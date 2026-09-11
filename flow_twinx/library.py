@@ -147,6 +147,50 @@ def get_liked_entries() -> list:
     ]
 
 
+def get_speed_dial_ids() -> list:
+    return sorted(k for k, v in load().items() if v.get("speed_dial"))
+
+
+def get_speed_dial_entries() -> list:
+    return [
+        {"video_id": k, "title": v.get("title", "")}
+        for k, v in load().items()
+        if v.get("speed_dial")
+    ]
+
+
+def mark_speed_dial(video_id: str, title: str = "", path: str = ""):
+    if not video_id:
+        return
+    library = load()
+    entry = library.get(video_id)
+    if entry is None:
+        entry = _default_entry(video_id, title)
+    entry["speed_dial"] = True
+    if title and not entry.get("title"):
+        entry["title"] = title
+    if path:
+        entry["song"] = path
+    entry["thumbnail"] = thumbnail_path(video_id)
+    library[video_id] = entry
+    save(library)
+
+
+def unmark_speed_dial(video_id: str):
+    if not video_id:
+        return
+    library = load()
+    entry = library.get(video_id)
+    if entry is None:
+        return
+    entry.pop("speed_dial", None)
+    if not entry.get("liked") and not entry.get("downloaded") and not entry.get("song"):
+        library.pop(video_id, None)
+    else:
+        library[video_id] = entry
+    save(library)
+
+
 def mark_liked(video_id: str, title: str = ""):
     if not video_id:
         return

@@ -134,7 +134,7 @@ def _check_vlc():
         import vlc
     except ImportError:
         print(
-            f"{config.Red}VLC is not installed. Flow requires VLC to play audio.{config.Reset}\n"
+            f"{config.RED}VLC is not installed. Flow requires VLC to play audio.{config.Reset}\n"
             f"{config.Muted}Install it with:{config.Reset}\n"
             f"  {config.Tertiary}sudo apt install vlc{config.Reset}"
             f"  {config.Muted}  # Debian/Ubuntu{config.Reset}\n"
@@ -153,7 +153,7 @@ def _setup_island():
     dest_dir = Path.home() / ".config" / "quickshell"
     dest = dest_dir / "island.qml"
     if not src.exists():
-        print(f"{config.Red}island.qml not found in this installation ({src}){R}")
+        print(f"{config.RED}island.qml not found in this installation ({src}){R}")
         sys.exit(1)
     dest_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dest)
@@ -182,7 +182,9 @@ def _resume(args):
         config.Mode = "Offline"
         _offline_commands.resume(title, args, thumb)
     else:
-        print(f"{M}Could not tell if last track is online or offline (thumbnail: {thumb}){R}")
+        print(
+            f"{M}Could not tell if last track is online or offline (thumbnail: {thumb}){R}"
+        )
 
 
 def _act_current(action):
@@ -214,7 +216,9 @@ def _act_current(action):
         config.Mode = "Offline"
         _offline_commands.act_on_current(action, title, thumb)
     else:
-        print(f"{M}Could not tell if current track is online or offline (thumbnail: {thumb}){R}")
+        print(
+            f"{M}Could not tell if current track is online or offline (thumbnail: {thumb}){R}"
+        )
         return 1
     return 0
 
@@ -222,7 +226,9 @@ def _act_current(action):
 def main():
     parser = argparse.ArgumentParser(description="Flow Music Player")
     parser.add_argument("--play", nargs="+", help="play a song")
-    parser.add_argument("--play-off", nargs="+", help="play a song from the local library (offline)")
+    parser.add_argument(
+        "--play-off", nargs="+", help="play a song from the local library (offline)"
+    )
     parser.add_argument("--rd", nargs="+", help="play radio mix")
     parser.add_argument(
         "--radio-off",
@@ -274,6 +280,11 @@ def main():
         help="like the currently playing song (requires an active player)",
     )
     parser.add_argument(
+        "--unlike",
+        action="store_true",
+        help="unlike the currently playing song (requires an active player)",
+    )
+    parser.add_argument(
         "--download",
         action="store_true",
         help="download the currently playing song (requires an active player)",
@@ -287,7 +298,13 @@ def main():
         "command", nargs="?", default=None, help="subcommand (play, search, list, ...)"
     )
     parser.add_argument("--check", action="store_true", help="check all dependencies")
-    parser.add_argument("--port", type=int, default=None, metavar="PORT", help="run web server on a specific port")
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        metavar="PORT",
+        help="run web server on a specific port",
+    )
 
     args, unknown = parser.parse_known_args()
 
@@ -353,7 +370,7 @@ def main():
                         int(WEB_PORT.read_text().strip()) if WEB_PORT.exists() else None
                     )
                 except ValueError, OSError:
-                        pass
+                    pass
 
             existing_alive = False
             if existing_pid is not None:
@@ -470,6 +487,8 @@ def main():
 
     if getattr(args, "like", False):
         sys.exit(_act_current("like"))
+    if getattr(args, "unlike", False):
+        sys.exit(_act_current("unlike"))
     if getattr(args, "download", False):
         sys.exit(_act_current("download"))
 
@@ -500,6 +519,7 @@ def main():
         "savan-s",
         "svn-s",
         "like",
+        "unlike",
         "download",
         "delete",
         "dl-d",

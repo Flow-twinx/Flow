@@ -18,8 +18,8 @@ P = config.Primary
 S = config.Secondary
 T = config.Tertiary
 M = config.Muted
-E = config.Red
-G = config.Grey
+E = config.RED
+G = config.GREY
 R = config.Reset
 
 m = lambda t: print(f"{M}{t}{R}")
@@ -82,9 +82,10 @@ COMMANDS = {
     "savan-s": "Search JioSaavn for tracks (alias: svn-s)",
     "radio": "Generate a mix | radio <song> [index] | -p save as playlist | -d download",
     "like": "Like a song",
+    "unlike": "Unlike the currently playing song",
     "download": "Download audio from YouTube | -f <format> (opus, m4a, mp3, webm)",
     "delete": "Delete a downloaded song (alias: dl-d)",
-    "playlist": "Manage playlists | create add remove list play rename move dup merge sort clear dedupe info export import download (alias: plist)",
+    "playlist": "Manage playlists | create add remove list play rename move dup merge sort clear dedupe info export import download",
     "switch": "Switch to Offline mode",
     "help": "Show this help message",
     "short": "Show/update command shortcuts",
@@ -121,6 +122,8 @@ def run(cmd: str, extra: list[str], args):
         savan_search(" ".join(extra) if extra else "")
     elif cmd == "like":
         like_track()
+    elif cmd == "unlike":
+        unlike_track()
     elif cmd == "download":
         download(extra)
     elif cmd in ("delete", "dl-d"):
@@ -195,21 +198,9 @@ def _fmt_choice(idx, entry, title, dur):
 
 
 def _style():
-    import questionary
-    from questionary import Style
+    from ..ui import questionary_style
 
-    return Style(
-        [
-            ("qmark", "fg:cyan bold"),
-            ("question", "fg:cyan bold"),
-            ("answer", f"fg:magenta bold"),
-            ("pointer", f"fg:cyan bold"),
-            ("highlighted", f"fg:magenta bold"),
-            ("selected", f"fg:cyan"),
-            ("instruction", f"fg:blue"),
-            ("text", ""),
-        ]
-    )
+    return questionary_style()
 
 
 def _select_result(query, allow_skip):
@@ -240,7 +231,7 @@ def _select_result(query, allow_skip):
                         instruction="(↑↓ navigate, Enter to play, Esc to cancel)",
                         style=_style(),
                     ).ask()
-                except (KeyboardInterrupt, EOFError):
+                except KeyboardInterrupt, EOFError:
                     return None
                 if choice == "more":
                     if limit >= MAX_PAGE_RESULTS:
@@ -258,7 +249,6 @@ def _select_result(query, allow_skip):
                     return None
                 return choice
 
-    # Non-interactive fallback (or questionary unavailable)
     if not sys.stdin.isatty():
         return None if allow_skip else 0
     while True:
@@ -267,7 +257,7 @@ def _select_result(query, allow_skip):
         prompt = f"Play which track? [1-{len(_last_results)}, {hint}] "
         try:
             choice = input(f"{P}{prompt}{R}").strip().lower()
-        except (EOFError, KeyboardInterrupt):
+        except EOFError, KeyboardInterrupt:
             return None if allow_skip else 0
         if choice in ("m", "more"):
             if limit >= MAX_PAGE_RESULTS:
@@ -633,9 +623,12 @@ def _vid_from_thumb(thumb):
     if not thumb:
         return None
     try:
-        if "/vi/" in thumb:
-            return thumb.split("/vi/")[1].split("/")[0].split("?")[0]
-        return pathlib.Path(thumb).stem
+        for pat in ("/vi_webp/", "/vi/"):
+            if pat in thumb:
+                vid = thumb.split(pat)[1].split("/")[0].split("?")[0]
+                if vid and len(vid) == 11:
+                    return vid
+        return None
     except Exception:
         return None
 
@@ -658,6 +651,8 @@ def _resolve_current(title, thumb):
 def act_on_current(action, title, thumb=None):
     if action == "download":
         _download_current(title, thumb)
+    elif action == "unlike":
+        _unlike_current(title, thumb)
     else:
         _like_current(title, thumb)
 
@@ -713,6 +708,41 @@ def _like_current(title, thumb):
                 _like_autodownload(url, video_id, title)
 
 
+def unlike_track():
+    global _last_played
+    if not _last_played:
+        e("     No song currently playing")
+        return
+    entry, title = _last_played
+    url = entry.get("webpage_url") or entry.get("original_url") or entry.get("url")
+    if not url and entry.get("id"):
+        url = f"https://www.youtube.com/watch?v={entry['id']}"
+    if not url:
+        e("     No URL for current song")
+        return
+    video_id = library.key_for(url, entry.get("id"))
+    if library.is_liked(video_id):
+        library.mark_unliked(video_id)
+        i(f"    Unliked: {_truncate_title(title)}")
+    else:
+        m(f"    Not liked: {_truncate_title(title)}")
+
+
+def _unlike_current(title, thumb):
+    url, vid = _resolve_current(title, thumb)
+    if not url:
+        e("    Could not find the current track online")
+        return
+    if not vid:
+        vid = _vid_from_thumb(thumb)
+    video_id = library.key_for(url, vid)
+    if library.is_liked(video_id):
+        library.mark_unliked(video_id)
+        i(f"    Unliked: {_truncate_title(title)}")
+    else:
+        m(f"    Not liked: {_truncate_title(title)}")
+
+
 def search(query: str):
     global _last_results, _last_played
     if not query:
@@ -732,6 +762,18 @@ def search(query: str):
 
 
 _truncate_title = config._truncate_title
+
+
+def _select_radio_seed(query):
+    global _last_results
+    _do_search(query)
+    if not _last_results:
+        return None
+    idx = _pick_result(query, allow_skip=True)
+    if idx is None:
+        return None
+    entry, title, _ = _last_results[idx]
+    return title
 
 
 def radio(extra, args):
@@ -794,10 +836,14 @@ def radio(extra, args):
         e("     Index out of range or no radio loaded")
         return
 
+    seed = _select_radio_seed(query)
+    if not seed:
+        return
+
     stop = False
     t = threading.Thread(target=_spinner, args=(lambda: stop,), daemon=True)
     t.start()
-    tracks = youtube.fetch_radio(query, config.MAX_RESULTS_RADIO)
+    tracks = youtube.fetch_radio(seed, config.MAX_RESULTS_RADIO)
     stop = True
     t.join()
 
@@ -853,17 +899,23 @@ def radio(extra, args):
     old_sigusr1 = signal.getsignal(signal.SIGUSR1)
 
     fd = sys.stdin.fileno()
+    tty_fd = None
     old_term = None
     old_fd_flags = None
     try:
-        old_term = termios.tcgetattr(fd)
-        new = termios.tcgetattr(fd)
+        tty_fd = os.open("/dev/tty", os.O_RDWR)
+        ctl = tty_fd
+    except OSError:
+        ctl = fd
+    try:
+        old_term = termios.tcgetattr(ctl)
+        new = termios.tcgetattr(ctl)
         new[0] &= ~termios.IXON
         new[6][termios.VQUIT] = 0x11
         new[6][termios.VSUSP] = 0
-        termios.tcsetattr(fd, termios.TCSADRAIN, new)
-        old_fd_flags = fcntl.fcntl(fd, fcntl.F_GETFL)
-        fcntl.fcntl(fd, fcntl.F_SETFL, old_fd_flags | os.O_NONBLOCK)
+        termios.tcsetattr(ctl, termios.TCSADRAIN, new)
+        old_fd_flags = fcntl.fcntl(ctl, fcntl.F_GETFL)
+        fcntl.fcntl(ctl, fcntl.F_SETFL, old_fd_flags | os.O_NONBLOCK)
     except termios.error, OSError:
         pass
 
@@ -880,7 +932,7 @@ def radio(extra, args):
         try:
             while not radio_stop.is_set():
                 try:
-                    ch = os.read(fd, 1)
+                    ch = os.read(ctl, 1)
                 except OSError as ex:
                     if ex.errno == errno.EAGAIN:
                         time.sleep(0.05)
@@ -918,8 +970,10 @@ def radio(extra, args):
                 )
                 entry = youtube.get_entry(url)
 
+                next_title = None
                 if idx + 1 < len(_radio_tracks):
                     n_title, n_vid, n_dur = _radio_tracks[idx + 1]
+                    next_title = n_title
                     n_short = _truncate_title(n_title)
                     n_mins, n_secs = divmod(int(n_dur), 60)
                     print(f"{T}\n\t[⥤ Next: {n_short:30s} {n_mins}:{n_secs:02d}]{R}")
@@ -930,9 +984,11 @@ def radio(extra, args):
                     i(
                         f"    Downloaded ({idx + 1}/{len(_radio_tracks)}): {_truncate_title(title)}"
                     )
-                    off_player.play_file(filepath, title, args)
+                    off_player.play_file(filepath, title, args, next_title=next_title)
                 else:
-                    player.play_entry(entry, title, args, flags=flags)
+                    player.play_entry(
+                        entry, title, args, flags=flags, next_title=next_title
+                    )
                 idx += _nav_delta()
             if not repeat or _radio_quit:
                 break
@@ -949,9 +1005,14 @@ def radio(extra, args):
         if old_term is not None:
             try:
                 if old_fd_flags is not None:
-                    fcntl.fcntl(fd, fcntl.F_SETFL, old_fd_flags)
-                termios.tcsetattr(fd, termios.TCSADRAIN, old_term)
+                    fcntl.fcntl(ctl, fcntl.F_SETFL, old_fd_flags)
+                termios.tcsetattr(ctl, termios.TCSADRAIN, old_term)
             except termios.error, OSError:
+                pass
+        if tty_fd is not None:
+            try:
+                os.close(tty_fd)
+            except OSError:
                 pass
         signal.signal(signal.SIGINT, old_sigint)
         signal.signal(signal.SIGQUIT, old_sigquit)
@@ -1000,7 +1061,10 @@ def download(extra: list[str]):
         if not _last_results:
             e("     No results found")
             return
-        entry, _, _ = _last_results[0]
+        idx = _choose_result(arg, _last_results)
+        if idx is None:
+            return
+        entry, _, _ = _last_results[idx]
         url = entry.get("webpage_url") or entry.get("original_url") or entry.get("url")
         if not url and entry.get("id"):
             url = f"https://www.youtube.com/watch?v={entry['id']}"
@@ -1031,12 +1095,22 @@ def download(extra: list[str]):
         stop = True
         t.join()
     if fmt != "webm":
-        i(f"    Converted to {fmt}: {_truncate_title(title)}")
+        i(f"    Downloaded and converted to {fmt}: {_truncate_title(title)}")
     else:
         i(f"    Downloaded: {_truncate_title(title)}")
 
 
-_AUDIO_EXTS = {".mp3", ".flac", ".wav", ".m4a", ".ogg", ".opus", ".wma", ".aac", ".webm"}
+_AUDIO_EXTS = {
+    ".mp3",
+    ".flac",
+    ".wav",
+    ".m4a",
+    ".ogg",
+    ".opus",
+    ".wma",
+    ".aac",
+    ".webm",
+}
 
 
 def _find_vid_by_path(index, path):
@@ -1110,7 +1184,9 @@ def delete_download(extra: list[str]):
         return
 
     try:
-        ans = input(f"{M}Delete '{_truncate_title(title or pathlib.Path(path).stem)}'? (y/N) {R}")
+        ans = input(
+            f"{M}Delete '{_truncate_title(title or pathlib.Path(path).stem)}'? (y/N) {R}"
+        )
     except EOFError:
         return
     if ans.strip().lower() not in ("y", "yes"):
@@ -1178,13 +1254,18 @@ def playlist_cmd(extra, args):
                     title = s.get("title", "Unknown")
                     short = _truncate_title(title)
                     src = playlist.resolve_track(s)
+                    next_title = (
+                        tracks[idx + 1].get("title") if idx + 1 < len(tracks) else None
+                    )
                     if isinstance(src, pathlib.Path):
                         print(
-                            f"{P}Playing local copy: {short}...{R}", end="\r", flush=True
+                            f"{P}Playing local copy: {short}...{R}",
+                            end="\r",
+                            flush=True,
                         )
                         _last_played = (None, title)
                         playlist.backfill_local(actual, idx, src)
-                        off_player.play_file(src, title, args)
+                        off_player.play_file(src, title, args, next_title=next_title)
                         idx += _nav_delta()
                         continue
                     vid = s.get("id", "")
@@ -1196,7 +1277,7 @@ def playlist_cmd(extra, args):
                         idx += 1
                         continue
                     _last_played = (entry, title)
-                    player.play_entry(entry, title, args)
+                    player.play_entry(entry, title, args, next_title=next_title)
                     idx += _nav_delta()
                 if not repeat:
                     break

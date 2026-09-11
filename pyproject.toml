@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flow-twinx"
-version = "0.6.0"
-description = "A terminal music player with online and offline modes"
+version = "0.6.1"
+description = "A terminal music player with online and offline modes sourced from youtube."
 readme = "README.md"
 requires-python = ">=3.14"
 dynamic = []

@@ -32,6 +32,10 @@ def _read():
         return {}
 
 
+def read():
+    return _read()
+
+
 def _web_active():
     try:
         if not WEB_PID_FILE.exists():
@@ -83,8 +87,8 @@ def _card_ready(thumb):
         return None
 
 
-def _print_plain(Primary, Grey, Reset, entries):
-    sep = f"{Grey}{'─' * 44}{Reset}"
+def _print_plain(Primary, GREY, Reset, entries):
+    sep = f"{GREY}{'─' * 44}{Reset}"
     print(f"\n{Primary}┌─ Flow Status{Reset}")
     print(sep)
     for label, rendered, _ in entries:
@@ -93,14 +97,16 @@ def _print_plain(Primary, Grey, Reset, entries):
     print(f"{Primary}└─{Reset}\n")
 
 
-def _print_card(Primary, Grey, Reset, entries, card):
+def _print_card(Primary, GREY, Reset, entries, card):
     ti, src, (pw, ph, icols, irows) = card
     label_w = 17
     text_area = max(PAD_L + label_w + 2 + v for _, _, v in entries)
     inner = max(PAD_L + icols + GAP + text_area + PAD_R, 44)
 
     header_label = "┌─ Flow Status "
-    print(f"{Primary}{header_label}{Reset}{Grey}{'─' * (inner - len(header_label))}{Reset}{Primary}┐{Reset}")
+    print(
+        f"{Primary}{header_label}{Reset}{GREY}{'─' * (inner - len(header_label))}{Reset}{Primary}┐{Reset}"
+    )
 
     offset = max(0, (irows - len(entries)) // 2)
     body = max(irows, len(entries))
@@ -117,7 +123,7 @@ def _print_card(Primary, Grey, Reset, entries, card):
         pad = " " * max(0, inner - vis)
         print(f"{Primary}│{Reset}{gutter}{content}{pad}{Primary}│{Reset}")
 
-    print(f"{Primary}└{Reset}{Grey}{'─' * inner}{Reset}{Primary}┘{Reset}")
+    print(f"{Primary}└{Reset}{GREY}{'─' * inner}{Reset}{Primary}┘{Reset}")
 
     up_down = body + 1
     sys.stdout.write(f"\x1b[{up_down}A\r\x1b[{1 + PAD_L}C")
@@ -130,7 +136,7 @@ def _print_card(Primary, Grey, Reset, entries, card):
 
 
 def show():
-    from .config import Cyan, Grey, Muted, Primary, Reset, White
+    from .config import CYAN, GREY, WHITE, Muted, Primary, Reset
 
     data = _read()
     web = _web_active()
@@ -144,7 +150,7 @@ def show():
     thumb = thumb_raw
     flow_prefix = str(pathlib.Path.home() / ".flow")
     if thumb.startswith(flow_prefix):
-        thumb = thumb[len(flow_prefix):]
+        thumb = thumb[len(flow_prefix) :]
     if len(thumb) > 120:
         thumb = thumb[:120] + "..."
     dur = int(data.get("duration", 0))
@@ -152,10 +158,10 @@ def show():
     dur_str = f"{mins}:{secs:02d}"
 
     status_val = "playing" if playing else "not playing"
-    status_col = Cyan if playing else Muted
+    status_col = CYAN if playing else Muted
     web_val = f"{port} active" if web else "not active"
     stat = "currently playing" if playing else "last played"
-    web_col = Cyan if web else Muted
+    web_col = CYAN if web else Muted
 
     dom_palette = []
     if thumb_raw:
@@ -167,8 +173,10 @@ def show():
             dom_palette = []
     if dom_palette:
         segs = [
-            (f"\x1b[38;2;{r};{g};{b}m██{Reset} {White}{hex_str((r, g, b))}{Reset}",
-             3 + len(hex_str((r, g, b))))
+            (
+                f"\x1b[38;2;{r};{g};{b}m██{Reset} {WHITE}{hex_str((r, g, b))}{Reset}",
+                3 + len(hex_str((r, g, b))),
+            )
             for r, g, b in dom_palette
         ]
         color_entry = (
@@ -181,14 +189,14 @@ def show():
     entries = [
         ("status", f"{status_col}{status_val}{Reset}", len(status_val)),
         ("web_mode", f"{web_col}{web_val}{Reset}", len(web_val)),
-        (stat, f"{White}{title}{Reset}", len(title)),
-        ("thumbnail", f"{White}{thumb}{Reset}", len(thumb)),
+        (stat, f"{WHITE}{title}{Reset}", len(title)),
+        ("thumbnail", f"{WHITE}{thumb}{Reset}", len(thumb)),
         ("color", *color_entry),
-        ("total duration", f"{White}{dur_str}{Reset}", len(dur_str)),
+        ("total duration", f"{WHITE}{dur_str}{Reset}", len(dur_str)),
     ]
 
     card = _card_ready(thumb_raw) if thumb_raw else None
     if card is not None:
-        _print_card(Primary, Grey, Reset, entries, card)
+        _print_card(Primary, GREY, Reset, entries, card)
     else:
-        _print_plain(Primary, Grey, Reset, entries)
+        _print_plain(Primary, GREY, Reset, entries)

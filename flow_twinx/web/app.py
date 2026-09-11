@@ -205,12 +205,6 @@ _seg_inflight = set()
 
 
 def _fetch_segments_background(video_id, duration=None):
-    """Fetch SponsorBlock segments off the request thread and cache them.
-
-    Playback must not wait on the SponsorBlock API, so segment data is served
-    from `_seg_cache` (populated in the background) and the frontend arms
-    skipping as soon as it arrives.
-    """
     if video_id in _seg_inflight:
         return
     _seg_inflight.add(video_id)
@@ -487,21 +481,101 @@ def api_library():
                 "title": v.get("title", ""),
                 "liked": bool(v.get("liked")),
                 "downloaded": bool(v.get("downloaded")),
+                "speed_dial": bool(v.get("speed_dial")),
                 "thumbnail": v.get("thumbnail") or "",
+                "song": v.get("song") or "",
             }
         )
     return jsonify({"songs": songs})
+
+
+@app.route("/api/speed-dial")
+def api_speed_dial():
+    results = []
+    for k in library.get_speed_dial_ids():
+        entry = library.get(k) or {}
+        results.append(
+            {
+                "video_id": k,
+                "title": entry.get("title", ""),
+                "thumbnail": _thumb_url(k) or entry.get("thumbnail", ""),
+            }
+        )
+    return jsonify({"results": results})
+
+
+@app.route("/api/speed-dial", methods=["POST"])
+def api_speed_dial_set():
+    data = request.get_json(force=True)
+    video_id = data.get("video_id", "").strip()
+    title = data.get("title", "")
+    enabled = bool(data.get("enabled"))
+    if not video_id:
+        return jsonify({"error": "missing video_id"}), 400
+    if enabled:
+        library.mark_speed_dial(video_id, title, data.get("path", ""))
+        devlog.log_success("LIB", 200, "/api/speed-dial", "flow", f"speed-dial +{video_id}")
+    else:
+        library.unmark_speed_dial(video_id)
+        devlog.log_success("LIB", 200, "/api/speed-dial", "flow", f"speed-dial -{video_id}")
+    return jsonify({"success": True, "speed_dial": enabled})
+
+
+@app.route("/api/home")
+def api_home():
+    status_data = status.read()
+    last_played = None
+    if status_data:
+        last_played = {
+            "title": status_data.get("title", "Unknown"),
+            "duration": int(status_data.get("duration", 0)),
+            "playing": bool(status_data.get("playing")),
+            "thumbnail": _resolve_thumbnail(status_data.get("thumbnail", "")),
+            "ts": status_data.get("ts", 0),
+        }
+    speed_dial = []
+    for k in library.get_speed_dial_ids():
+        entry = library.get(k) or {}
+        speed_dial.append(
+            {
+                "video_id": k,
+                "title": entry.get("title", ""),
+                "thumbnail": _thumb_url(k) or entry.get("thumbnail", ""),
+            }
+        )
+    return jsonify({"last_played": last_played, "speed_dial": speed_dial})
 
 
 @app.route("/api/delete-download", methods=["POST"])
 def api_delete_download():
     data = request.get_json(force=True)
     video_id = data.get("video_id", "").strip()
-    if not video_id:
+    path = data.get("path", "").strip()
+    if not video_id and not path:
         return jsonify({"error": "missing video_id"}), 400
     if library.delete(video_id):
         devlog.log_success("FETCH", 200, "/api/delete-download", "flow", f"deleted {video_id}")
         return jsonify({"success": True})
+    if path:
+        p = pathlib.Path(path).expanduser()
+        try:
+            resolved = p.resolve()
+        except OSError:
+            resolved = p.absolute()
+        root = FLOW_DIR.resolve()
+        if (resolved == root or root in resolved.parents) and p.is_file():
+            p.unlink()
+            stem = p.stem if p.suffix else p.name
+            for other in p.parent.glob(f"{stem}*"):
+                if other != p and other.is_file():
+                    try:
+                        other.unlink()
+                    except OSError:
+                        pass
+            if video_id:
+                library.clear_download(video_id)
+            devlog.log_success("FETCH", 200, "/api/delete-download", "flow", f"deleted file {resolved.name}")
+            return jsonify({"success": True})
     return jsonify({"error": "not downloaded"}), 404
 
 
@@ -1030,11 +1104,6 @@ def api_settings():
 @app.route("/")
 def index():
     return render_template("index.html")
-
-
-@app.route("/setting")
-def setting_page():
-    return render_template("setting.html")
 
 
 @app.route("/<path:path>")

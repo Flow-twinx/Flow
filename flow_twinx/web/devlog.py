@@ -4,6 +4,11 @@ import pathlib
 
 from ..imports import config
 
+e = config.RED
+s = config.GREEN
+r = config.Reset
+w = config.ORANGE
+
 LOGS_DIR = pathlib.Path.home() / ".flow/LOGS"
 
 _handler = None
@@ -12,7 +17,7 @@ _handler = None
 def _make_handler():
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     h = logging.handlers.RotatingFileHandler(
-        LOGS_DIR / "flow.log", maxBytes=512_000, backupCount=3, encoding="utf-8"
+        LOGS_DIR / "flow2.log", maxBytes=512_000, backupCount=3, encoding="utf-8"
     )
     h.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
     return h
@@ -38,16 +43,23 @@ def _emit(level, msg):
 
 
 def log_error(method, status, route, source="", message=""):
-    _emit(logging.ERROR, f"[ERROR] [{source}] {method} {status} {route} - {message}")
+    _emit(
+        logging.ERROR, f"{e}[ERROR] [{source}] {method} {status} {route} - {message}{r}"
+    )
 
 
 def log_success(method, status, route, source="", message=""):
-    _emit(logging.INFO, f"[OK] [{source}] {method} {status} {route} - {message}")
+    _emit(logging.INFO, f"{s}[OK] [{source}] {method} {status} {route} - {message}{r}")
 
 
 def log_info(method, status, route, source="", message=""):
+    if route == "/api/control/poll":
+        return
     _emit(logging.INFO, f"[INFO] [{source}] {method} {status} {route} - {message}")
 
 
 def log_warn(method, status, route, source="", message=""):
-    _emit(logging.WARNING, f"[WARN] [{source}] {method} {status} {route} - {message}")
+    _emit(
+        logging.WARNING,
+        f"{w}[WARN] [{source}] {method} {status} {route} - {message}{r}",
+    )

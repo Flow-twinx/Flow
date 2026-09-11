@@ -1,5 +1,7 @@
 import curses
 import re
+import shutil
+import subprocess
 import threading
 
 import numpy as np
@@ -17,6 +19,16 @@ _stream = None
 _lock = threading.Lock()
 _stdscr = None
 _color_pair = 1
+_tertiary_pair = 2
+
+_orig_source = None
+
+_FOOTER_ROWS = 2
+_status_title = None
+_status_shuffle = False
+_status_repeat = False
+_status_next = None
+_status_paused = False
 
 
 def _ansi_to_curses_color(ansi_code):
@@ -76,6 +88,36 @@ _bins = _rebuild()
 
 
 def _find_monitor():
+    # The system output monitor (.monitor source) is what actually carries the
+    # music. On PulseAudio/PipeWire these are exposed as "XXX.monitor" sources,
+    # which PortAudio does not surface by name, so we resolve them via pactl and
+    # temporarily make them the capture source for the "pulse" device.
+    pactl = shutil.which("pactl")
+    if pactl:
+        try:
+            out = subprocess.run(
+                [pactl, "list", "short", "sources"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            ).stdout
+        except Exception:
+            out = ""
+        monitor = None
+        for line in out.splitlines():
+            parts = line.split("\t")
+            if len(parts) < 2:
+                continue
+            name = parts[1]
+            state = parts[2] if len(parts) > 2 else ""
+            if ".monitor" in name.lower():
+                monitor = name
+                if "running" in state.lower():
+                    return name
+        if monitor:
+            return monitor
+
+    # Fallback: any sounddevice device named like a monitor.
     try:
         devices = sd.query_devices()
     except Exception:
@@ -84,11 +126,43 @@ def _find_monitor():
         name = d["name"].lower()
         if "monitor" in name and d["max_input_channels"] > 0:
             return i
-    for i, d in enumerate(devices):
-        name = d["name"].lower()
-        if name in ("pulse", "pipewire") and d["max_input_channels"] > 0:
-            return i
     return None
+
+
+def _switch_default_source(monitor):
+    """Temporarily route the 'pulse' capture to the monitor source.
+
+    Returns the name of the previous default source (to restore later), or None.
+    """
+    pactl = shutil.which("pactl")
+    if not pactl or not isinstance(monitor, str):
+        return None
+    try:
+        old = subprocess.run(
+            [pactl, "get-default-source"], capture_output=True, text=True, timeout=5
+        ).stdout.strip()
+        subprocess.run(
+            [pactl, "set-default-source", monitor],
+            capture_output=True,
+            timeout=5,
+        )
+        return old
+    except Exception:
+        return None
+
+
+def _restore_default_source(old):
+    if not old:
+        return
+    pactl = shutil.which("pactl")
+    if not pactl:
+        return
+    try:
+        subprocess.run(
+            [pactl, "set-default-source", old], capture_output=True, timeout=5
+        )
+    except Exception:
+        pass
 
 
 def _audio_callback(indata, frames, time_info, status):
@@ -129,7 +203,7 @@ def _audio_callback(indata, frames, time_info, status):
 
 
 def start(stdscr, ansi_color):
-    global _stream, _bins, _bars, _peak, _stdscr
+    global _stream, _bins, _bars, _peak, _stdscr, _orig_source
     if _stream is not None:
         return
     _stdscr = stdscr
@@ -137,15 +211,18 @@ def start(stdscr, ansi_color):
     curses.use_default_colors()
     color_num = _ansi_to_curses_color(ansi_color)
     curses.init_pair(_color_pair, color_num, -1)
-    dev = _find_monitor()
-    if dev is None:
+    tertiary_num = _ansi_to_curses_color(config.Tertiary)
+    curses.init_pair(_tertiary_pair, tertiary_num, -1)
+    monitor = _find_monitor()
+    if monitor is None:
         return False
+    _orig_source = _switch_default_source(monitor)
     _bars = np.zeros(config.BarWidth)
     _peak = None
     _bins = _log_bins(BLOCK_SIZE, SAMPLE_RATE, config.BarWidth)
     try:
         _stream = sd.InputStream(
-            device=dev,
+            device="pulse",
             channels=1,
             samplerate=SAMPLE_RATE,
             blocksize=BLOCK_SIZE,
@@ -153,21 +230,49 @@ def start(stdscr, ansi_color):
         )
         _stream.start()
     except Exception:
-        _stream = None
-        return False
+        try:
+            _stream = sd.InputStream(
+                device=monitor,
+                channels=1,
+                samplerate=SAMPLE_RATE,
+                blocksize=BLOCK_SIZE,
+                callback=_audio_callback,
+            )
+            _stream.start()
+        except Exception:
+            _stream = None
+            _restore_default_source(_orig_source)
+            _orig_source = None
+            return False
     return True
 
 
+def set_status(title=None, shuffle=False, repeat=False, next_title=None):
+    global _status_title, _status_shuffle, _status_repeat, _status_next
+    _status_title = title
+    _status_shuffle = shuffle
+    _status_repeat = repeat
+    _status_next = next_title
+
+
+def set_paused(paused):
+    global _status_paused
+    _status_paused = paused
+
+
 def stop():
-    global _stream, _bars, _peak, _stdscr
+    global _stream, _bars, _peak, _stdscr, _orig_source
     if _stream is not None:
         _stream.stop()
         _stream.close()
         _stream = None
+    _restore_default_source(_orig_source)
+    _orig_source = None
     with _lock:
         _bars = None
         _peak = None
     _stdscr = None
+    set_status()
 
 
 def draw():
@@ -180,23 +285,83 @@ def draw():
             return
         bars = _bars.copy()
     max_y, max_x = _stdscr.getmaxyx()
-    bar_height = max(10, min(config.BarHeight, max_y - 2))
+    available_height = max(1, max_y - _FOOTER_ROWS)
+    bar_height = max(1, min(config.BarHeight, available_height))
     num_bars = len(bars)
     spacing = config.get_bar_spacing()
-    bar_col = spacing + 1  # total stride per bar, including its trailing gap
+    bar_col = spacing + 1
     _stdscr.erase()
+
+    base_y = max_y - _FOOTER_ROWS
     for row in range(bar_height):
-        y = max_y - 1 - row
+        y = base_y - 1 - row
         for col_idx in range(num_bars):
             level = bars[col_idx]
             x = col_idx * bar_col
             if int(level * bar_height) > row:
                 cell = config.BarChar[:1]
                 attr = curses.color_pair(_color_pair) | curses.A_BOLD
-                if y < max_y and x < max_x:
+                if y >= 0 and x < max_x:
                     try:
                         _stdscr.addstr(y, x, cell, attr)
                     except curses.error:
                         pass
-            # Unlit cells: nothing to draw, screen was already erased.
+
+    _draw_footer(max_y, max_x)
     _stdscr.refresh()
+
+
+def _draw_footer(max_y, max_x):
+    if (
+        _status_title is None
+        and not _status_shuffle
+        and not _status_repeat
+        and not _status_next
+        and not _status_paused
+    ):
+        return
+
+    badges = []
+    if _status_paused:
+        badges.append("[Paused]")
+    if _status_repeat:
+        badges.append("[Repeat]")
+    if _status_shuffle:
+        badges.append("[Shuffle]")
+    if _status_next:
+        n = _status_next
+        if len(n) > 24:
+            n = n[:23] + "…"
+        badges.append(f"[Next: {n}]")
+
+    title_row = max_y - 1
+    badge_row = max_y - 2
+    if _status_title is not None:
+        title = f"[{_status_title}]"
+        if len(title) > max_x:
+            title = title[: max_x - 1]
+        try:
+            _stdscr.addstr(
+                title_row,
+                0,
+                title,
+                curses.color_pair(_tertiary_pair) | curses.A_BOLD,
+            )
+        except curses.error:
+            pass
+    elif badges:
+        badge_row = title_row
+
+    if badges:
+        line = "  ".join(badges)
+        if len(line) > max_x:
+            line = line[: max_x - 1]
+        try:
+            _stdscr.addstr(
+                badge_row,
+                0,
+                line,
+                curses.color_pair(_tertiary_pair) | curses.A_DIM,
+            )
+        except curses.error:
+            pass

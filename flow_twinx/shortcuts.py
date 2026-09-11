@@ -6,8 +6,9 @@ SHORTCUTS_FILE = pathlib.Path.home() / ".flow/shortcuts.json"
 DEFAULT_SHORTCUTS = {
     "pl": "play",
     "sh": "search",
-    "li": "list",
+    "ls": "list",
     "lk": "like",
+    "ul": "unlike",
     "dl": "download",
     "dl-d": "delete",
     "rd": "radio",
@@ -24,14 +25,13 @@ _shortcuts = {}
 
 def load():
     global _shortcuts
+    _shortcuts = DEFAULT_SHORTCUTS.copy()
     if SHORTCUTS_FILE.exists():
         try:
-            _shortcuts = json.loads(SHORTCUTS_FILE.read_text())
+            saved = json.loads(SHORTCUTS_FILE.read_text())
+            _shortcuts.update(saved)
         except (json.JSONDecodeError, OSError):
-            _shortcuts = DEFAULT_SHORTCUTS.copy()
-    else:
-        _shortcuts = DEFAULT_SHORTCUTS.copy()
-        save()
+            pass
 
 def save():
     SHORTCUTS_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -63,12 +63,46 @@ def cmd_short(extra, tprint):
         tprint("Shortcuts:")
         for i, (key, val) in enumerate(items, 1):
             tprint(f"  {i}. {key:8s} -> {val}")
+        tprint(f"\n  short add <key> <cmd>  - add new alias")
+        tprint(f"  short remove <idx>     - remove alias")
+        return
+
+    if extra[0] == "add":
+        if len(extra) < 3:
+            tprint("Usage: short add <key> <command>")
+            return
+        key = extra[1].lower()
+        val = extra[2].lower()
+        if key in _shortcuts:
+            set_shortcut(key, val)
+            tprint(f"  {key:8s} -> {val}  (updated)")
+        else:
+            set_shortcut(key, val)
+            tprint(f"  {key:8s} -> {val}  (added)")
+        return
+
+    if extra[0] == "remove":
+        if len(extra) < 2:
+            tprint("Usage: short remove <index>")
+            return
+        try:
+            idx = int(extra[1])
+        except ValueError:
+            tprint("Index must be a number")
+            return
+        items = get_list()
+        if idx < 1 or idx > len(items):
+            tprint(f"Index out of range (1-{len(items)})")
+            return
+        key, val = items[idx - 1]
+        remove(key)
+        tprint(f"  Removed: {key} -> {val}")
         return
 
     try:
         idx = int(extra[0])
     except ValueError:
-        tprint("Usage: short [index] [new_command]")
+        tprint("Usage: short [index] [new_command] | short add <key> <cmd> | short remove <idx>")
         return
 
     if idx < 1 or idx > len(items):

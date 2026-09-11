@@ -35,15 +35,15 @@ def merge_flags(extra: list[str], args) -> tuple[list[str], object]:
     return rest, args
 
 
-Red = "\033[0;31m"
-Green = "\033[0;32m"
-Brown = "\033[0;33m"
-Blue = "\033[0;34m"
-Purple = "\033[0;35m"
-Cyan = "\033[0;36m"
-Grey = "\033[90m"
+RED = "\033[0;31m"
+GREEN = "\033[0;32m"
+BROWN = "\033[0;33m"
+BLUE = "\033[0;34m"
+PURPLE = "\033[0;35m"
+CYAN = "\033[0;36m"
+GREY = "\033[90m"
 YELLOW = "\033[1;33m"
-White = "\033[1;37m"
+WHITE = "\033[1;37m"
 MAROON = "\033[38;5;124m"
 OLIVE = "\033[38;5;100m"
 DARK_KHAKI = "\033[38;5;136m"
@@ -77,10 +77,10 @@ _TARGETS = {"primary", "secondary", "tertiary", "display"}
 _DISPLAY_MODES = {"none", "bars", "lyrics"}
 _BAR_SPACING = {"min", "fit", "max"}
 
-Primary = Cyan
-Secondary = Purple
-Tertiary = Blue
-Muted = Grey
+Primary = CYAN
+Secondary = PURPLE
+Tertiary = BLUE
+Muted = GREY
 Display = "bars"
 BarWidth = 20
 BarHeight = 40
@@ -341,7 +341,11 @@ def _load_config():
             and 0.5 <= data["sensitivity"] <= 5.0
         ):
             Sensitivity = data["sensitivity"]
-        if "bar_char" in data and isinstance(data["bar_char"], str) and data["bar_char"]:
+        if (
+            "bar_char" in data
+            and isinstance(data["bar_char"], str)
+            and data["bar_char"]
+        ):
             BarChar = data["bar_char"][:1]
         if "dev" in data and isinstance(data["dev"], bool):
             DEV_MODE = data["dev"]
@@ -349,7 +353,9 @@ def _load_config():
             FFMPEG = data["ffmpeg"]
         if "ad_skip" in data and isinstance(data["ad_skip"], bool):
             AD_SKIP = data["ad_skip"]
-        if "sponsor_categories" in data and isinstance(data["sponsor_categories"], list):
+        if "sponsor_categories" in data and isinstance(
+            data["sponsor_categories"], list
+        ):
             cats = [c for c in data["sponsor_categories"] if isinstance(c, str)]
             if cats:
                 SPONSOR_CATEGORIES = cats
@@ -357,13 +363,29 @@ def _load_config():
             DOWN_ON_LIKE = data["down_on_like"]
         if "format" in data and data["format"] in _VALID_FORMATS:
             FORMAT = data["format"]
-        if "max_search" in data and isinstance(data["max_search"], int) and 1 <= data["max_search"] <= 20:
+        if (
+            "max_search" in data
+            and isinstance(data["max_search"], int)
+            and 1 <= data["max_search"] <= 20
+        ):
             MAX_SEARCH_RESULTS = data["max_search"]
-        if "max_radio" in data and isinstance(data["max_radio"], int) and 1 <= data["max_radio"] <= 50:
+        if (
+            "max_radio" in data
+            and isinstance(data["max_radio"], int)
+            and 1 <= data["max_radio"] <= 50
+        ):
             MAX_RESULTS_RADIO = data["max_radio"]
-        if "img_size" in data and isinstance(data["img_size"], int) and 3 <= data["img_size"] <= 20:
+        if (
+            "img_size" in data
+            and isinstance(data["img_size"], int)
+            and 3 <= data["img_size"] <= 20
+        ):
             ImgSize = data["img_size"]
-        if "img_colors" in data and isinstance(data["img_colors"], int) and 1 <= data["img_colors"] <= 3:
+        if (
+            "img_colors" in data
+            and isinstance(data["img_colors"], int)
+            and 1 <= data["img_colors"] <= 3
+        ):
             ImgColors = data["img_colors"]
     except json.JSONDecodeError, OSError:
         pass
@@ -520,13 +542,20 @@ def _apply_format(value):
             return f"Unknown format '{value}'. Options: opus, m4a, mp3, webm"
         return (
             f"{YELLOW}ffmpeg not found. Install ffmpeg to use {value} format.{Reset}\n"
-            f"{Grey}  Keeping current format: {FORMAT}{Reset}"
+            f"{GREY}  Keeping current format: {FORMAT}{Reset}"
         )
     return f"{Tertiary}Default download format changed to {value}{Reset}"
 
 
 def _apply_int(attr, value, lo, hi, ok_msg):
-    global BarWidth, BarHeight, BarSpacing, MAX_SEARCH_RESULTS, MAX_RESULTS_RADIO, ImgSize, ImgColors
+    global \
+        BarWidth, \
+        BarHeight, \
+        BarSpacing, \
+        MAX_SEARCH_RESULTS, \
+        MAX_RESULTS_RADIO, \
+        ImgSize, \
+        ImgColors
     try:
         v = int(value)
     except ValueError:
@@ -562,24 +591,36 @@ def cmd_config(extra: list[str], args=None):
         print(f"  {Primary}primary{Reset}   (aliases: pri)")
         print(f"  {Secondary}secondary{Reset} (aliases: sec)")
         print(f"  {Tertiary}tertiary{Reset}  (aliases: ter)")
-        print(f"  {Grey}display{Reset}    (none, bars, lyrics)")
-        print(f"  {Grey}barwidth{Reset}   (4-80, current: {BarWidth})")
-        print(f"  {Grey}barheight{Reset}  (10-90, current: {BarHeight})")
-        print(f"  {Grey}barspacing{Reset} (0-4, min, fit, max — current: {BarSpacing})")
-        print(f"  {Grey}barchar{Reset}    (dot, block, circle, or any single char — current: {BarChar})")
-        print(f"  {Grey}sensitivity{Reset} (0.5-5.0, current: {Sensitivity})")
-        print(f"  {Grey}format{Reset}     (opus, m4a, mp3, webm — current: {FORMAT})")
-        print(f"  {Grey}ad_skip{Reset}     (true/false — SponsorBlock segment skipping, current: {AD_SKIP})")
-        print(f"  {Grey}down_on_like{Reset} (true/false — auto-download when liking online, current: {DOWN_ON_LIKE})")
-        print(f"  {Grey}sponsor_categories{Reset} (in config file: sponsor, selfpromo, intro, outro, ...)")
-        print(f"  {Grey}max_search{Reset} (1-20, current: {MAX_SEARCH_RESULTS})")
-        print(f"  {Grey}max_radio{Reset}  (1-50, current: {MAX_RESULTS_RADIO})")
-        print(f"  {Grey}img_size{Reset}   (3-20, status card image height in rows, current: {ImgSize})")
-        print(f"  {Grey}img_colors{Reset} (1-3, number of colors+swatches shown, current: {ImgColors})")
+        print(f"  {GREY}display{Reset}    (none, bars, lyrics)")
+        print(f"  {GREY}barwidth{Reset}   (4-80, current: {BarWidth})")
+        print(f"  {GREY}barheight{Reset}  (10-90, current: {BarHeight})")
+        print(f"  {GREY}barspacing{Reset} (0-4, min, fit, max — current: {BarSpacing})")
+        print(
+            f"  {GREY}barchar{Reset}    (dot, block, circle, or any single char — current: {BarChar})"
+        )
+        print(f"  {GREY}sensitivity{Reset} (0.5-5.0, current: {Sensitivity})")
+        print(f"  {GREY}format{Reset}     (opus, m4a, mp3, webm — current: {FORMAT})")
+        print(
+            f"  {GREY}ad_skip{Reset}     (true/false — SponsorBlock segment skipping, current: {AD_SKIP})"
+        )
+        print(
+            f"  {GREY}down_on_like{Reset} (true/false — auto-download when liking online, current: {DOWN_ON_LIKE})"
+        )
+        print(
+            f"  {GREY}sponsor_categories{Reset} (in config file: sponsor, selfpromo, intro, outro, ...)"
+        )
+        print(f"  {GREY}max_search{Reset} (1-20, current: {MAX_SEARCH_RESULTS})")
+        print(f"  {GREY}max_radio{Reset}  (1-50, current: {MAX_RESULTS_RADIO})")
+        print(
+            f"  {GREY}img_size{Reset}   (3-20, status card image height in rows, current: {ImgSize})"
+        )
+        print(
+            f"  {GREY}img_colors{Reset} (1-3, number of colors+swatches shown, current: {ImgColors})"
+        )
         print(f"\n{Tertiary}Available colors:{Reset}")
         for name, code in _COLORS.items():
             print(f"  {code}{name}{Reset}")
-        print(f"\n{Grey}Config file: {CONFIG_FILE}{Reset}")
+        print(f"\n{GREY}Config file: {CONFIG_FILE}{Reset}")
         return
     if not extra:
         _interactive_config()
@@ -646,7 +687,9 @@ def cmd_config(extra: list[str], args=None):
         _save_config()
         print(f"{Tertiary}Auto-download on like set to {DOWN_ON_LIKE}{Reset}")
     elif target in ("max_search", "maxresults"):
-        print(_apply_int("MAX_SEARCH_RESULTS", value, 1, 20, "Max search results changed"))
+        print(
+            _apply_int("MAX_SEARCH_RESULTS", value, 1, 20, "Max search results changed")
+        )
     elif target in ("max_radio", "maxradio"):
         print(_apply_int("MAX_RESULTS_RADIO", value, 1, 50, "Max radio tracks changed"))
     elif target in ("img_size", "imgsize"):
@@ -668,7 +711,9 @@ def _interactive_config():
     except ImportError:
         print(f"{Primary}Usage: config <target> <value>{Reset}")
         print(f"       config -h{Reset}")
-        print(f"{Grey}  (interactive mode requires 'questionary', install with: pip install questionary){Reset}")
+        print(
+            f"{GREY}  (interactive mode requires 'questionary', install with: pip install questionary){Reset}"
+        )
         return
 
     color_names = sorted(_COLORS.keys())
@@ -800,10 +845,10 @@ def _interactive_config():
     try:
         answers = questionary.prompt(questions, style=py_style)
     except KeyboardInterrupt:
-        print(f"\n{Grey}Config setup cancelled.{Reset}")
+        print(f"\n{GREY}Config setup cancelled.{Reset}")
         return
     if not answers:
-        print(f"\n{Grey}Config setup cancelled.{Reset}")
+        print(f"\n{GREY}Config setup cancelled.{Reset}")
         return
 
     print(_apply_display(answers["display"]))
@@ -811,10 +856,18 @@ def _interactive_config():
     print(_apply_color("secondary", answers["secondary"]))
     print(_apply_color("tertiary", answers["tertiary"]))
 
-    bar_width_v = int(answers["bar_width"]) if answers["bar_width"].strip() and answers["display"] == "bars" else None
+    bar_width_v = (
+        int(answers["bar_width"])
+        if answers["bar_width"].strip() and answers["display"] == "bars"
+        else None
+    )
     if bar_width_v is not None and 4 <= bar_width_v <= 80:
         print(_apply_bar_width(bar_width_v))
-    bar_height_v = int(answers["bar_height"]) if answers["bar_height"].strip() and answers["display"] == "bars" else None
+    bar_height_v = (
+        int(answers["bar_height"])
+        if answers["bar_height"].strip() and answers["display"] == "bars"
+        else None
+    )
     if bar_height_v is not None and 10 <= bar_height_v <= 90:
         print(_apply_bar_height(bar_height_v))
     if answers["display"] == "bars":
@@ -823,25 +876,48 @@ def _interactive_config():
         else:
             print(_apply_bar_spacing(int(answers["bar_spacing"])))
         print(_apply_bar_char(answers["bar_char"]))
-        sens_v = float(answers["sensitivity"]) if answers["sensitivity"].strip() else None
+        sens_v = (
+            float(answers["sensitivity"]) if answers["sensitivity"].strip() else None
+        )
         if sens_v is not None and 0.5 <= sens_v <= 5.0:
             print(_apply_sensitivity(sens_v))
 
     print(_apply_format(answers["format"]))
-    print(_apply_int("MAX_SEARCH_RESULTS", answers["max_search"], 1, 20, "Max search results changed"))
-    print(_apply_int("MAX_RESULTS_RADIO", answers["max_radio"], 1, 50, "Max radio tracks changed"))
-    print(_apply_int("ImgSize", answers["img_size"], 3, 20, "Status image size changed"))
-    print(_apply_int("ImgColors", answers["img_colors"], 1, 3, "Status color swatches changed"))
+    print(
+        _apply_int(
+            "MAX_SEARCH_RESULTS",
+            answers["max_search"],
+            1,
+            20,
+            "Max search results changed",
+        )
+    )
+    print(
+        _apply_int(
+            "MAX_RESULTS_RADIO", answers["max_radio"], 1, 50, "Max radio tracks changed"
+        )
+    )
+    print(
+        _apply_int("ImgSize", answers["img_size"], 3, 20, "Status image size changed")
+    )
+    print(
+        _apply_int(
+            "ImgColors", answers["img_colors"], 1, 3, "Status color swatches changed"
+        )
+    )
     AD_SKIP = answers["ad_skip"]
     DOWN_ON_LIKE = answers["down_on_like"]
     _save_config()
     print(f"{Tertiary}Ad skip set to {AD_SKIP}{Reset}")
     print(f"{Tertiary}Auto-download on like set to {DOWN_ON_LIKE}{Reset}")
-    print(f"\n{Grey}Config saved.{Reset}")
+    print(f"\n{GREY}Config saved.{Reset}")
 
 
 def _cname(ansi_code):
-    return _COLOR_NAMES.get(ansi_code, "white")
+    name = _COLOR_NAMES.get(ansi_code, "white")
+    if name == "deeppurple":  # not a valid prompt_toolkit color name
+        return "darkmagenta"
+    return name
 
 
 def _BC_NAME(char):

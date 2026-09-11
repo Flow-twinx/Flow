@@ -18,8 +18,8 @@ P = config.Primary
 S = config.Secondary
 T = config.Tertiary
 M = config.Muted
-E = config.Red
-G = config.Grey
+E = config.RED
+G = config.GREY
 R = config.Reset
 
 m = lambda t: print(f"{M}{t}{R}")
@@ -81,6 +81,7 @@ COMMANDS = {
     "list": "List local music library",
     "radio": "Radio mode | shuffle & loop library | Ctrl+C next | Ctrl+Q quit",
     "like": "Like the currently playing song",
+    "unlike": "Unlike the currently playing song",
     "delete": "Delete a downloaded song (alias: dl-d)",
     "playlist": "Manage playlists | create add remove list play rename move dup merge sort clear dedupe info export import (alias: plist)",
     "switch": "Switch to Online mode (checks connection)",
@@ -150,6 +151,8 @@ def run(cmd: str, extra: list[str], args):
         radio(extra, args)
     elif cmd == "like":
         like_track()
+    elif cmd == "unlike":
+        unlike_track()
     elif cmd in ("delete", "dl-d"):
         delete_song(extra)
     elif cmd in ("playlist", "plist"):
@@ -170,40 +173,134 @@ def run(cmd: str, extra: list[str], args):
         e(f"Unknown command: {cmd}")
 
 
-def _pick_result():
+def _pick_index(results):
+    from ..ui import pick
+
+    choices = [(lib.display_name(p), i) for i, p in enumerate(results)]
+    choice, used = pick(
+        "Play which track?",
+        choices,
+        default=0,
+        instruction="(↑↓ navigate, Enter to play, Esc to cancel)",
+    )
+    if used:
+        return choice
     if not sys.stdin.isatty():
         return 0
     m("  Multiple matches:")
-    for i, p in enumerate(_last_results, 1):
+    for i, p in enumerate(results, 1):
         m(f"  {i}. {lib.display_name(p)}")
     while True:
         try:
-            choice = input(f"{P}Play which track? [1-{len(_last_results)}] {R}").strip()
-        except (EOFError, KeyboardInterrupt):
+            raw = input(f"{P}Play which track? [1-{len(results)}] {R}").strip()
+        except EOFError, KeyboardInterrupt:
             return None
-        if not choice:
+        if not raw:
             return None
-        if choice.isdigit():
-            idx = int(choice) - 1
-            if 0 <= idx < len(_last_results):
+        if raw.isdigit():
+            idx = int(raw) - 1
+            if 0 <= idx < len(results):
                 return idx
         e("    Invalid choice")
+
+
+def _pick_result():
+    return _pick_index(_last_results)
+
+
+def _pick_target(targets):
+    from ..ui import pick
+
+    choices = [(_truncate(t), t) for t in targets]
+    choice, used = pick(
+        "Pick a song",
+        choices,
+        default=0,
+        instruction="(↑↓ navigate, Enter to select, Esc to cancel)",
+    )
+    if used:
+        return choice
+    if not sys.stdin.isatty():
+        return targets[0]
+    m("    Multiple matches:")
+    for n, t in enumerate(targets, 1):
+        m(f"      {n}. {_truncate(t)}")
+    try:
+        raw = input(
+            f"{P}Pick a song to delete [1-{len(targets)}] (Enter to cancel): {R}"
+        ).strip()
+    except EOFError, KeyboardInterrupt:
+        return None
+    if not raw.isdigit():
+        return None
+    sel = int(raw) - 1
+    if sel < 0 or sel >= len(targets):
+        e("     Invalid choice")
+        return None
+    return targets[sel]
+
+
+def _style():
+    from ..ui import questionary_style
+
+    return questionary_style()
+
+
+def _select_song():
+    songs = lib.get_all_songs()
+    if not songs:
+        e("No songs in library")
+        return None
+    from ..ui import pick
+
+    choices = [(lib.display_name(p), p) for p in songs]
+    choice, used = pick(
+        "Play which song?",
+        choices,
+        default=0,
+        instruction="(↑↓ navigate, Enter to play, Esc to cancel)",
+    )
+    if used:
+        return choice
+    if not sys.stdin.isatty():
+        return songs[0]
+    return _pick_song_numbered(songs)
+
+
+def _pick_song_numbered(songs):
+    m("  Select a song:")
+    for i, p in enumerate(songs, 1):
+        m(f"  {i}. {lib.display_name(p)}")
+    try:
+        raw = input(f"{P}Play which song? [1-{len(songs)}] {R}").strip()
+    except EOFError, KeyboardInterrupt:
+        return None
+    if not raw:
+        return None
+    if raw.isdigit():
+        idx = int(raw) - 1
+        if 0 <= idx < len(songs):
+            return songs[idx]
+    e("    Invalid choice")
+    return None
 
 
 def play(extra: list[str], args):
     global _last_results, _last_played
     arg = " ".join(extra) if extra else None
-    if not arg:
-        e("No song specified")
-        return
 
-    if arg == "liked":
+    if arg and arg == "liked":
         _play_liked(args)
         return
-    elif arg == "all":
+    elif arg and arg == "all":
         _play_all(args)
         return
-    if arg.isdigit():
+
+    if not arg:
+        song_path = _select_song()
+        if song_path is None:
+            return
+    elif arg.isdigit():
         idx = int(arg) - 1
         if idx < 0 or idx >= len(_last_results):
             e("Index out of range")
@@ -354,6 +451,20 @@ def like_track():
             m(f"{lib.display_name(song_path)} is already liked")
 
 
+def unlike_track():
+    global _last_played
+    if not _last_played:
+        e("No song currently playing")
+        return
+    song_path = _last_played
+    liked = lib.get_liked_songs()
+    if song_path in liked:
+        lib.unlike_song(song_path)
+        i(f"Unliked: {lib.display_name(song_path)}")
+    else:
+        m(f"Not liked: {lib.display_name(song_path)}")
+
+
 def act_on_current(action, title, thumb=None):
     local = None
     if thumb:
@@ -375,6 +486,14 @@ def act_on_current(action, title, thumb=None):
     fpath = pathlib.Path(local)
     if action == "download":
         i(f"    Already on device: {lib.display_name(fpath)}")
+        return
+    if action == "unlike":
+        liked = lib.get_liked_songs()
+        if fpath in liked:
+            lib.unlike_song(fpath)
+            i(f"    Unliked: {lib.display_name(fpath)}")
+        else:
+            m(f"    Not liked: {lib.display_name(fpath)}")
         return
     liked = lib.get_liked_songs()
     if fpath in liked:
@@ -429,24 +548,10 @@ def delete_song(extra):
         return
 
     if len(targets) > 1:
-        m("    Multiple matches:")
-        for n, t in enumerate(targets, 1):
-            m(f"      {n}. {_truncate(t)}")
-        try:
-            choice = input(
-                f"{P}Pick a song to delete [1-{len(targets)}] (Enter to cancel): {R}"
-            ).strip()
-        except (EOFError, KeyboardInterrupt):
+        path = _pick_target(targets)
+        if path is None:
             m("    Cancelled")
             return
-        if not choice.isdigit():
-            m("    Cancelled")
-            return
-        sel = int(choice) - 1
-        if sel < 0 or sel >= len(targets):
-            e("     Invalid choice")
-            return
-        path = targets[sel]
     else:
         path = targets[0]
 
@@ -488,7 +593,13 @@ def playlist_cmd(extra, args=None):
             if not results:
                 e(f"No songs found matching '{target}'")
                 return None
-            song_path = results[0]
+            if len(results) == 1:
+                song_path = results[0]
+            else:
+                idx = _pick_index(results)
+                if idx is None:
+                    return None
+                song_path = results[idx]
         return playlist.make_track(
             title=lib.display_name(song_path), ref=str(song_path), source="local"
         )
@@ -515,8 +626,13 @@ def playlist_cmd(extra, args=None):
                         m(f"    Skipping {s.get('title', 'Unknown')} (file not found)")
                         idx += 1
                         continue
+                    next_title = (
+                        tracks[idx + 1].get("title") if idx + 1 < len(tracks) else None
+                    )
                     _last_played = fpath
-                    player.play_file(fpath, s.get("title", "Unknown"), args)
+                    player.play_file(
+                        fpath, s.get("title", "Unknown"), args, next_title=next_title
+                    )
                     idx += _nav_delta()
                 if not repeat:
                     break
@@ -548,7 +664,7 @@ def playlist_cmd(extra, args=None):
 
 
 def search(query: str):
-    global _last_results
+    global _last_results, _last_played
     if not query:
         e("Search query required")
         return
@@ -557,8 +673,12 @@ def search(query: str):
         e("No results found")
         return
     _last_results = results
-    for i, p in enumerate(results, 1):
-        m(f"  {i}. {lib.display_name(p)}")
+    idx = _pick_index(results)
+    if idx is None:
+        return
+    song_path = results[idx]
+    _last_played = song_path
+    player.play_file(song_path, lib.display_name(song_path), None)
 
 
 def list_library():
@@ -607,18 +727,24 @@ def radio(extra, args):
     old_sigusr1 = signal.getsignal(signal.SIGUSR1)
 
     fd = sys.stdin.fileno()
+    tty_fd = None
     old_term = None
     old_fd_flags = None
     try:
-        old_term = termios.tcgetattr(fd)
-        new = termios.tcgetattr(fd)
+        tty_fd = os.open("/dev/tty", os.O_RDWR)
+        ctl = tty_fd
+    except OSError:
+        ctl = fd
+    try:
+        old_term = termios.tcgetattr(ctl)
+        new = termios.tcgetattr(ctl)
         new[0] &= ~termios.IXON
         new[6][termios.VQUIT] = 0x11
         new[6][termios.VSUSP] = 0
-        termios.tcsetattr(fd, termios.TCSADRAIN, new)
-        old_fd_flags = fcntl.fcntl(fd, fcntl.F_GETFL)
-        fcntl.fcntl(fd, fcntl.F_SETFL, old_fd_flags | os.O_NONBLOCK)
-    except (termios.error, OSError):
+        termios.tcsetattr(ctl, termios.TCSADRAIN, new)
+        old_fd_flags = fcntl.fcntl(ctl, fcntl.F_GETFL)
+        fcntl.fcntl(ctl, fcntl.F_SETFL, old_fd_flags | os.O_NONBLOCK)
+    except termios.error, OSError:
         pass
 
     def _radio_sigusr1(sig, frame):
@@ -634,7 +760,7 @@ def radio(extra, args):
         try:
             while not radio_stop.is_set():
                 try:
-                    ch = os.read(fd, 1)
+                    ch = os.read(ctl, 1)
                 except OSError as ex:
                     if ex.errno == errno.EAGAIN:
                         time.sleep(0.05)
@@ -657,8 +783,16 @@ def radio(extra, args):
             while 0 <= idx < len(tracks) and not _radio_quit:
                 _radio_skip = False
                 song = tracks[idx]
+                next_song = tracks[idx + 1] if idx + 1 < len(tracks) else None
+                next_title = lib.display_name(next_song) if next_song else None
                 _last_played = song
-                player.play_file(song, lib.display_name(song), args, flags=flags)
+                player.play_file(
+                    song,
+                    lib.display_name(song),
+                    args,
+                    flags=flags,
+                    next_title=next_title,
+                )
                 if _radio_quit:
                     break
                 idx += _nav_delta()
@@ -674,9 +808,14 @@ def radio(extra, args):
         if old_term is not None:
             try:
                 if old_fd_flags is not None:
-                    fcntl.fcntl(fd, fcntl.F_SETFL, old_fd_flags)
-                termios.tcsetattr(fd, termios.TCSADRAIN, old_term)
-            except (termios.error, OSError):
+                    fcntl.fcntl(ctl, fcntl.F_SETFL, old_fd_flags)
+                termios.tcsetattr(ctl, termios.TCSADRAIN, old_term)
+            except termios.error, OSError:
+                pass
+        if tty_fd is not None:
+            try:
+                os.close(tty_fd)
+            except OSError:
                 pass
         signal.signal(signal.SIGINT, old_sigint)
         signal.signal(signal.SIGQUIT, old_sigquit)

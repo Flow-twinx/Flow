@@ -1,3 +1,4 @@
+import atexit
 import curses
 import errno
 import fcntl
@@ -22,7 +23,7 @@ T = config.Tertiary
 
 
 M = config.Muted
-E = config.Red
+E = config.RED
 R = config.Reset
 
 m = lambda t: print(f"{M}{t}{R}")
@@ -39,6 +40,14 @@ _reader_thread = None
 
 _next_req = False
 _prev_req = False
+
+
+def _clear_stale_pid():
+    if config.read_pid() == os.getpid():
+        config.clear_pid()
+
+
+atexit.register(_clear_stale_pid)
 
 
 def _sigusr1_toggle(sig, frame):
@@ -140,11 +149,18 @@ def _flags_str(args):
     return "  ".join(parts)
 
 
-def _display_loop(player, stop_check=None):
+def _display_loop(player, title=None, args=None, next_title=None, stop_check=None):
     global _paused
     display = config.Display
     if display == "none":
         return
+
+    if display == "bars":
+        shuffle = bool(getattr(args, "shuffle", False))
+        repeat = bool(getattr(args, "repeat", False))
+        visualizer.set_status(
+            title, shuffle=shuffle, repeat=repeat, next_title=next_title
+        )
 
     if display == "bars":
         stdscr = curses.initscr()
@@ -169,6 +185,7 @@ def _display_loop(player, stop_check=None):
                 break
             if _paused:
                 if not paused_printed:
+                    visualizer.set_paused(True)
                     if display == "bars":
                         try:
                             stdscr.addstr(0, 0, "  [Paused]  ", curses.A_BOLD)
@@ -185,6 +202,7 @@ def _display_loop(player, stop_check=None):
                     pass
                 continue
             if paused_printed:
+                visualizer.set_paused(False)
                 paused_printed = False
             if display == "bars":
                 visualizer.draw()
@@ -205,11 +223,12 @@ def _display_loop(player, stop_check=None):
             sys.stdout.flush()
 
 
-def play_file(filepath, title, args=None, flags=None):
+def play_file(filepath, title, args=None, flags=None, next_title=None):
     global _player, _paused, _next_req, _prev_req
     _paused = False
     _next_req = False
     _prev_req = False
+    config.save_pid(os.getpid())
     devnull = os.open(os.devnull, os.O_RDWR)
     old_stderr = os.dup(2)
     os.dup2(devnull, 2)
@@ -253,7 +272,13 @@ def play_file(filepath, title, args=None, flags=None):
             return False
 
         try:
-            _display_loop(_player, stop_check=stop_check)
+            _display_loop(
+                _player,
+                title=title,
+                args=args,
+                next_title=next_title,
+                stop_check=stop_check,
+            )
         except KeyboardInterrupt:
             _player.stop()
             sys.stdout.write("\n")

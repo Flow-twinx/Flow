@@ -1,5 +1,3 @@
-
-
 import pathlib
 import time
 
@@ -10,8 +8,8 @@ P = config.Primary
 S = config.Secondary
 T = config.Tertiary
 M = config.Muted
-E = config.Red
-G = config.Grey
+E = config.RED
+G = config.GREY
 R = config.Reset
 
 m = lambda t: print(f"{M}{t}{R}")

@@ -20,7 +20,7 @@ def show_banner():
     )
     builtins.print(f"{c}         Mode : {config.Mode}{config.Reset}")
     if config.DEV_MODE:
-        print(f"     {config.Red}       [Dev Mode]{config.Reset}")
+        print(f"     {config.RED}       [Dev Mode]{config.Reset}")
     builtins.print()
 
 
