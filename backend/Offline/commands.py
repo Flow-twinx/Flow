@@ -9,10 +9,12 @@ import termios
 import threading
 import time
 
-from .. import help_detail, library, playlist, plist_cli, shortcuts
-from ..imports import config, is_connected, merge_flags
-from . import file as lib
-from . import player
+from backend import help_detail, library, playlist, plist_cli, shortcuts
+from backend import config
+from backend.ping import is_connected
+from backend.config import merge_flags
+from backend.Offline import file as lib
+from backend.Offline import player
 
 P = config.Primary
 S = config.Secondary

@@ -3,7 +3,7 @@ import urllib.request
 import urllib.parse
 import urllib.error
 
-from ..imports import config
+from backend import config
 
 API_BASE = "https://teenapi.dino.icu/api"
 

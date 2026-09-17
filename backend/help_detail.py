@@ -1,4 +1,4 @@
-from . import config
+from backend import config
 
 
 def _t():
@@ -179,9 +179,9 @@ def _online_help():
             f"{G}  Backup ~/.flow config and data to ~/Downloads/flow_backup.zip{R}",
         ],
         "stop": [
-            f"{T}> flow --stop{R}",
+            f"{T}> flow --pause{R}",
             f"{G}  Toggle stop/resume on the background VLC or web player.{R}",
-            f"{G}  Use from shell: {M}flow --stop{R}",
+            f"{G}  Use from shell: {M}flow --pause{R}",
         ],
         "resume": [
             f"{T}> flow --resume{R}",
@@ -322,9 +322,9 @@ def _offline_help():
             f"{G}  Backup ~/.flow config and data to ~/Downloads/flow_backup.zip{R}",
         ],
         "stop": [
-            f"{T}> flow --stop{R}",
+            f"{T}> flow --pause{R}",
             f"{G}  Toggle stop/resume on the background VLC or web player.{R}",
-            f"{G}  Use from shell: {B}flow --stop{R}",
+            f"{G}  Use from shell: {B}flow --pause{R}",
         ],
         "resume": [
             f"{T}> flow --resume{R}",

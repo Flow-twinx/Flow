@@ -3,8 +3,8 @@ import pathlib
 
 import yt_dlp
 
-from .. import library, sponsor
-from ..imports import config
+from backend import library, sponsor
+from backend import config
 
 logger = logging.getLogger(__name__)
 

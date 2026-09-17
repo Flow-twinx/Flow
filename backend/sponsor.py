@@ -8,7 +8,7 @@ import urllib.request
 
 import yt_dlp
 
-from .imports import config
+from backend import config
 
 logger = logging.getLogger(__name__)
 

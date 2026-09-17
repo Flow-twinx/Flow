@@ -2,7 +2,7 @@ import logging
 import logging.handlers
 import pathlib
 
-from ..imports import config
+from backend import config
 
 e = config.RED
 s = config.GREEN

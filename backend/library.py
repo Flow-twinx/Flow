@@ -3,7 +3,7 @@ import json
 import pathlib
 import urllib.request
 
-from .config import _truncate_title
+from backend.config import _truncate_title
 
 LIBRARY_FILE = pathlib.Path.home() / ".flow/library.json"
 THUMB_CACHE = pathlib.Path.home() / ".flow/downloads/.cache"

@@ -18,9 +18,9 @@ if __name__ == "__main__" and __package__ is None:
 
 import warnings
 
-from flow_twinx import shortcuts
-from flow_twinx.Offline import commands as _offline_commands
-from flow_twinx.Online import commands as _online_commands
+from backend import shortcuts
+from backend.Offline import commands as _offline_commands
+from backend.Online import commands as _online_commands
 
 from .imports import config, is_connected, show_banner, tui_input
 
@@ -51,7 +51,7 @@ def kill_port(port):
 
 
 def _run_web(port):
-    from flow_twinx.web.app import app
+    from backend.web.app import app
 
     WEB_PID = Path.home() / ".flow/web.pid"
     WEB_PORT = Path.home() / ".flow/web_port"
@@ -164,7 +164,7 @@ def _setup_island():
 
 
 def _resume(args):
-    from . import status as _status
+    from backend import status as _status
 
     data = _status._read()
     title = (data.get("title") or "").strip()
@@ -190,7 +190,7 @@ def _resume(args):
 
 
 def _act_current(action):
-    from . import status as _status
+    from backend import status as _status
 
     data = _status._read()
     title = (data.get("title") or "").strip()
@@ -243,7 +243,7 @@ def main():
         help="resume the last played track from ~/.flow/status.json",
     )
     parser.add_argument(
-        "--stop",
+        "--pause",
         action="store_true",
         help="toggle stop/resume playback (VLC or web player)",
     )
@@ -480,7 +480,7 @@ def main():
             _run_web(port)
         return
     if getattr(args, "status", False):
-        from .status import show as show_status
+        from backend.status import show as show_status
 
         show_status()
         sys.exit(0)
@@ -490,6 +490,8 @@ def main():
     control_args = []
     if getattr(args, "stop", False):
         control_args.append(("stop", signal.SIGUSR1, "Toggled stop/resume", None))
+    if getattr(args, "pause", False):
+        control_args.append(("stop", signal.SIGUSR1, "Toggled pause/resume", None))
     if getattr(args, "next", False):
         control_args.append(("next", signal.SIGUSR2, "Skipped to next track", None))
     if getattr(args, "previous", False):

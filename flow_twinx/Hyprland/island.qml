@@ -31,8 +31,7 @@ PanelWindow {
 
     // ================= interaction state =================
     property bool panelOpen: false
-    property string uiMode: panelOpen ? "panel"
-        : (island.isHovered ? "hover" : "idle")
+    property string uiMode: panelOpen ? "panel" : (island.isHovered ? "hover" : "idle")
 
     // ================= sizing =================
     property int hitPad: 15
@@ -47,13 +46,17 @@ PanelWindow {
     property int idleMusicWidth: Math.max(150, Math.min(titleText.implicitWidth + 24 + (island.thumbnailSource.length > 0 ? 32 : 0), 380))
 
     function contentWidth() {
-        if (island.uiMode === "panel") return island.panelW;
-        if (island.uiMode === "hover") return island.hoverW;
+        if (island.uiMode === "panel")
+            return island.panelW;
+        if (island.uiMode === "hover")
+            return island.hoverW;
         return (island.hasSession && !island.isIdleStatus) ? island.idleMusicWidth : island.tinyW;
     }
     function contentHeight() {
-        if (island.uiMode === "panel") return island.panelH;
-        if (island.uiMode === "hover") return island.hoverH;
+        if (island.uiMode === "panel")
+            return island.panelH;
+        if (island.uiMode === "hover")
+            return island.hoverH;
         return (island.hasSession && !island.isIdleStatus) ? island.idleH : island.tinyH;
     }
 
@@ -68,17 +71,33 @@ PanelWindow {
         id: statusProc
         command: ["flow", "--status"]
         running: false
-        stdout: StdioCollector { onStreamFinished: island.parseStatus(this.text) }
+        stdout: StdioCollector {
+            onStreamFinished: island.parseStatus(this.text)
+        }
     }
     Process {
         id: homeProc
         command: ["sh", "-c", "echo $HOME"]
         running: false
-        stdout: StdioCollector { onStreamFinished: island.homeDir = this.text.trim() }
+        stdout: StdioCollector {
+            onStreamFinished: island.homeDir = this.text.trim()
+        }
     }
-    Process { id: prevProc; command: ["flow", "--previous"]; running: false }
-    Process { id: toggleProc; command: ["flow", "--stop"]; running: false }
-    Process { id: nextProc; command: ["flow", "--next"]; running: false }
+    Process {
+        id: prevProc
+        command: ["flow", "--previous"]
+        running: false
+    }
+    Process {
+        id: toggleProc
+        command: ["flow", "--pause"]
+        running: false
+    }
+    Process {
+        id: nextProc
+        command: ["flow", "--next"]
+        running: false
+    }
 
     Process {
         id: radioProc
@@ -86,9 +105,14 @@ PanelWindow {
         command: ["flow", "radio"].concat(radioProc.query.trim().length > 0 ? radioProc.query.trim().split(/\s+/) : [])
         running: false
     }
-    Process { id: stopAll; command: ["flow", "--stop-all"]; running: false }
+    Process {
+        id: stopAll
+        command: ["flow", "--stop-all"]
+        running: false
+    }
     function runRadio(q) {
-        if (q.trim().length === 0) return;
+        if (q.trim().length === 0)
+            return;
         stopAll.running = true;
         radioProc.running = false;
         radioProc.query = q;
@@ -103,14 +127,18 @@ PanelWindow {
         triggeredOnStart: true
         onTriggered: {
             statusProc.running = true;
-            if (island.homeDir === "") homeProc.running = true;
+            if (island.homeDir === "")
+                homeProc.running = true;
         }
     }
 
-    function stripAnsi(text) { return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, ""); }
+    function stripAnsi(text) {
+        return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+    }
     function resolveThumbnail(raw) {
         const t = raw.trim();
-        if (/^https?:\/\//i.test(t)) return t;
+        if (/^https?:\/\//i.test(t))
+            return t;
         let p = t.startsWith("~") ? island.homeDir + t.substring(1) : t;
         if (p.startsWith("/downloads/") || p.startsWith("/cache/") || p.startsWith("/.cache/")) {
             p = island.homeDir + "/.flow" + p;
@@ -128,9 +156,16 @@ PanelWindow {
         island.statusText = statusMatch ? statusMatch[1].trim() : "not playing";
         island.thumbnailSource = thumbMatch ? island.resolveThumbnail(thumbMatch[1].trim()) : "";
 
-        if (nowMatch) { island.nowPlaying = nowMatch[1].trim(); island.isLastPlayed = false; }
-        else if (lastMatch) { island.nowPlaying = lastMatch[1].trim(); island.isLastPlayed = true; }
-        else { island.nowPlaying = ""; island.isLastPlayed = false; }
+        if (nowMatch) {
+            island.nowPlaying = nowMatch[1].trim();
+            island.isLastPlayed = false;
+        } else if (lastMatch) {
+            island.nowPlaying = lastMatch[1].trim();
+            island.isLastPlayed = true;
+        } else {
+            island.nowPlaying = "";
+            island.isLastPlayed = false;
+        }
 
         island.duration = durMatch ? durMatch[1].trim() : "";
     }
@@ -148,7 +183,8 @@ PanelWindow {
     Item {
         anchors.fill: parent
         focus: island.isHovered || island.panelOpen
-        Keys.onEscapePressed: if (island.panelOpen) island.panelOpen = false
+        Keys.onEscapePressed: if (island.panelOpen)
+            island.panelOpen = false
     }
 
     // ================= shell =================
@@ -159,8 +195,10 @@ PanelWindow {
         anchors.top: parent.top
         anchors.horizontalCenter: parent.horizontalCenter
         radius: {
-            if (island.uiMode === "panel") return 10;
-            if (island.uiMode === "idle") return 5;
+            if (island.uiMode === "panel")
+                return 10;
+            if (island.uiMode === "idle")
+                return 5;
             return height / 8;
         }
         color: "#000"
@@ -168,9 +206,24 @@ PanelWindow {
         border.width: (island.uiMode === "idle" && !(island.hasSession && !island.isIdleStatus)) ? 0 : 1
         clip: true
 
-        Behavior on width { NumberAnimation { duration: 600; easing.type: Easing.OutExpo } }
-        Behavior on height { NumberAnimation { duration: 600; easing.type: Easing.OutExpo } }
-        Behavior on radius { NumberAnimation { duration: 200; easing.type: Easing.OutExpo } }
+        Behavior on width {
+            NumberAnimation {
+                duration: 600
+                easing.type: Easing.OutExpo
+            }
+        }
+        Behavior on height {
+            NumberAnimation {
+                duration: 600
+                easing.type: Easing.OutExpo
+            }
+        }
+        Behavior on radius {
+            NumberAnimation {
+                duration: 200
+                easing.type: Easing.OutExpo
+            }
+        }
 
         // ---- idle: mini music pill ----
         Row {
@@ -179,8 +232,11 @@ PanelWindow {
             visible: island.uiMode === "idle" && island.hasSession && !island.isIdleStatus
 
             Rectangle {
-                width: 20; height: 20; radius: 10
-                color: "transparent"; clip: true
+                width: 20
+                height: 20
+                radius: 10
+                color: "transparent"
+                clip: true
                 anchors.verticalCenter: parent.verticalCenter
                 visible: island.thumbnailSource.length > 0
                 Image {
@@ -188,13 +244,16 @@ PanelWindow {
                     source: island.thumbnailSource
                     sourceSize: Qt.size(60, 60)
                     fillMode: Image.PreserveAspectCrop
-                    mipmap: true; asynchronous: true
+                    mipmap: true
+                    asynchronous: true
                 }
             }
             Text {
                 id: titleText
                 text: island.nowPlaying
-                color: "#f5f5f5"; font.pixelSize: 12; font.bold: true
+                color: "#f5f5f5"
+                font.pixelSize: 12
+                font.bold: true
                 elide: Text.ElideRight
                 width: island.idleMusicWidth - 24 - (island.thumbnailSource.length > 0 ? 28 : 0)
                 anchors.verticalCenter: parent.verticalCenter
@@ -208,8 +267,11 @@ PanelWindow {
             visible: island.uiMode === "hover"
 
             Rectangle {
-                width: 44; height: 44; radius: 20
-                color: "transparent"; clip: true
+                width: 44
+                height: 44
+                radius: 20
+                color: "transparent"
+                clip: true
                 anchors.verticalCenter: parent.verticalCenter
                 visible: island.thumbnailSource.length > 0
                 Image {
@@ -217,7 +279,8 @@ PanelWindow {
                     source: island.thumbnailSource
                     sourceSize: Qt.size(94, 94)
                     fillMode: Image.PreserveAspectCrop
-                    mipmap: true; asynchronous: true
+                    mipmap: true
+                    asynchronous: true
                 }
             }
             Column {
@@ -225,33 +288,63 @@ PanelWindow {
                 anchors.verticalCenter: parent.verticalCenter
                 Text {
                     text: island.nowPlaying.length > 0 ? island.nowPlaying : "Nothing playing"
-                    color: "#f5f5f5"; font.pixelSize: 12; font.bold: true
+                    color: "#f5f5f5"
+                    font.pixelSize: 12
+                    font.bold: true
                     elide: Text.ElideRight
                     width: shell.width - 24 - 44 - ctrlRow.implicitWidth - 16
                 }
-                Text { text: island.duration; color: "#999999"; font.pixelSize: 11 }
+                Text {
+                    text: island.duration
+                    color: "#999999"
+                    font.pixelSize: 11
+                }
             }
             Row {
                 id: ctrlRow
                 spacing: 6
                 anchors.verticalCenter: parent.verticalCenter
                 Text {
-                    id: prevBtn; text: "󰼨"
-                    color: prevBtn.hovered ? "#f5f5f5" : "#999999"; font.pixelSize: 20
+                    id: prevBtn
+                    text: "󰼨"
+                    color: prevBtn.hovered ? "#f5f5f5" : "#999999"
+                    font.pixelSize: 20
                     property bool hovered: false
-                    MouseArea { anchors.fill: parent; hoverEnabled: true; onEntered: prevBtn.hovered = true; onExited: prevBtn.hovered = false; onClicked: prevProc.running = true }
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onEntered: prevBtn.hovered = true
+                        onExited: prevBtn.hovered = false
+                        onClicked: prevProc.running = true
+                    }
                 }
                 Text {
-                    id: toggleBtn; text: island.isPlaying ? "󰏤" : "󰐊"
-                    color: toggleBtn.hovered ? "#f5f5f5" : "#999999"; font.pixelSize: 20
+                    id: toggleBtn
+                    text: island.isPlaying ? "󰏤" : "󰐊"
+                    color: toggleBtn.hovered ? "#f5f5f5" : "#999999"
+                    font.pixelSize: 20
                     property bool hovered: false
-                    MouseArea { anchors.fill: parent; hoverEnabled: true; onEntered: toggleBtn.hovered = true; onExited: toggleBtn.hovered = false; onClicked: toggleProc.running = true }
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onEntered: toggleBtn.hovered = true
+                        onExited: toggleBtn.hovered = false
+                        onClicked: toggleProc.running = true
+                    }
                 }
                 Text {
-                    id: nextBtn; text: "󰼧"
-                    color: nextBtn.hovered ? "#f5f5f5" : "#999999"; font.pixelSize: 20
+                    id: nextBtn
+                    text: "󰼧"
+                    color: nextBtn.hovered ? "#f5f5f5" : "#999999"
+                    font.pixelSize: 20
                     property bool hovered: false
-                    MouseArea { anchors.fill: parent; hoverEnabled: true; onEntered: nextBtn.hovered = true; onExited: nextBtn.hovered = false; onClicked: nextProc.running = true }
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onEntered: nextBtn.hovered = true
+                        onExited: nextBtn.hovered = false
+                        onClicked: nextProc.running = true
+                    }
                 }
             }
         }
@@ -263,8 +356,11 @@ PanelWindow {
             visible: island.uiMode === "panel"
 
             Rectangle {
-                width: 260; height: 260; radius: 10
-                color: "#1a1a1c"; clip: true
+                width: 260
+                height: 260
+                radius: 10
+                color: "#1a1a1c"
+                clip: true
                 anchors.horizontalCenter: parent.horizontalCenter
                 visible: island.thumbnailSource.length > 0
                 Image {
@@ -272,19 +368,24 @@ PanelWindow {
                     source: island.thumbnailSource
                     sourceSize: Qt.size(320, 320)
                     fillMode: Image.PreserveAspectCrop
-                    mipmap: true; asynchronous: true
+                    mipmap: true
+                    asynchronous: true
                 }
             }
             Text {
                 text: island.nowPlaying.length > 0 ? island.nowPlaying : "Nothing playing"
-                color: "#f5f5f5"; font.pixelSize: 16; font.bold: true
-                width: 320; horizontalAlignment: Text.AlignHCenter
+                color: "#f5f5f5"
+                font.pixelSize: 16
+                font.bold: true
+                width: 320
+                horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.WordWrap
                 anchors.horizontalCenter: parent.horizontalCenter
             }
             Text {
                 text: island.isLastPlayed ? "Last played · " + island.duration : island.duration
-                color: "#999999"; font.pixelSize: 12
+                color: "#999999"
+                font.pixelSize: 12
                 anchors.horizontalCenter: parent.horizontalCenter
                 visible: island.duration.length > 0
             }
@@ -292,28 +393,62 @@ PanelWindow {
                 spacing: 16
                 anchors.horizontalCenter: parent.horizontalCenter
                 Text {
-                    id: pPrevBtn; text: "󰼨"
-                    color: pPrevBtn.hovered ? "#f5f5f5" : "#999999"; font.pixelSize: 30
+                    id: pPrevBtn
+                    text: "󰼨"
+                    color: pPrevBtn.hovered ? "#f5f5f5" : "#999999"
+                    font.pixelSize: 30
                     property bool hovered: false
-                    MouseArea { anchors.fill: parent; anchors.margins: -8; hoverEnabled: true; onEntered: pPrevBtn.hovered = true; onExited: pPrevBtn.hovered = false; onClicked: prevProc.running = true }
+                    MouseArea {
+                        anchors.fill: parent
+                        anchors.margins: -8
+                        hoverEnabled: true
+                        onEntered: pPrevBtn.hovered = true
+                        onExited: pPrevBtn.hovered = false
+                        onClicked: prevProc.running = true
+                    }
                 }
                 Text {
-                    id: pToggleBtn; text: island.isPlaying ? "󰏤" : "󰐊"
-                    color: pToggleBtn.hovered ? "#f5f5f5" : "#999999"; font.pixelSize: 30
+                    id: pToggleBtn
+                    text: island.isPlaying ? "󰏤" : "󰐊"
+                    color: pToggleBtn.hovered ? "#f5f5f5" : "#999999"
+                    font.pixelSize: 30
                     property bool hovered: false
-                    MouseArea { anchors.fill: parent; anchors.margins: -8; hoverEnabled: true; onEntered: pToggleBtn.hovered = true; onExited: pToggleBtn.hovered = false; onClicked: toggleProc.running = true }
+                    MouseArea {
+                        anchors.fill: parent
+                        anchors.margins: -8
+                        hoverEnabled: true
+                        onEntered: pToggleBtn.hovered = true
+                        onExited: pToggleBtn.hovered = false
+                        onClicked: toggleProc.running = true
+                    }
                 }
                 Text {
-                    id: pNextBtn; text: "󰼧"
-                    color: pNextBtn.hovered ? "#f5f5f5" : "#999999"; font.pixelSize: 30
+                    id: pNextBtn
+                    text: "󰼧"
+                    color: pNextBtn.hovered ? "#f5f5f5" : "#999999"
+                    font.pixelSize: 30
                     property bool hovered: false
-                    MouseArea { anchors.fill: parent; anchors.margins: -8; hoverEnabled: true; onEntered: pNextBtn.hovered = true; onExited: pNextBtn.hovered = false; onClicked: nextProc.running = true }
+                    MouseArea {
+                        anchors.fill: parent
+                        anchors.margins: -8
+                        hoverEnabled: true
+                        onEntered: pNextBtn.hovered = true
+                        onExited: pNextBtn.hovered = false
+                        onClicked: nextProc.running = true
+                    }
                 }
             }
-            Rectangle { width: 320; height: 1; color: "#242424"; anchors.horizontalCenter: parent.horizontalCenter }
+            Rectangle {
+                width: 320
+                height: 1
+                color: "#242424"
+                anchors.horizontalCenter: parent.horizontalCenter
+            }
 
             Rectangle {
-                width: 320; height: 34; radius: 10
+                width: 320
+                height: 34
+                radius: 10
                 color: "#141416"
                 border.color: radioInput.activeFocus ? "#3a3a3f" : "#242424"
                 border.width: 1
@@ -331,7 +466,8 @@ PanelWindow {
 
                         Text {
                             text: "Start a radio for..."
-                            color: "#5c5c5c"; font.pixelSize: 12
+                            color: "#5c5c5c"
+                            font.pixelSize: 12
                             anchors.verticalCenter: parent.verticalCenter
                             visible: radioInput.text.length === 0
                         }
@@ -343,16 +479,24 @@ PanelWindow {
                             font.pixelSize: 12
                             clip: true
                             selectByMouse: true
-                            Keys.onReturnPressed: { island.runRadio(radioInput.text); radioInput.text = ""; }
+                            Keys.onReturnPressed: {
+                                island.runRadio(radioInput.text);
+                                radioInput.text = "";
+                            }
                         }
                     }
                     Text {
                         text: "󰍉"
-                        color: "#999999"; font.pixelSize: 14
+                        color: "#999999"
+                        font.pixelSize: 14
                         anchors.verticalCenter: parent.verticalCenter
                         MouseArea {
-                            anchors.fill: parent; anchors.margins: -6
-                            onClicked: { island.runRadio(radioInput.text); radioInput.text = ""; }
+                            anchors.fill: parent
+                            anchors.margins: -6
+                            onClicked: {
+                                island.runRadio(radioInput.text);
+                                radioInput.text = "";
+                            }
                         }
                     }
                 }

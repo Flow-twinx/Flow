@@ -1,8 +1,8 @@
 import pathlib
 import time
 
-from . import playlist
-from .imports import config
+from backend import playlist
+from backend import config
 
 P = config.Primary
 S = config.Secondary

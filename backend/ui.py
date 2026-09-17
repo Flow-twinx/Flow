@@ -1,4 +1,4 @@
-from .imports import config
+from backend import config
 
 
 def questionary_style():

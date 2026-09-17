@@ -1,4 +1,4 @@
-from . import config
+from backend import config
+from backend.config import merge_flags
+from backend.ping import is_connected
 from .tui import show_banner, input as tui_input
-from .ping import is_connected
-from .config import merge_flags

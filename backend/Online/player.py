@@ -11,8 +11,8 @@ import time
 
 import vlc
 
-from .. import library, lyrics, sponsor, status, visualizer
-from ..imports import config
+from backend import library, lyrics, sponsor, status, visualizer
+from backend import config
 
 _truncate_title = config._truncate_title
 

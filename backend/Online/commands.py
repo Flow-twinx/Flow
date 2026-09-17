@@ -9,10 +9,11 @@ import termios
 import threading
 import time
 
-from .. import help_detail, library, playlist, plist_cli, shortcuts
-from ..imports import config, merge_flags
-from ..Offline import player as off_player
-from . import player, savan, youtube
+from backend import help_detail, library, playlist, plist_cli, shortcuts
+from backend import config
+from backend.config import merge_flags
+from backend.Offline import player as off_player
+from backend.Online import player, savan, youtube
 
 P = config.Primary
 S = config.Secondary

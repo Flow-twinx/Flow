@@ -8,13 +8,13 @@ import time
 import yt_dlp
 from flask import Flask, jsonify, render_template, request, send_file
 
-from .. import control
-from .. import library
-from .. import playlist
-from .. import sponsor
-from .. import status
-from ..imports import config
-from . import devlog
+from backend import control
+from backend import library
+from backend import playlist
+from backend import sponsor
+from backend import status
+from backend import config
+from backend.web import devlog
 
 logger = logging.getLogger(__name__)
 

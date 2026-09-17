@@ -12,6 +12,8 @@ SIG_NEXT = _signal.SIGUSR2
 SIG_PREV = _signal.SIGRTMIN + 2
 SIG_SEEK_FWD = _signal.SIGRTMIN + 3
 SIG_SEEK_BWD = _signal.SIGRTMIN + 4
+SIG_REPEAT = _signal.SIGRTMIN + 5
+SIG_SHUFFLE = _signal.SIGRTMIN + 6
 
 
 def merge_flags(extra: list[str], args) -> tuple[list[str], object]:
@@ -439,6 +441,7 @@ ImgColors = 1
 
 PID_FILE = pathlib.Path.home() / ".flow/vlc.pid"
 SEEK_FILE = pathlib.Path.home() / ".flow/seek.txt"
+TUI_PID_FILE = pathlib.Path.home() / ".flow/tui.pid"
 
 
 def write_seek(delta_ms: int):
@@ -474,6 +477,52 @@ def read_pid() -> int | None:
 def clear_pid():
     if PID_FILE.exists():
         PID_FILE.unlink()
+
+
+def save_tui_pid(pid: int):
+    TUI_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    TUI_PID_FILE.write_text(str(pid))
+
+
+def read_tui_pid() -> int | None:
+    if not TUI_PID_FILE.exists():
+        return None
+    try:
+        return int(TUI_PID_FILE.read_text().strip())
+    except (ValueError, OSError):
+        return None
+
+
+def clear_tui_pid():
+    if TUI_PID_FILE.exists():
+        TUI_PID_FILE.unlink()
+
+
+def save_pid_if_free(pid: int) -> bool:
+    """Claim the player pid slot unless another live player already holds it."""
+    existing = read_pid()
+    if existing is not None and existing != pid:
+        try:
+            import psutil
+
+            if psutil.Process(existing).is_running():
+                return False
+        except Exception:
+            pass
+    save_pid(pid)
+    return True
+
+
+def clear_pid_if(pid: int):
+    """Clear the player pid slot only when it belongs to ``pid``."""
+    if read_pid() == pid:
+        clear_pid()
+
+
+def clear_tui_pid_if(pid: int):
+    """Clear the TUI pid slot only when it belongs to ``pid``."""
+    if read_tui_pid() == pid:
+        clear_tui_pid()
 
 
 def kill_stored():

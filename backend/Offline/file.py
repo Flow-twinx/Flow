@@ -1,8 +1,8 @@
 import pathlib
 import shutil
 
-from ..imports import config
-from .. import library
+from backend import config
+from backend import library
 
 AUDIO_EXTENSIONS = {
     ".mp3",

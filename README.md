@@ -40,6 +40,23 @@ flow
 
 ### Note: Make sure vlc is installed it can break on some PC but mostly work without vlc.
 
+## Project structure
+
+```
+flow/
+├── backend/          # Engine: config, library, playlists, players, web API
+│   ├── Online/       # Online mode (youtube, savan, streaming player)
+│   ├── Offline/      # Offline mode (local files, offline player)
+│   └── web/          # Flask app + templates (GUI mode)
+├── flow_twinx/       # CLI launcher shell that links to backend
+│   ├── main.py       # entry point (`flow`)
+│   └── tui.py        # banner + prompt chrome
+└── flow_twinx_tui/   # Full-screen Textual UI
+    └── main.py       # entry point (`flowt`)
+```
+
+The backend holds all the logic; `flow_twinx` is the thin CLI shell that imports it.
+
 ## Usage
 
 ```bash
@@ -66,6 +83,10 @@ uv run main.py
 | `--play-off` | Play a song from the local library without going online           |
 | `--radio-off` | Radio from the local library (shuffled, looped) without going online |
 | `--resume`    | Resume the last played track from `~/.flow/status.json`          |
+| `--pause`     | Toggle play/pause in the running player (VLC or flowt TUI)       |
+| `--next`      | Skip to the next track in the running player                     |
+| `--previous`  | Go back to the previous track in the running player              |
+| `--status`    | Show the playback status card                                    |
 | `--seek SEC`  | Seek SEC seconds forward in the running player (VLC or web player) |
 | `--seekb SEC` | Seek SEC seconds backward in the running player (VLC or web player) |
 
@@ -106,6 +127,43 @@ To launch gui mode just type :
 ```bash
 flow --web
 ```
+
+### TUI Mode:
+
+Launch the full-screen Textual interface with:
+
+```bash
+flowt
+```
+
+It shows the local (or online) library on the left and the Now Playing panel on
+the right, including a live progress bar, time, mode, repeat/shuffle state and
+volume.
+
+| Key      | Action              |
+| -------- | ------------------- |
+| `Enter` / click | Play the selected track (starts immediately) |
+| `space`  | Play / pause        |
+| `n` / `p` | Next / previous track |
+| `s` / `r` | Toggle shuffle / repeat |
+| `+` / `-` | Volume up / down    |
+| `Tab`    | Switch online/offline mode |
+| `q`      | Quit                |
+
+`flowt` also accepts the control flags:
+
+| Flag         | Description                                                        |
+| ------------ | ------------------------------------------------------------------ |
+| `--status`   | Print the playback status card and exit                            |
+| `--pause`    | Toggle play/pause in a running Flow session (TUI or background VLC) |
+| `--next`     | Skip to the next track in a running Flow session                   |
+| `--previous` | Go back to the previous track in a running Flow session            |
+| `--repeat`   | Toggle repeat in a running TUI, or start the TUI with repeat on    |
+| `--shuffle`  | Toggle shuffle in a running TUI, or start the TUI with shuffle on  |
+
+While playing, the TUI publishes its state to `~/.flow/status.json`, so
+`flow --status` (and `flow --pause` / `--next` / `--previous`) work against a
+running TUI. Its pid is tracked in `~/.flow/tui.pid`.
 
 ### Commands
 

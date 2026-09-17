@@ -1,6 +1,6 @@
 import builtins
 
-from . import config
+from backend import config
 
 BANNER = r"""
 ███████╗██╗      ██████╗ ██╗    ██╗

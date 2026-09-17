@@ -6,7 +6,7 @@ import threading
 
 import numpy as np
 import sounddevice as sd
-from .imports import config
+from backend import config
 
 BLOCK_SIZE = 4096
 SAMPLE_RATE = 48000

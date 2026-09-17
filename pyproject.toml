@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flow-twinx"
-version = "0.6.2"
+version = "0.7.0"
 description = "A terminal music player with online and offline modes sourced from youtube."
 readme = "README.md"
 requires-python = ">=3.14"
@@ -28,10 +28,11 @@ flowt = "flow_twinx_tui:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["flow_twinx*"]
+include = ["flow_twinx*", "backend*"]
 
 [tool.setuptools.package-data]
-flow_twinx = ["web/templates/*", "Hyprland/*.qml"]
+flow_twinx = ["Hyprland/*.qml"]
+backend = ["web/templates/*"]
 
 [dependency-groups]
 dev = [
