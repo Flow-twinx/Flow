@@ -66,6 +66,8 @@ uv run main.py
 | `--play-off` | Play a song from the local library without going online           |
 | `--radio-off` | Radio from the local library (shuffled, looped) without going online |
 | `--resume`    | Resume the last played track from `~/.flow/status.json`          |
+| `--seek SEC`  | Seek SEC seconds forward in the running player (VLC or web player) |
+| `--seekb SEC` | Seek SEC seconds backward in the running player (VLC or web player) |
 
 ### Shell Mode
 

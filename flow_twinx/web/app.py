@@ -597,15 +597,17 @@ def api_control():
     command = data.get("command", "").strip()
     if command not in control.COMMANDS:
         return jsonify({"error": f"invalid command, expected one of {sorted(control.COMMANDS)}"}), 400
-    control.send(command)
+    control.send(command, delta=data.get("delta"))
     devlog.log_success("CTRL", 200, "/api/control", "flow", f"command={command}")
     return jsonify({"success": True, "command": command})
 
 
 @app.route("/api/control/poll")
 def api_control_poll():
-    command = control.take()
-    return jsonify({"command": command})
+    cmd = control.take()
+    if isinstance(cmd, dict):
+        return jsonify(cmd)
+    return jsonify({"command": cmd})
 
 
 

@@ -69,10 +69,21 @@ def _sigusr3_prev(sig, frame):
         _player.stop()
 
 
+def _seek_current(sig, frame):
+    delta_ms = config.read_seek()
+    config.clear_seek()
+    if _player and delta_ms:
+        cur = _player.get_time()
+        if cur is not None and cur >= 0:
+            _player.set_time(max(0, int(cur) + delta_ms))
+
+
 def setup_nav_signals():
     signal.signal(signal.SIGUSR1, _sigusr1_toggle)
     signal.signal(signal.SIGUSR2, _sigusr2_next)
     signal.signal(config.SIG_PREV, _sigusr3_prev)
+    signal.signal(config.SIG_SEEK_FWD, _seek_current)
+    signal.signal(config.SIG_SEEK_BWD, _seek_current)
 
 
 def _setup_pause_input():
@@ -153,6 +164,12 @@ def _display_loop(
     global _paused
     display = config.Display
     if display == "none":
+        while player.get_state() not in (vlc.State.Ended, vlc.State.Error):
+            if stop_check and stop_check():
+                break
+            if _next_req or _prev_req:
+                break
+            time.sleep(0.1)
         return
 
     if display == "bars":
@@ -249,6 +266,7 @@ def play_url(url, title, args=None, duration=0, thumbnail=None, next_title=None)
     _next_req = False
     _prev_req = False
     config.save_pid(os.getpid())
+    config.clear_seek()
     devnull = os.open(os.devnull, os.O_RDWR)
     old_stderr = os.dup(2)
     os.dup2(devnull, 2)
@@ -301,6 +319,7 @@ def play_entry(entry, title, args=None, flags=None, next_title=None):
     _next_req = False
     _prev_req = False
     config.save_pid(os.getpid())
+    config.clear_seek()
     title = title.split("|")[0]
 
     instance = vlc.Instance("--no-video --quiet")

@@ -22,16 +22,30 @@ def _liked_dir() -> pathlib.Path:
     return config.DOWNLOAD_DIR / LIKED_DIR_NAME
 
 
+def _sorted_by_name(paths: list[pathlib.Path]) -> list[pathlib.Path]:
+    try:
+        index = library.load()
+    except Exception:
+        index = {}
+
+    def key(p):
+        entry = index.get(p.stem)
+        if entry and entry.get("title"):
+            return entry["title"].lower()
+        return p.stem.lower()
+
+    return sorted(paths, key=key)
+
+
 def get_all_songs() -> list[pathlib.Path]:
     if not config.DOWNLOAD_DIR.exists():
         return []
-    return sorted(
-        [
-            p
-            for p in config.DOWNLOAD_DIR.rglob("*")
-            if p.suffix.lower() in AUDIO_EXTENSIONS
-        ]
-    )
+    paths = [
+        p
+        for p in config.DOWNLOAD_DIR.rglob("*")
+        if p.suffix.lower() in AUDIO_EXTENSIONS
+    ]
+    return _sorted_by_name(paths)
 
 
 def get_songs() -> list[pathlib.Path]:
@@ -43,7 +57,8 @@ def get_liked_songs() -> list[pathlib.Path]:
     liked = _liked_dir()
     if not liked.exists():
         return []
-    return sorted([p for p in liked.iterdir() if p.suffix.lower() in AUDIO_EXTENSIONS])
+    paths = [p for p in liked.iterdir() if p.suffix.lower() in AUDIO_EXTENSIONS]
+    return _sorted_by_name(paths)
 
 
 def like_song(song_path: pathlib.Path) -> pathlib.Path | None:

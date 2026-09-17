@@ -10,6 +10,8 @@ CONFIG_FILE = pathlib.Path.home() / ".flow/config.json"
 SIG_STOP = _signal.SIGUSR1
 SIG_NEXT = _signal.SIGUSR2
 SIG_PREV = _signal.SIGRTMIN + 2
+SIG_SEEK_FWD = _signal.SIGRTMIN + 3
+SIG_SEEK_BWD = _signal.SIGRTMIN + 4
 
 
 def merge_flags(extra: list[str], args) -> tuple[list[str], object]:
@@ -436,6 +438,23 @@ ImgSize = 6
 ImgColors = 1
 
 PID_FILE = pathlib.Path.home() / ".flow/vlc.pid"
+SEEK_FILE = pathlib.Path.home() / ".flow/seek.txt"
+
+
+def write_seek(delta_ms: int):
+    SEEK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    SEEK_FILE.write_text(str(int(delta_ms)))
+
+
+def read_seek() -> int:
+    try:
+        return int(SEEK_FILE.read_text().strip())
+    except (ValueError, OSError):
+        return 0
+
+
+def clear_seek():
+    SEEK_FILE.unlink(missing_ok=True)
 
 
 def save_pid(pid: int):
@@ -858,14 +877,14 @@ def _interactive_config():
 
     bar_width_v = (
         int(answers["bar_width"])
-        if answers["bar_width"].strip() and answers["display"] == "bars"
+        if answers["display"] == "bars" and answers["bar_width"].strip()
         else None
     )
     if bar_width_v is not None and 4 <= bar_width_v <= 80:
         print(_apply_bar_width(bar_width_v))
     bar_height_v = (
         int(answers["bar_height"])
-        if answers["bar_height"].strip() and answers["display"] == "bars"
+        if answers["display"] == "bars" and answers["bar_height"].strip()
         else None
     )
     if bar_height_v is not None and 10 <= bar_height_v <= 90:

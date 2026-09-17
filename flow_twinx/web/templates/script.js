@@ -2152,6 +2152,11 @@ function pollControls() {
       if (cmd === "next") nextTrack();
       else if (cmd === "previous") prevTrack();
       else if (cmd === "stop" && audio.src) togglePlay();
+      else if ((cmd === "seek" || cmd === "seekb") && audio.src) {
+        const d = Number(data.delta) || 0;
+        const end = audio.duration || audio.currentTime;
+        audio.currentTime = Math.max(0, Math.min(end, audio.currentTime + d));
+      }
     })
     .catch(() => {});
 }

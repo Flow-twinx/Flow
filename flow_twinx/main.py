@@ -71,11 +71,13 @@ def _web_alive(WEB_PID):
         return False
 
 
-def _send_web_command(port, command):
-    payload = json.dumps({"command": command}).encode()
+def _send_web_command(port, command, payload=None):
+    data = {"command": command}
+    if payload:
+        data.update(payload)
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}/api/control",
-        data=payload,
+        data=json.dumps(data).encode(),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
@@ -86,7 +88,7 @@ def _send_web_command(port, command):
         return False
 
 
-def _send_control(command, sig, label):
+def _send_control(command, sig, label, payload=None):
     WEB_PID = Path.home() / ".flow/web.pid"
     WEB_PORT = Path.home() / ".flow/web_port"
 
@@ -106,7 +108,7 @@ def _send_control(command, sig, label):
                 port = int(WEB_PORT.read_text().strip())
             except ValueError, OSError:
                 port = None
-        if port and _send_web_command(port, command):
+        if port and _send_web_command(port, command, payload):
             print(f"{P}{label} (web player){R}")
             return
 
@@ -254,6 +256,18 @@ def main():
         "--previous",
         action="store_true",
         help="play previous track (VLC or web player)",
+    )
+    parser.add_argument(
+        "--seek",
+        type=int,
+        metavar="SEC",
+        help="seek forward SEC seconds in the running player (VLC or web player)",
+    )
+    parser.add_argument(
+        "--seekb",
+        type=int,
+        metavar="SEC",
+        help="seek backward SEC seconds in the running player (VLC or web player)",
     )
     parser.add_argument(
         "--web", action="store_true", help="start web server with API and player UI"
@@ -475,14 +489,33 @@ def main():
 
     control_args = []
     if getattr(args, "stop", False):
-        control_args.append(("stop", signal.SIGUSR1, "Toggled stop/resume"))
+        control_args.append(("stop", signal.SIGUSR1, "Toggled stop/resume", None))
     if getattr(args, "next", False):
-        control_args.append(("next", signal.SIGUSR2, "Skipped to next track"))
+        control_args.append(("next", signal.SIGUSR2, "Skipped to next track", None))
     if getattr(args, "previous", False):
-        control_args.append(("previous", config.SIG_PREV, "Went to previous track"))
+        control_args.append(
+            ("previous", config.SIG_PREV, "Went to previous track", None)
+        )
+    if getattr(args, "seek", None) is not None:
+        control_args.append(
+            ("seek", config.SIG_SEEK_FWD, "Seeked forward", getattr(args, "seek"))
+        )
+    if getattr(args, "seekb", None) is not None:
+        control_args.append(
+            ("seekb", config.SIG_SEEK_BWD, "Seeked backward", -getattr(args, "seekb"))
+        )
     if control_args:
-        for command, sig, label in control_args:
-            _send_control(command, sig, label)
+        for command, sig, label, delta in control_args:
+            if delta is not None:
+                if config.read_pid() is not None:
+                    config.write_seek(delta * 1000)
+                label = f"{label} {abs(delta)}s"
+            _send_control(
+                command,
+                sig,
+                label,
+                payload={"delta": delta} if delta is not None else None,
+            )
         sys.exit(0)
 
     if getattr(args, "like", False):
