@@ -3,8 +3,7 @@ import pathlib
 
 import yt_dlp
 
-from backend import library, sponsor
-from backend import config
+from backend import config, library, sponsor
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +108,7 @@ def download_url(url, outdir, fmt=None):
                 filename = str(pathlib.Path(outdir) / f"{stem}.{fmt}")
     except Exception as exc:
         logger.warning("Download failed for %s: %s", url, exc)
+        config.down_notify(url, error=True)
         raise
     config.dev_print(
         "YouTube Download",
@@ -120,7 +120,13 @@ def download_url(url, outdir, fmt=None):
             "filesize": info.get("filesize") or info.get("filesize_approx"),
         },
     )
-    library.track_download(info.get("id"), filename, info.get("title", "Unknown"))
+    library.track_download(
+        info.get("id"),
+        filename,
+        info.get("title", "Unknown"),
+        meta=library.meta_from_info(info),
+    )
+    config.down_notify(info.get("title", "Unknown"))
     try:
         library.download_thumbnail(info.get("id"), info.get("thumbnail"))
     except Exception:

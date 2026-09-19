@@ -3,7 +3,6 @@ import os
 
 
 def _running_pid():
-    """Best-effort PID of a running Flow player (flowt TUI first, then VLC)."""
     from backend import config
 
     for getter, clearer in (
@@ -58,11 +57,6 @@ def main():
         description="Flow — terminal UI music player",
     )
     parser.add_argument(
-        "--status",
-        action="store_true",
-        help="show the playback status card and exit",
-    )
-    parser.add_argument(
         "--pause",
         action="store_true",
         help="toggle play/pause in a running Flow session (flowt or background VLC)",
@@ -102,7 +96,9 @@ def main():
         (args.repeat, config.SIG_REPEAT, "Repeat toggled", True),
         (args.shuffle, config.SIG_SHUFFLE, "Shuffle toggled", True),
     )
-    active = [(sig, label, require_tui) for flag, sig, label, require_tui in controls if flag]
+    active = [
+        (sig, label, require_tui) for flag, sig, label, require_tui in controls if flag
+    ]
     hard = args.pause or args.next or args.previous
 
     if active and _running_pid() is not None:
@@ -111,14 +107,11 @@ def main():
             ok, msg = _control(sig, label, require_tui=require_tui)
             print(msg)
             if require_tui and not ok:
-                # A plain VLC player is running — repeat/shuffle only apply to the TUI.
                 delivered = False
         if delivered:
             return
         if hard:
             return
-        # Only --repeat/--shuffle were requested and couldn't target a TUI:
-        # fall through and launch a new TUI with those modes enabled.
 
     if active and hard and _running_pid() is None:
         print("No running Flow player to control. Start `flowt` first.")

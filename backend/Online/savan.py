@@ -1,7 +1,7 @@
 import json
-import urllib.request
-import urllib.parse
 import urllib.error
+import urllib.parse
+import urllib.request
 
 from backend import config
 
@@ -14,7 +14,7 @@ def search(query, limit=10):
     try:
         with urllib.request.urlopen(url, timeout=15) as resp:
             data = json.loads(resp.read())
-    except (urllib.error.URLError, json.JSONDecodeError, OSError):
+    except urllib.error.URLError, json.JSONDecodeError, OSError:
         return []
     if not data.get("success"):
         return []
@@ -27,13 +27,16 @@ def search(query, limit=10):
         artist = primary[0]["name"] if primary else "Unknown"
         out.append((r, f"{name} - {artist}", dur))
     for entry, title, dur in out:
-        config.dev_print("Savan Search Result", {
-            "title": title,
-            "song_id": entry.get("id"),
-            "duration": f"{dur}s",
-            "album": entry.get("album", {}).get("name"),
-            "download_urls": len(entry.get("downloadUrl", [])),
-        })
+        config.dev_print(
+            "Savan Search Result",
+            {
+                "title": title,
+                "song_id": entry.get("id"),
+                "duration": f"{dur}s",
+                "album": entry.get("album", {}).get("name"),
+                "download_urls": len(entry.get("downloadUrl", [])),
+            },
+        )
     return out
 
 
@@ -62,14 +65,22 @@ def best_url(entry):
         if best:
             break
     url = best or dls[0]["url"]
-    config.dev_print("Savan Best URL", {
-        "title": entry.get("name", "Unknown"),
-        "selected_url": url[:80] + "..." if len(url) > 80 else url,
-        "available_qualities": [dl["quality"] for dl in dls],
-    })
+    config.dev_print(
+        "Savan Best URL",
+        {
+            "title": entry.get("name", "Unknown"),
+            "selected_url": url[:80] + "..." if len(url) > 80 else url,
+            "available_qualities": [dl["quality"] for dl in dls],
+        },
+    )
     return url
 
 
 def download(url, dest):
-    urllib.request.urlretrieve(url, dest)
+    try:
+        urllib.request.urlretrieve(url, dest)
+    except Exception as exc:
+        config.down_notify(url, error=True)
+        raise
+    config.down_notify(url)
     return dest

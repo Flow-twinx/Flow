@@ -8,6 +8,18 @@ from backend.config import _truncate_title
 LIBRARY_FILE = pathlib.Path.home() / ".flow/library.json"
 THUMB_CACHE = pathlib.Path.home() / ".flow/downloads/.cache"
 
+# Metadata fields once stored but no longer wanted; purged on every save.
+_REMOVED_META_KEYS = {
+    "track",
+    "uploader",
+    "channel",
+    "upload_date",
+    "release_date",
+    "view_count",
+    "like_count",
+    "url",
+}
+
 
 def load() -> dict:
     if not LIBRARY_FILE.exists():
@@ -16,15 +28,18 @@ def load() -> dict:
         data = json.loads(LIBRARY_FILE.read_text())
         if isinstance(data, dict):
             return data
-    except (json.JSONDecodeError, OSError):
+    except json.JSONDecodeError, OSError:
         pass
     return {}
 
 
 def save(library: dict):
     for entry in library.values():
-        if isinstance(entry, dict) and entry.get("title"):
-            entry["title"] = _truncate_title(entry["title"])
+        if isinstance(entry, dict):
+            if entry.get("title"):
+                entry["title"] = _truncate_title(entry["title"])
+            for key in _REMOVED_META_KEYS:
+                entry.pop(key, None)
     LIBRARY_FILE.parent.mkdir(parents=True, exist_ok=True)
     LIBRARY_FILE.write_text(json.dumps(library, indent=2))
 
@@ -64,9 +79,7 @@ def download_thumbnail(video_id: str, thumb_url: str = "") -> str | None:
             pass
     for url in candidates:
         try:
-            req = urllib.request.Request(
-                url, headers={"User-Agent": "Mozilla/5.0"}
-            )
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = resp.read()
             if not data:
@@ -130,9 +143,7 @@ def get_download_path(video_id: str) -> str | None:
 
 
 def get_downloaded_ids() -> list:
-    return sorted(
-        k for k, v in load().items() if v.get("downloaded") and v.get("song")
-    )
+    return sorted(k for k, v in load().items() if v.get("downloaded") and v.get("song"))
 
 
 def get_liked_ids() -> list:
@@ -221,7 +232,7 @@ def mark_unliked(video_id: str):
     save(library)
 
 
-def track_download(video_id: str, path: str, title: str = ""):
+def track_download(video_id: str, path: str, title: str = "", meta=None):
     if not video_id:
         return
     library = load()
@@ -232,7 +243,57 @@ def track_download(video_id: str, path: str, title: str = ""):
     entry["song"] = path
     if title and not entry.get("title"):
         entry["title"] = title
+    if meta:
+        for k, v in meta.items():
+            if v not in (None, ""):
+                entry[k] = v
     entry["thumbnail"] = thumbnail_path(video_id)
+    library[video_id] = entry
+    save(library)
+
+
+def meta_from_info(info: dict) -> dict:
+    """Best-effort metadata extraction from a yt-dlp info dict.
+
+    Only artist, album and duration are kept; anything else that was
+    previously stored is deliberately dropped (see _REMOVED_META_KEYS).
+    """
+    meta = {}
+    artist = info.get("artist")
+    if not artist:
+        artists = info.get("artists")
+        if (
+            isinstance(artists, list)
+            and artists
+            and all(isinstance(a, str) for a in artists)
+        ):
+            artist = ", ".join(artists)
+    if isinstance(artist, (list, tuple)):
+        artist = ", ".join(str(a) for a in artist if a) or None
+    if artist:
+        meta["artist"] = str(artist)
+    if info.get("album"):
+        meta["album"] = info.get("album")
+    duration = info.get("duration")
+    if duration:
+        try:
+            meta["duration"] = int(duration)
+        except (TypeError, ValueError):
+            pass
+    return meta
+
+
+def update_meta(video_id: str, meta: dict):
+    """Merge fetched/backfilled metadata into the library entry."""
+    if not video_id or not meta:
+        return
+    library = load()
+    entry = library.get(video_id)
+    if entry is None:
+        entry = _default_entry(video_id)
+    for k, v in meta.items():
+        if v not in (None, ""):
+            entry[k] = v
     library[video_id] = entry
     save(library)
 

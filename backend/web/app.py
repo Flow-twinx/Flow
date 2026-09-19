@@ -416,8 +416,15 @@ def _download_audio(video_id: str, save_dir: str, fmt: str):
             if attempt < DOWNLOAD_ATTEMPTS - 1:
                 time.sleep(2 * (attempt + 1))
             else:
+                config.down_notify(f"video {video_id}", error=True)
                 raise last_exc
-    library.track_download(video_id, filename, info.get("title", "Unknown"))
+    library.track_download(
+        video_id,
+        filename,
+        info.get("title", "Unknown"),
+        meta=library.meta_from_info(info),
+    )
+    config.down_notify(info.get("title", "Unknown"))
     try:
         library.download_thumbnail(video_id, info.get("thumbnail"))
     except Exception:

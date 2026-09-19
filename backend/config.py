@@ -4,6 +4,7 @@ import pathlib
 import re
 import shutil
 import signal as _signal
+import subprocess
 
 CONFIG_FILE = pathlib.Path.home() / ".flow/config.json"
 
@@ -304,9 +305,7 @@ def _load_config():
         SPONSOR_CATEGORIES, \
         DOWN_ON_LIKE, \
         MAX_SEARCH_RESULTS, \
-        MAX_RESULTS_RADIO, \
-        ImgSize, \
-        ImgColors
+        MAX_RESULTS_RADIO
     if not CONFIG_FILE.exists():
         return
     try:
@@ -379,18 +378,6 @@ def _load_config():
             and 1 <= data["max_radio"] <= 50
         ):
             MAX_RESULTS_RADIO = data["max_radio"]
-        if (
-            "img_size" in data
-            and isinstance(data["img_size"], int)
-            and 3 <= data["img_size"] <= 20
-        ):
-            ImgSize = data["img_size"]
-        if (
-            "img_colors" in data
-            and isinstance(data["img_colors"], int)
-            and 1 <= data["img_colors"] <= 3
-        ):
-            ImgColors = data["img_colors"]
     except json.JSONDecodeError, OSError:
         pass
 
@@ -415,8 +402,6 @@ def _save_config():
         "format": FORMAT,
         "max_search": MAX_SEARCH_RESULTS,
         "max_radio": MAX_RESULTS_RADIO,
-        "img_size": ImgSize,
-        "img_colors": ImgColors,
     }
     CONFIG_FILE.write_text(json.dumps(data, indent=2))
 
@@ -436,9 +421,6 @@ Mode = "Online"
 MAX_RESULTS_RADIO = 35
 MAX_SEARCH_RESULTS = 5
 
-ImgSize = 6
-ImgColors = 1
-
 PID_FILE = pathlib.Path.home() / ".flow/vlc.pid"
 SEEK_FILE = pathlib.Path.home() / ".flow/seek.txt"
 TUI_PID_FILE = pathlib.Path.home() / ".flow/tui.pid"
@@ -452,7 +434,7 @@ def write_seek(delta_ms: int):
 def read_seek() -> int:
     try:
         return int(SEEK_FILE.read_text().strip())
-    except (ValueError, OSError):
+    except ValueError, OSError:
         return 0
 
 
@@ -489,7 +471,7 @@ def read_tui_pid() -> int | None:
         return None
     try:
         return int(TUI_PID_FILE.read_text().strip())
-    except (ValueError, OSError):
+    except ValueError, OSError:
         return None
 
 
@@ -621,9 +603,7 @@ def _apply_int(attr, value, lo, hi, ok_msg):
         BarHeight, \
         BarSpacing, \
         MAX_SEARCH_RESULTS, \
-        MAX_RESULTS_RADIO, \
-        ImgSize, \
-        ImgColors
+        MAX_RESULTS_RADIO
     try:
         v = int(value)
     except ValueError:
@@ -651,9 +631,7 @@ def cmd_config(extra: list[str], args=None):
         AD_SKIP, \
         DOWN_ON_LIKE, \
         MAX_SEARCH_RESULTS, \
-        MAX_RESULTS_RADIO, \
-        ImgSize, \
-        ImgColors
+        MAX_RESULTS_RADIO
     if extra and (extra[0] in ("help", "-h")):
         print(f"{Tertiary}Available targets:{Reset}")
         print(f"  {Primary}primary{Reset}   (aliases: pri)")
@@ -679,12 +657,6 @@ def cmd_config(extra: list[str], args=None):
         )
         print(f"  {GREY}max_search{Reset} (1-20, current: {MAX_SEARCH_RESULTS})")
         print(f"  {GREY}max_radio{Reset}  (1-50, current: {MAX_RESULTS_RADIO})")
-        print(
-            f"  {GREY}img_size{Reset}   (3-20, status card image height in rows, current: {ImgSize})"
-        )
-        print(
-            f"  {GREY}img_colors{Reset} (1-3, number of colors+swatches shown, current: {ImgColors})"
-        )
         print(f"\n{Tertiary}Available colors:{Reset}")
         for name, code in _COLORS.items():
             print(f"  {code}{name}{Reset}")
@@ -760,15 +732,24 @@ def cmd_config(extra: list[str], args=None):
         )
     elif target in ("max_radio", "maxradio"):
         print(_apply_int("MAX_RESULTS_RADIO", value, 1, 50, "Max radio tracks changed"))
-    elif target in ("img_size", "imgsize"):
-        print(_apply_int("ImgSize", value, 3, 20, "Status image size changed"))
-    elif target in ("img_colors", "imgcolors"):
-        print(_apply_int("ImgColors", value, 1, 3, "Status color swatches changed"))
     else:
         aliases = ", ".join(f"{k}->{v}" for k, v in _TARGET_ALIASES.items())
         print(
             f"Unknown target '{target}'. Use: primary, sec, ter, display ({aliases}){Reset}"
         )
+
+
+def down_notify(song_name, error=False):
+    if error:
+        title = "Download Failed"
+        body = f"Error occurred during download: {song_name}"
+    else:
+        title = "Downloaded Song"
+        body = f"song: {song_name}"
+    try:
+        subprocess.run(["notify-send", title, body], check=False)
+    except OSError:
+        pass
 
 
 def _interactive_config():
@@ -896,18 +877,6 @@ def _interactive_config():
             "message": "Max radio tracks (1-50)",
             "default": str(MAX_RESULTS_RADIO),
         },
-        {
-            "type": "text",
-            "name": "img_size",
-            "message": "Status image size in rows (3-20)",
-            "default": str(ImgSize),
-        },
-        {
-            "type": "text",
-            "name": "img_colors",
-            "message": "Status image color swatches (1-3)",
-            "default": str(ImgColors),
-        },
     ]
 
     try:
@@ -963,14 +932,6 @@ def _interactive_config():
     print(
         _apply_int(
             "MAX_RESULTS_RADIO", answers["max_radio"], 1, 50, "Max radio tracks changed"
-        )
-    )
-    print(
-        _apply_int("ImgSize", answers["img_size"], 3, 20, "Status image size changed")
-    )
-    print(
-        _apply_int(
-            "ImgColors", answers["img_colors"], 1, 3, "Status color swatches changed"
         )
     )
     AD_SKIP = answers["ad_skip"]

@@ -23,12 +23,12 @@ dependencies = [
 ]
 
 [project.scripts]
-flow = "flow_twinx.main:main"
-flowt = "flow_twinx_tui:main"
+flow = "cli.main:main"
+flowt = "tui:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["flow_twinx*", "backend*"]
+include = ["cli*", "backend*"]
 
 [tool.setuptools.package-data]
 flow_twinx = ["Hyprland/*.qml"]

@@ -9,8 +9,7 @@ import termios
 import threading
 import time
 
-from backend import help_detail, library, playlist, plist_cli, shortcuts
-from backend import config
+from backend import config, help_detail, library, playlist, plist_cli, shortcuts
 from backend.config import merge_flags
 from backend.Offline import player as off_player
 from backend.Online import player, savan, youtube
@@ -116,7 +115,7 @@ def run(cmd: str, extra: list[str], args):
     if cmd == "play":
         play(extra, args)
     elif cmd == "search":
-        search(" ".join(extra) if extra else "")
+        search(" ".join(extra) if extra else "", args)
     elif cmd in ("savan", "svn"):
         savan_cmd(extra, args)
     elif cmd in ("savan-s", "svn-s"):
@@ -126,7 +125,7 @@ def run(cmd: str, extra: list[str], args):
     elif cmd == "unlike":
         unlike_track()
     elif cmd == "download":
-        download(extra)
+        download(extra, args)
     elif cmd in ("delete", "dl-d"):
         delete_download(extra)
     elif cmd == "switch":
@@ -204,9 +203,26 @@ def _style():
     return questionary_style()
 
 
-def _select_result(query, allow_skip):
+def _active_flags(args):
+    if args is None:
+        return ""
+    parts = []
+    if getattr(args, "download", False):
+        parts.append("download=true")
+    if getattr(args, "shuffle", False):
+        parts.append("shuffle=true")
+    if getattr(args, "repeat", False):
+        count = getattr(args, "repeat_count", 0) or 0
+        parts.append("repeat=true" if count <= 0 else f"repeat=true(x{count})")
+    if getattr(args, "bg", False):
+        parts.append("bg=true")
+    return " ".join(parts)
+
+
+def _select_result(query, allow_skip, args=None):
     global _last_results
     limit = len(_last_results)
+    flags = _active_flags(args)
     try:
         import questionary
     except ImportError:
@@ -224,12 +240,15 @@ def _select_result(query, allow_skip):
                     )
                 more_label = "↻ Load more results"
                 choices.append(questionary.Choice(title=more_label, value="more"))
+                instruction = "(↑↓ navigate, Enter to play)"
+                if flags:
+                    instruction = f"{flags} | {instruction}"
                 try:
                     choice = questionary.select(
                         "Play which track?",
                         choices=choices,
                         default=0,
-                        instruction="(↑↓ navigate, Enter to play, Esc to cancel)",
+                        instruction=instruction,
                         style=_style(),
                     ).ask()
                 except KeyboardInterrupt, EOFError:
@@ -255,7 +274,10 @@ def _select_result(query, allow_skip):
     while True:
         _print_results(_last_results)
         hint = "m for more" + (", Enter to skip" if allow_skip else ", default 1")
-        prompt = f"Play which track? [1-{len(_last_results)}, {hint}] "
+        if flags:
+            prompt = f"Play which track? [{flags}] [1-{len(_last_results)}, {hint}] "
+        else:
+            prompt = f"Play which track? [1-{len(_last_results)}, {hint}] "
         try:
             choice = input(f"{P}{prompt}{R}").strip().lower()
         except EOFError, KeyboardInterrupt:
@@ -280,14 +302,14 @@ def _select_result(query, allow_skip):
         e("    Invalid choice")
 
 
-def _pick_result(query, allow_skip):
-    return _select_result(query, allow_skip)
+def _pick_result(query, allow_skip, args=None):
+    return _select_result(query, allow_skip, args)
 
 
-def _choose_result(query, results):
+def _choose_result(query, results, args=None):
     if len(results) == 1:
         return 0
-    return _pick_result(query, allow_skip=False)
+    return _pick_result(query, allow_skip=False, args=args)
 
 
 def play(extra: list[str], args):
@@ -300,7 +322,7 @@ def play(extra: list[str], args):
         return
 
     if getattr(args, "download", False):
-        download(extra)
+        download(extra, args)
 
     if arg == "liked":
         _play_liked(args)
@@ -366,7 +388,7 @@ def play(extra: list[str], args):
         except KeyboardInterrupt:
             pass
     else:
-        idx = _choose_result(arg, _last_results)
+        idx = _choose_result(arg, _last_results, args)
         if idx is None:
             return
         entry, title, _ = _last_results[idx]
@@ -744,7 +766,7 @@ def _unlike_current(title, thumb):
         m(f"    Not liked: {_truncate_title(title)}")
 
 
-def search(query: str):
+def search(query: str, args=None):
     global _last_results, _last_played
     if not query:
         print("Search query required")
@@ -753,13 +775,34 @@ def search(query: str):
     if not _last_results:
         print("No results found")
         return
-    idx = _pick_result(query, allow_skip=True)
+    idx = _pick_result(query, allow_skip=True, args=args)
     if idx is None:
         return
     entry, title, _ = _last_results[idx]
+
+    if args is not None and getattr(args, "download", False):
+        download([str(idx + 1)], args)
+        return
+
     entry = _resolve_entry(entry)
     _last_played = (entry, title)
-    player.play_entry(entry, title, None)
+    if args is not None and getattr(args, "bg", False):
+        if not _fork_bg("Now playing"):
+            return
+    repeat = getattr(args, "repeat", False) if args is not None else False
+    if repeat:
+        repeat_count = getattr(args, "repeat_count", 0) if args is not None else 0
+        iteration = 0
+        try:
+            while True:
+                player.play_entry(entry, title, args)
+                iteration += 1
+                if repeat_count > 0 and iteration >= repeat_count:
+                    break
+        except KeyboardInterrupt:
+            pass
+    else:
+        player.play_entry(entry, title, args)
 
 
 _truncate_title = config._truncate_title
@@ -1020,7 +1063,7 @@ def radio(extra, args):
         signal.signal(signal.SIGUSR1, old_sigusr1)
 
 
-def download(extra: list[str]):
+def download(extra: list[str], args=None):
     global _last_results
     fmt = None
     if "-f" in extra:
@@ -1062,7 +1105,7 @@ def download(extra: list[str]):
         if not _last_results:
             e("     No results found")
             return
-        idx = _choose_result(arg, _last_results)
+        idx = _choose_result(arg, _last_results, args)
         if idx is None:
             return
         entry, _, _ = _last_results[idx]
@@ -1099,6 +1142,66 @@ def download(extra: list[str]):
         i(f"    Downloaded and converted to {fmt}: {_truncate_title(title)}")
     else:
         i(f"    Downloaded: {_truncate_title(title)}")
+
+
+def backfill_metadata():
+    """TEMP (--meta): pull metadata for already-downloaded songs into library.json.
+
+    Saves after every song (update_meta writes library.json immediately), so a
+    YouTube block mid-run never loses what's already fetched. Songs that
+    already have metadata are skipped on re-runs, so you can restart after a
+    block instead of re-fetching all 84. One self-contained function so it's
+    easy to delete later.
+    """
+    ids = library.get_downloaded_ids()
+    if not ids:
+        e("     No downloaded songs in the library")
+        return 1
+    import yt_dlp
+
+    i(f"    Fetching metadata for {len(ids)} downloaded songs...")
+    updated = 0
+    skipped = 0
+    failed = 0
+    for pos, video_id in enumerate(ids, 1):
+        tag = f"[{pos}/{len(ids)}] {video_id}"
+        existing = library.get(video_id) or {}
+        if existing.get("artist") or existing.get("duration"):
+            skipped += 1
+            continue
+        try:
+            with yt_dlp.YoutubeDL(youtube.ydl_opts_play) as ydl:
+                info = ydl.extract_info(
+                    f"https://www.youtube.com/watch?v={video_id}", download=False
+                )
+        except Exception as exc:
+            failed += 1
+            m(f"    {tag}: failed ({exc})")
+            continue
+        if not info:
+            failed += 1
+            m(f"    {tag}: no metadata returned")
+            continue
+        meta = library.meta_from_info(info)
+        meta["title"] = info.get("title", "")
+        library.update_meta(video_id, meta)  # saves library.json right here
+        updated += 1
+        label = meta.get("title") or video_id
+        artist = meta.get("artist") or ""
+        album = f" [{meta['album']}]" if meta.get("album") else ""
+        dur = meta.get("duration")
+        dur_s = f" ({dur // 60}:{dur % 60:02d})" if dur else ""
+        i(
+            f"    {tag}: {_truncate_title(label)}{dur_s}{album}"
+            + (f" — {artist}" if artist else "")
+        )
+    tail = (
+        f" ({skipped} already done, {failed} failed)"
+        if skipped or failed
+        else ""
+    )
+    print(f"\n{P}Backfilled metadata for {updated}/{len(ids)} songs{R}{tail}")
+    return 0
 
 
 _AUDIO_EXTS = {

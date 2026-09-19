@@ -144,8 +144,6 @@ def _online_help():
             f"  {M}format{R}     {G}Default download format (opus, m4a, mp3, webm){R}",
             f"  {M}max_search{R} {G}Max YouTube search results (1-20, current: {M}{config.MAX_SEARCH_RESULTS}{G}){R}",
             f"  {M}max_radio{R}  {G}Max radio tracks (1-50, current: {M}{config.MAX_RESULTS_RADIO}{G}){R}",
-            f"  {M}img_size{R}   {G}Status card image height in rows (3-20, current: {M}{config.ImgSize}{G}){R}",
-            f"  {M}img_colors{R} {G}Color swatches shown in status (1-3, current: {M}{config.ImgColors}{G}){R}",
         ],
         "check": [
             f"{T}> check{R}",
@@ -309,8 +307,6 @@ def _offline_help():
             f"  {B}format{R}     {G}Default download format (opus, m4a, mp3, webm){R}",
             f"  {B}max_search{R} {G}Max YouTube search results (1-20, current: {B}{config.MAX_SEARCH_RESULTS}{G}){R}",
             f"  {B}max_radio{R}  {G}Max radio tracks (1-50, current: {B}{config.MAX_RESULTS_RADIO}{G}){R}",
-            f"  {B}img_size{R}   {G}Status card image height in rows (3-20, current: {B}{config.ImgSize}{G}){R}",
-            f"  {B}img_colors{R} {G}Color swatches shown in status (1-3, current: {B}{config.ImgColors}{G}){R}",
         ],
         "check": [
             f"{T}> check{R}",

@@ -9,12 +9,11 @@ import termios
 import threading
 import time
 
-from backend import help_detail, library, playlist, plist_cli, shortcuts
-from backend import config
-from backend.ping import is_connected
+from backend import config, help_detail, library, playlist, plist_cli, shortcuts
 from backend.config import merge_flags
 from backend.Offline import file as lib
 from backend.Offline import player
+from backend.ping import is_connected
 
 P = config.Primary
 S = config.Secondary
@@ -183,7 +182,7 @@ def _pick_index(results):
         "Play which track?",
         choices,
         default=0,
-        instruction="(↑↓ navigate, Enter to play, Esc to cancel)",
+        instruction="(↑↓ navigate, Enter to play)",
     )
     if used:
         return choice
@@ -260,7 +259,7 @@ def _select_song():
         "Play which song?",
         choices,
         default=0,
-        instruction="(↑↓ navigate, Enter to play, Esc to cancel)",
+        instruction="(↑↓ navigate, Enter to play)",
     )
     if used:
         return choice

@@ -18,11 +18,13 @@ if __name__ == "__main__" and __package__ is None:
 
 import warnings
 
-from backend import shortcuts
+from backend import config, shortcuts
 from backend.Offline import commands as _offline_commands
 from backend.Online import commands as _online_commands
+from backend.ping import is_connected
 
-from .imports import config, is_connected, show_banner, tui_input
+from .tui import input as tui_input
+from .tui import show_banner
 
 _COMMAND_MODULES = {
     "Online": _online_commands,
@@ -151,9 +153,9 @@ def _check_vlc():
 
 
 def _setup_island():
-    src = Path(__file__).resolve().parent / "Hyprland" / "island.qml"
+    src = Path(__file__).resolve().parent.parent / "backend" / "Hyprland" / "island.qml"
     dest_dir = Path.home() / ".config" / "quickshell"
-    dest = dest_dir / "island.qml"
+    dest = dest_dir / "flow-island.qml"
     if not src.exists():
         print(f"{config.RED}island.qml not found in this installation ({src}){R}")
         sys.exit(1)
@@ -302,6 +304,11 @@ def main():
         "--download",
         action="store_true",
         help="download the currently playing song (requires an active player)",
+    )
+    parser.add_argument(
+        "--meta",
+        action="store_true",
+        help="backfill metadata in library.json for already downloaded songs (temporary)",
     )
     parser.add_argument(
         "--setup-island",
@@ -526,6 +533,8 @@ def main():
         sys.exit(_act_current("unlike"))
     if getattr(args, "download", False):
         sys.exit(_act_current("download"))
+    if getattr(args, "meta", False):
+        sys.exit(_online_commands.backfill_metadata())
 
     forced_offline = False
     if getattr(args, "resume", False):
@@ -625,7 +634,7 @@ def main():
                     print(f"{M}Goodbye!{R}")
                     break
                 cmd_args = argparse.Namespace(**vars(args))
-                for flag in ("bg", "repeat", "shuffle"):
+                for flag in ("bg", "download", "repeat", "shuffle"):
                     setattr(cmd_args, flag, False)
                 cmd_args.repeat_count = 0
                 try:
