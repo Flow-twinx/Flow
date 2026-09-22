@@ -1,28 +1,3 @@
-"""backend/mpris.py — org.mpris.MediaPlayer2.flow on the D-Bus session bus.
-
-Registers flow as a standard MPRIS media player so media keys, playerctl,
-GNOME/KDE media widgets, etc. work against the running player. Exposes:
-
-  * metadata  -> xesam:title / xesam:artist / xesam:album, mpris:length,
-                 mpris:artUrl, mpris:trackid
-  * state     -> PlaybackStatus (Playing/Paused/Stopped) and Position
-  * controls  -> Play / Pause / PlayPause / Stop / Next / Previous
-
-Two interchangeable backends sit behind a tiny facade:
-
-  * _GlibBackend — dbus-python + PyGObject (preferred; the classic service
-                   runs a GLib mainloop in a background thread)
-  * _FastBackend — pure-Python dbus-fast (fallback; asyncio mainloop thread)
-
-If neither library imports, the facade degrades to a no-op stub and flow
-keeps working entirely without D-Bus.
-
-The playback hosts (Online/Offline players and the TUI) call this module from
-their own threads; metadata/status updates are marshalled onto the D-Bus
-mainloop thread. MPRIS control methods act through the exact same signals the
-shell uses (config.SIG_*), so they work identically for every playback host.
-"""
-
 from __future__ import annotations
 
 import os
@@ -41,8 +16,8 @@ PAUSED = "Paused"
 STOPPED = "Stopped"
 
 BACKEND_LOCK = threading.Lock()
-_bg = None  # lazily selected backend instance
-_pending = []  # deferred calls while the backend once boots
+_bg = None
+_pending = []
 _pending_lock = threading.Lock()
 _once_wait_done = False
 
@@ -81,6 +56,7 @@ def _start_flusher():
                 pass
 
     threading.Thread(target=_loop, daemon=True, name="mpris-flush").start()
+
 
 try:
     import dbus  # noqa: F401
@@ -155,16 +131,16 @@ if _DBUS_OK:
             self.available = False
 
         def start(self):
-            threading.Thread(
-                target=self._run, daemon=True, name="mpris-glib"
-            ).start()
+            threading.Thread(target=self._run, daemon=True, name="mpris-glib").start()
 
         def _run(self):
             try:
                 dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
                 bus = dbus.SessionBus()
                 try:
-                    bus_name = dbus.service.BusName(BUS_NAME, bus=bus, do_not_queue=True)
+                    bus_name = dbus.service.BusName(
+                        BUS_NAME, bus=bus, do_not_queue=True
+                    )
                 except dbus.exceptions.NameExistsException:
                     self.error = f"{BUS_NAME} already owned"
                     return
@@ -481,9 +457,7 @@ if _FAST_OK:
             art = str(art_path or "")
             self._metadata = {
                 "mpris:trackid": dbus_fast.Variant("o", _next_trackid()),
-                "mpris:length": dbus_fast.Variant(
-                    "x", int(duration or 0) * 1_000_000
-                ),
+                "mpris:length": dbus_fast.Variant("x", int(duration or 0) * 1_000_000),
                 "mpris:artUrl": dbus_fast.Variant("s", f"file://{art}" if art else ""),
                 "xesam:title": dbus_fast.Variant("s", title),
                 "xesam:artist": dbus_fast.Variant("as", [artist] if artist else []),
@@ -630,9 +604,7 @@ if _FAST_OK:
             self.available = False
 
         def start(self):
-            threading.Thread(
-                target=self._run, daemon=True, name="mpris-fast"
-            ).start()
+            threading.Thread(target=self._run, daemon=True, name="mpris-fast").start()
 
         def _run(self):
             import asyncio

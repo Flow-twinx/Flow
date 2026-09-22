@@ -191,6 +191,11 @@ running TUI. Its pid is tracked in `~/.flow/tui.pid`.
 | `radio <name> [#]`     | Radio mix (online) or shuffle-loop library (offline) |
 | `playlist <sub>`       | Manage playlists (create/add/remove/play)            |
 | `export`               | Backup ~/.flow config to ~/Downloads                 |
+| `plugins list`         | List available plugins (fast, offline)               |
+| `install <ref>`        | Install a plugin: `name`, `owner/name`, or git URL   |
+| `run <name>`           | Run an installed plugin                              |
+| `uninstall <name>`     | Remove an installed plugin                           |
+| `plugins update`       | Pull latest plugin repo and show available updates   |
 | `switch`               | Toggle between online and offline mode               |
 | `help`                 | Show available commands                              |
 | `help -i`              | Show available commands with detailed explanation    |
@@ -216,6 +221,31 @@ Usage: `config <target> <value>`
 - Thumbnails are downloaded on like/download to `~/.flow/downloads/.cache/<video_id>.jpg`
 - User shortcuts are stored in `~/.flow/shortcuts.json`
 - Config file: `~/.flow/config.json`
+- Downloaded plugins live in `~/.flow/plugins/`
+
+## Plugins
+
+Flow can install and run plugins from git repositories. Plugins are small
+packages that live in `~/.flow/plugins/<name>/` and are run as **external
+processes** — a plugin can only read the current-track status and invoke the
+`flow` CLI itself, so Flow internals stay isolated.
+
+```bash
+flow plugins list
+flow install thumbnail-circle
+flow install Twinx015/harpy
+flow install <git-url>
+flow run thumbnail-circle
+flow uninstall thumbnail-circle
+flow plugins update            # pull latest repos + show available updates
+```
+
+- `flow install <name> --force` reinstalls an already-installed plugin.
+- A plugin's dependencies are printed at install time (e.g. `pip install pyside6`).
+- The bundled `~/.flow/plugins/<name>/flow_api.py` is the entire API surface:
+  `current_track()` (read `~/.flow/status.json`) and `control("--pause", ...)`
+  (run a `flow` CLI command).
+- The community plugin repo is https://github.com/Twinx015/flow-plugins.
 
 ## License
 

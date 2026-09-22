@@ -201,7 +201,17 @@ def _act_current(action):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Flow Music Player")
+    parser = argparse.ArgumentParser(
+        description="Flow Music Player",
+        epilog=(
+            "Plugin commands:\n"
+            "  flow install <ref>       install a plugin (name | owner/name | git URL)\n"
+            "  flow plugins list        list available plugins\n"
+            "  flow run <name> [args]   run an installed plugin\n"
+            "  flow uninstall <name>    remove an installed plugin\n"
+            "  flow plugins update      update the plugin repos"
+        ),
+    )
     parser.add_argument("--play", nargs="+", help="play a song")
     parser.add_argument(
         "--play-off", nargs="+", help="play a song from the local library (offline)"
@@ -280,6 +290,12 @@ def main():
     if getattr(args, "setup_island", False):
         _setup_island()
         sys.exit(0)
+
+    # --- plugin commands (global; work without VLC / mode detection) ---
+    if args.command in ("plugins", "install", "uninstall", "remove", "run", "update"):
+        from backend import plugins
+
+        sys.exit(plugins.dispatch(args.command, unknown, args))
 
     _check_vlc()
 
@@ -437,6 +453,10 @@ def main():
                 for flag in ("bg", "download", "repeat", "shuffle"):
                     setattr(cmd_args, flag, False)
                 cmd_args.repeat_count = 0
+                from backend import plugins
+
+                if plugins.dispatch(cmd, extra, cmd_args) is not None:
+                    continue
                 try:
                     commands.run(cmd, extra, cmd_args)
                 except KeyboardInterrupt:

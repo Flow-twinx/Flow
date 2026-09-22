@@ -187,6 +187,14 @@ def _online_help():
             f"{G}  Picks online/offline automatically from the thumbnail path.{R}",
             f"{G}  Use from shell: {M}flow --resume{R}",
         ],
+        "plugins": [
+            f"{T}> plugins{R} {M}list{R} | {M}install{R} {M}<ref>{R} | {M}uninstall{R} {M}<name>{R} | {M}run{R} {M}<name>{R} | {M}update{R}",
+            f"{G}  Install and run Flow plugins (packages from git repos).{R}",
+            f"{G}  Shell:{R} {M}flow install <ref>{R} | {M}flow run <name>{R} | {M}flow plugins list{R}",
+            f"  {M}<ref>{R}     {G}name | owner/name | full git URL{R}",
+            f"  {M}--force{R}   {G}Reinstall a plugin that is already installed{R}",
+            f"{G}  Installed plugins live in {M}~/.flow/plugins/<name>/{R}",
+        ],
     }
 
 
@@ -327,6 +335,14 @@ def _offline_help():
             f"{G}  Replay the last played track listed in {B}~/.flow/status.json{R}",
             f"{G}  Picks online/offline automatically from the thumbnail path.{R}",
             f"{G}  Use from shell: {B}flow --resume{R}",
+        ],
+        "plugins": [
+            f"{T}> plugins{R} {B}list{R} | {B}install{R} {B}<ref>{R} | {B}uninstall{R} {B}<name>{R} | {B}run{R} {B}<name>{R} | {B}update{R}",
+            f"{G}  Install and run Flow plugins (packages from git repos).{R}",
+            f"{G}  Shell:{R} {B}flow install <ref>{R} | {B}flow run <name>{R} | {B}flow plugins list{R}",
+            f"  {B}<ref>{R}     {G}name | owner/name | full git URL{R}",
+            f"  {B}--force{R}   {G}Reinstall a plugin that is already installed{R}",
+            f"{G}  Installed plugins live in {B}~/.flow/plugins/<name>/{R}",
         ],
     }
 

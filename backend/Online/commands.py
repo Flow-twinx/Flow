@@ -1536,4 +1536,5 @@ def show_help(inf=False):
         print(f"{T}Online Commands:{R}")
         for cmd, desc in COMMANDS.items():
             print(f"  {T}{cmd:12s}{R} {G}{desc}{R}")
+        print(f"  {T}plugins{R} {G}install/list/run/update Flow plugins | flow plugins list{R}")
         print(f"{G}  Use 'help -i' for detailed usage{R}")
