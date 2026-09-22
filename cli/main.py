@@ -440,7 +440,7 @@ def main():
                 try:
                     commands.run(cmd, extra, cmd_args)
                 except KeyboardInterrupt:
-                    pass
+                    config.clear_pid_if(os.getpid())
                 if getattr(cmd_args, "bg", False):
                     break
                 if cmd == "switch":

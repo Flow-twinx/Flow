@@ -403,10 +403,14 @@ def play_url(
             _display_loop(_player, title, args=args)
         except KeyboardInterrupt:
             _player.stop()
+            config.clear_pid()
+            status.update(title, duration, playing=False, thumbnail=thumbnail)
             sys.stdout.write("\n")
             sys.stdout.flush()
             raise
         finally:
+            config.clear_pid()
+            status.update(title, duration, playing=False, thumbnail=thumbnail)
             _restore_pause_input()
     finally:
         _restore_pause_input()
@@ -528,10 +532,15 @@ def play_entry(entry, title, args=None, flags=None, next_title=None, nav=None):
             )
         except KeyboardInterrupt:
             _player.stop()
+            config.clear_pid()
+            status.update(title, duration, playing=False, thumbnail=thumb)
             sys.stdout.write("\n")
             sys.stdout.flush()
             raise
     finally:
+        if _stop_req or (next_title is None and not (_next_req or _prev_req)):
+            config.clear_pid()
+            status.update(title, duration, playing=False, thumbnail=thumb)
         if skip_thread:
             skip_thread.stop()
         _restore_pause_input()
