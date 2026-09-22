@@ -1,5 +1,4 @@
 import argparse
-import builtins
 import json
 import os
 import shutil
@@ -15,8 +14,6 @@ import psutil
 if __name__ == "__main__" and __package__ is None:
     __package__ = "flow_twinx"
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-import warnings
 
 from backend import config, shortcuts
 from backend.Offline import commands as _offline_commands
@@ -38,30 +35,6 @@ M = config.Muted
 R = config.Reset
 
 SHELL_AUTO_BG = {"radio", "savan"}
-
-
-def kill_port(port):
-    for conn in psutil.net_connections(kind="inet"):
-        if conn.laddr and conn.laddr.port == port:
-            try:
-                proc = psutil.Process(conn.pid)
-                proc.kill()
-                return True
-            except psutil.NoSuchProcess, psutil.AccessDenied:
-                return False
-    return False
-
-
-def _run_web(port):
-    from backend.web.app import app
-
-    WEB_PID = Path.home() / ".flow/web.pid"
-    WEB_PORT = Path.home() / ".flow/web_port"
-    try:
-        app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False)
-    finally:
-        WEB_PID.unlink(missing_ok=True)
-        WEB_PORT.unlink(missing_ok=True)
 
 
 def _web_alive(WEB_PID):
@@ -272,22 +245,6 @@ def main():
         help="seek backward SEC seconds in the running player (VLC or web player)",
     )
     parser.add_argument(
-        "--web", action="store_true", help="start web server with API and player UI"
-    )
-    parser.add_argument(
-        "--web-stop", action="store_true", help="stop running web server"
-    )
-    parser.add_argument(
-        "--web-new",
-        action="store_true",
-        help="start web server on next available port without prompting",
-    )
-    parser.add_argument(
-        "--stop-all",
-        action="store_true",
-        help="stop all background processes (VLC + web server)",
-    )
-    parser.add_argument(
         "--status", action="store_true", help="show playback and web mode status"
     )
     parser.add_argument(
@@ -305,27 +262,18 @@ def main():
         action="store_true",
         help="download the currently playing song (requires an active player)",
     )
-    parser.add_argument(
-        "--meta",
-        action="store_true",
-        help="backfill metadata in library.json for already downloaded songs (temporary)",
-    )
+    # parser.add_argument(
+    #     "--meta",
+    #     action="store_true",
+    #     help="backfill metadata in library.json for already downloaded songs (temporary)",
+    # )
     parser.add_argument(
         "--setup-island",
         action="store_true",
         help="install the Hyprland music island into ~/.config/quickshell",
     )
-    parser.add_argument(
-        "command", nargs="?", default=None, help="subcommand (play, search, list, ...)"
-    )
+    parser.add_argument("command", nargs="?", default=None, help="subcommand (play, search, list, ...)")
     parser.add_argument("--check", action="store_true", help="check all dependencies")
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=None,
-        metavar="PORT",
-        help="run web server on a specific port",
-    )
 
     args, unknown = parser.parse_known_args()
 
@@ -340,152 +288,6 @@ def main():
         config.check_deps()
         sys.exit(0)
 
-    WEB_PID = Path.home() / ".flow/web.pid"
-    WEB_PORT = Path.home() / ".flow/web_port"
-
-    if getattr(args, "stop_all", False):
-        stopped = []
-        if config.kill_stored():
-            stopped.append("VLC")
-        if WEB_PID.exists():
-            try:
-                pid = int(WEB_PID.read_text().strip())
-                port = int(WEB_PORT.read_text().strip()) if WEB_PORT.exists() else 5000
-                kill_port(port)
-                stopped.append(f"web server (PID: {pid})")
-            except ProcessLookupError, ValueError, OSError:
-                stopped.append("web server (zombie, cleaned up)")
-            WEB_PID.unlink(missing_ok=True)
-            WEB_PORT.unlink(missing_ok=True)
-        if stopped:
-            print(f"{P}Stopped: {', '.join(stopped)}{R}")
-        else:
-            print(f"{M}No background processes running{R}")
-        sys.exit(0)
-
-    if getattr(args, "web_stop", False):
-        if WEB_PID.exists():
-            try:
-                pid = int(WEB_PID.read_text().strip())
-                port = int(WEB_PORT.read_text().strip()) if WEB_PORT.exists() else 5000
-                kill_port(port)
-                print(f"{P}Stopped web server (PID: {pid}){R}")
-            except ProcessLookupError, ValueError:
-                print(f"{M}Web server not running{R}")
-            WEB_PID.unlink(missing_ok=True)
-            WEB_PORT.unlink(missing_ok=True)
-        else:
-            print(f"{M}Web server not running{R}")
-        sys.exit(0)
-
-    if getattr(args, "web", False) or getattr(args, "web_new", False):
-        WEB_PID.parent.mkdir(parents=True, exist_ok=True)
-
-        if getattr(args, "web", False):
-            existing_pid = None
-            existing_port = None
-            if WEB_PID.exists():
-                try:
-                    existing_pid = int(WEB_PID.read_text().strip())
-                    existing_port = (
-                        int(WEB_PORT.read_text().strip()) if WEB_PORT.exists() else None
-                    )
-                except ValueError, OSError:
-                    pass
-
-            existing_alive = False
-            if existing_pid is not None:
-                try:
-                    proc = psutil.Process(existing_pid)
-                    existing_alive = proc.is_running()
-                except psutil.NoSuchProcess:
-                    pass
-
-            if existing_alive:
-                port_str = f" on port {existing_port}" if existing_port else ""
-                answer = builtins.input(
-                    f"{P}A web server is already running{port_str}. "
-                    f"Kill it and restart? (y/N) {R}"
-                )
-                if answer.lower() not in ("y", "yes"):
-                    print(f"{M}Aborted.{R}")
-                    print(f"{M}Use -new to start a new server.{R}")
-                    sys.exit(0)
-                if existing_port:
-                    kill_port(existing_port)
-                    for _ in range(10):
-                        if not any(
-                            c.laddr and c.laddr.port == existing_port
-                            for c in psutil.net_connections(kind="inet")
-                        ):
-                            break
-                        time.sleep(0.2)
-                else:
-                    try:
-                        os.kill(existing_pid, signal.SIGTERM)
-                    except ProcessLookupError:
-                        pass
-                WEB_PID.unlink(missing_ok=True)
-                WEB_PORT.unlink(missing_ok=True)
-
-        port = None
-        for p in range(5000, 5006):
-            if not any(
-                c.laddr and c.laddr.port == p
-                for c in psutil.net_connections(kind="inet")
-            ):
-                port = p
-                break
-        if port is None:
-            print(
-                f"{M}All ports 5000-5005 are busy. Pls free your port to use flow web.{R}"
-            )
-            sys.exit(1)
-
-        if not config.DEV_MODE:
-            warnings.filterwarnings(
-                "ignore", category=DeprecationWarning, message=".*fork.*"
-            )
-            pid = os.fork()
-            if pid > 0:
-                WEB_PID.write_text(str(pid))
-                WEB_PORT.write_text(str(port))
-                print(f"{P}Flow web server → http://127.0.0.1:{port}{R}")
-                return
-            devnull = os.open(os.devnull, os.O_RDWR)
-            os.dup2(devnull, 1)
-            os.dup2(devnull, 2)
-            _run_web(port)
-        else:
-            WEB_PID.write_text(str(os.getpid()))
-            WEB_PORT.write_text(str(port))
-            print(f"{P}Flow web server → http://127.0.0.1:{port} (dev){R}")
-            _run_web(port)
-        return
-
-    if getattr(args, "port", None) is not None:
-        port = args.port
-        WEB_PID.parent.mkdir(parents=True, exist_ok=True)
-        if not config.DEV_MODE:
-            warnings.filterwarnings(
-                "ignore", category=DeprecationWarning, message=".*fork.*"
-            )
-            pid = os.fork()
-            if pid > 0:
-                WEB_PID.write_text(str(pid))
-                WEB_PORT.write_text(str(port))
-                print(f"{P}Flow web server → http://127.0.0.1:{port}{R}")
-                return
-            devnull = os.open(os.devnull, os.O_RDWR)
-            os.dup2(devnull, 1)
-            os.dup2(devnull, 2)
-            _run_web(port)
-        else:
-            WEB_PID.write_text(str(os.getpid()))
-            WEB_PORT.write_text(str(port))
-            print(f"{P}Flow web server → http://127.0.0.1:{port} (dev){R}")
-            _run_web(port)
-        return
     if getattr(args, "status", False):
         from backend.status import show as show_status
 
@@ -495,8 +297,6 @@ def main():
     shortcuts.load()
 
     control_args = []
-    if getattr(args, "stop", False):
-        control_args.append(("stop", signal.SIGUSR1, "Toggled stop/resume", None))
     if getattr(args, "pause", False):
         control_args.append(("stop", signal.SIGUSR1, "Toggled pause/resume", None))
     if getattr(args, "next", False):
@@ -533,8 +333,8 @@ def main():
         sys.exit(_act_current("unlike"))
     if getattr(args, "download", False):
         sys.exit(_act_current("download"))
-    if getattr(args, "meta", False):
-        sys.exit(_online_commands.backfill_metadata())
+    # if getattr(args, "meta", False):
+    #     sys.exit(_online_commands.backfill_metadata())
 
     forced_offline = False
     if getattr(args, "resume", False):

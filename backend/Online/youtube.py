@@ -61,6 +61,8 @@ def search(query, limit=3):
         return []
     results = []
     for entry in info["entries"]:
+        if not entry:
+            continue
         title = entry.get("title", "Unknown")
         dur = entry.get("duration", 0)
         results.append((entry, title, dur))
@@ -143,7 +145,10 @@ def fetch_radio(query, max_results=30):
         return []
     if not info or not info.get("entries"):
         return []
-    video_id = info["entries"][0].get("id")
+    seed = info["entries"][0]
+    if not seed:
+        return []
+    video_id = seed.get("id")
     if not video_id:
         return []
 
@@ -165,6 +170,8 @@ def fetch_radio(query, max_results=30):
     entries = info.get("entries", [])
     results = []
     for entry in entries:
+        if not entry:
+            continue
         title = entry.get("title", "Unknown")
         vid = entry.get("id")
         dur = entry.get("duration", 0)

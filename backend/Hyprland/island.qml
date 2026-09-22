@@ -29,11 +29,10 @@ PanelWindow {
     property bool isLastPlayed: false
     property string homeDir: ""
 
-    // ================= interaction state =================
+
     property bool panelOpen: false
     property string uiMode: panelOpen ? "panel" : (island.isHovered ? "hover" : "idle")
 
-    // ================= sizing =================
     property int hitPad: 15
     property int tinyW: 100
     property int tinyH: 10
@@ -107,7 +106,7 @@ PanelWindow {
     }
     Process {
         id: stopAll
-        command: ["flow", "--stop-all"]
+        command: ["flow-web", "--stop-all"]
         running: false
     }
     function runRadio(q) {

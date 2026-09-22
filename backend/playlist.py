@@ -585,7 +585,11 @@ def import_m3u(path, name=None):
     count = 0
     pending_title = ""
     pending_dur = 0
-    for raw in path.read_text().splitlines():
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except (UnicodeDecodeError, OSError):
+        text = path.read_text(encoding="utf-8", errors="replace")
+    for raw in text.splitlines():
         line = raw.strip()
         if not line:
             continue
@@ -689,6 +693,11 @@ def backfill_thumb(name, index, path):
 
 
 def download_dir(name):
-    d = PLAYLIST_DIR / name
+    # Sanitize so a raw playlist name can never traverse out of the playlist
+    # directory (e.g. "../../.ssh" or "/tmp/x"). _slugify strips path and
+    # dot characters entirely.
+    raw = str(name or "").strip()
+    safe = _slugify(raw) if raw else "playlist"
+    d = PLAYLIST_DIR / safe
     d.mkdir(parents=True, exist_ok=True)
     return d

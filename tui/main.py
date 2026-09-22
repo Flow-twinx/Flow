@@ -26,7 +26,7 @@ from textual.widgets import (
     Static,
 )
 
-from backend import config, library, sponsor, status
+from backend import config, library, mpris, sponsor, status
 from backend.Offline import file as offline_file
 from backend.Online import youtube
 
@@ -272,7 +272,9 @@ class Flow(App):
         ("n", "next_track", "Next"),
         ("p", "prev_track", "Prev"),
         ("s", "toggle_shuffle", "Shuffle"),
+        ("S", "search", "Search"),
         ("r", "toggle_repeat", "Repeat"),
+        ("d", "download", "Download"),
         ("+", "volume_up", "Vol +"),
         ("-", "volume_down", "Vol -"),
         Binding("tab", "switch_mode", "Mode", priority=True),
@@ -301,6 +303,9 @@ class Flow(App):
         self._loop: asyncio.AbstractEventLoop | None = None
         self._shuffle = shuffle
         self._repeat = repeat
+        self._offline_full: list[Track] = []
+        self._search_seq = 0  # bumps per query; discards stale search results
+        self._probing = False  # one duration-probe pass at a time
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -349,6 +354,9 @@ class Flow(App):
             (config.SIG_PREV, "prev"),
             (config.SIG_REPEAT, "repeat"),
             (config.SIG_SHUFFLE, "shuffle"),
+            (config.SIG_STOP_ALL, "stop"),
+            (config.SIG_SEEK_FWD, "seek"),
+            (config.SIG_SEEK_BWD, "seek"),
         ):
             try:
                 signal.signal(sig, lambda *_, a=action: self._signal_dispatch(a))
@@ -372,8 +380,50 @@ class Flow(App):
                 self.action_toggle_repeat()
             elif action == "shuffle":
                 self.action_toggle_shuffle()
+            elif action == "stop":
+                self.action_stop()
+            elif action == "seek":
+                self._apply_seek()
         except Exception:
             pass
+
+    def _apply_seek(self) -> None:
+        """Apply a seek requested via `flow --seek/--seekb`.
+
+        The CLI writes delta milliseconds into seek.txt and raises
+        SIG_SEEK_FWD/BWD, so whether we're playing via VLC or in simulated
+        mode we shift the position by that delta.
+        """
+        delta_ms = config.read_seek()
+        config.clear_seek()
+        if not delta_ms:
+            return
+        try:
+            if (
+                self._streaming
+                and self._vlc_player is not None
+                and self._vlc_player.get_media() is not None
+            ):
+                cur = self._vlc_player.get_time() or 0
+                self._vlc_player.set_time(max(0, int(cur) + int(delta_ms)))
+                return
+        except Exception:
+            pass
+        # Simulated playback: shift the on-screen clock.
+        np = self.now_playing
+        if np.total:
+            np.position = max(
+                0, min(int(np.position + delta_ms / 1000), int(np.total))
+            )
+
+    def action_stop(self) -> None:
+        self._pause()
+        self._reset_media()
+        # A hard stop should discard any save point: resuming later starts
+        # from the beginning, not from where we stopped.
+        self._resume_position = None
+        self.now_playing.position = 0
+        mpris.set_status(mpris.STOPPED)
 
     def _init_vlc(self) -> None:
         try:
@@ -419,13 +469,20 @@ class Flow(App):
             "[b]Search — Online[/b]" if online else "[b]Library — Offline[/b]"
         )
         self.query_one("#np-mode", Label).update(f"Mode: [b]{self.mode}[/b]")
-        self.query_one("#search", Input).display = online
+        search = self.query_one("#search", Input)
+        search.display = True
+        search.placeholder = (
+            "Search YouTube… and press Enter"
+            if online
+            else "Search library… and press Enter"
+        )
         if not online:
-            self.query_one("#search", Input).value = ""
+            search.value = ""
 
     def _reload_library(self) -> None:
         if self.mode == "Offline":
-            self.library = local_tracks()
+            self._offline_full = local_tracks()
+            self.library = list(self._offline_full)
             self._populate()
             self._status(f"{len(self.library)} tracks in local library")
             self._probe_durations_async()
@@ -450,13 +507,17 @@ class Flow(App):
 
     def _probe_durations_async(self) -> None:
         tracks = [t for t in self.library if t.duration is None]
-        if self.mode != "Offline" or not tracks:
+        if self.mode != "Offline" or not tracks or self._probing:
             return
+        self._probing = True
         threading.Thread(target=self._probe_worker, args=(tracks,), daemon=True).start()
 
     def _probe_worker(self, tracks: list[Track]) -> None:
         try:
-            import vlc
+            try:
+                import vlc
+            except Exception:
+                return
 
             inst = vlc.Instance("--no-video")
             for track in tracks:
@@ -475,8 +536,8 @@ class Flow(App):
                 except Exception:
                     continue
             inst.release()
-        except Exception:
-            pass
+        finally:
+            self._probing = False
 
     def _set_duration(self, track: Track, seconds: int) -> None:
         for item in self.query_one("#playlist", ListView).query(TrackItem):
@@ -488,23 +549,36 @@ class Flow(App):
             self._update_status(self.is_playing)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        if self.mode != "Online":
-            return
         query = event.value.strip()
-        if not query:
-            return
-        self._status("Searching YouTube…")
-        threading.Thread(target=self._search_worker, args=(query,), daemon=True).start()
+        if self.mode == "Online":
+            if not query:
+                return
+            self._search_seq += 1
+            seq = self._search_seq
+            self._status("Searching YouTube…")
+            threading.Thread(
+                target=self._search_worker, args=(query, seq), daemon=True
+            ).start()
+        else:
+            self._search_offline(query)
 
-    def _search_worker(self, query: str) -> None:
+    def _search_worker(self, query: str, seq: int) -> None:
         try:
             tracks = stream_tracks(query)
         except Exception as exc:
-            self._call(self._status, f"Search failed: {exc}")
+            self._call(self._search_failed, exc, seq)
             return
-        self._call(self._apply_search, tracks)
+        self._call(self._apply_search, tracks, seq)
 
-    def _apply_search(self, tracks: list[Track]) -> None:
+    def _search_failed(self, exc: Exception, seq: int) -> None:
+        if seq == self._search_seq:
+            self._status(f"Search failed: {exc}")
+
+    def _apply_search(self, tracks: list[Track], seq: int) -> None:
+        # A newer query has been submitted since this thread started: drop the
+        # stale response instead of overwriting fresher results.
+        if seq != self._search_seq:
+            return
         self._online_results = tracks
         if self.mode == "Online":
             self.library = tracks
@@ -515,6 +589,62 @@ class Flow(App):
                 if n
                 else "No results — try a different query"
             )
+
+    def action_search(self) -> None:
+        """Focus the search box (works in both modes)."""
+        self.query_one("#search", Input).focus()
+
+    def _search_offline(self, query: str) -> None:
+        if not query:
+            self.library = list(self._offline_full)
+            self._populate()
+            self._status(f"{len(self.library)} tracks in local library")
+            return
+        q = query.lower()
+        matches = [t for t in self._offline_full if q in t.title.lower()]
+        self.library = matches
+        self._populate()
+        # Keep the cursor on the track that's actually current when filtering
+        # leaves it in the result set (the highlight otherwise drifts).
+        if self._current in matches:
+            self.current_index = matches.index(self._current)
+            self.query_one("#playlist", ListView).index = self.current_index
+        if matches:
+            n = len(matches)
+            self._status(f"{n} match{'es' if n != 1 else ''} for '{query}'")
+        else:
+            self._status(f"No local tracks match '{query}'")
+
+    def action_download(self) -> None:
+        """Download the highlighted (or current) stream track — online only."""
+        if self.mode != "Online":
+            self._status("Download is only available in Online mode (Tab to switch)")
+            return
+        # Prefer the row the user has highlighted; fall back to the current track.
+        track = None
+        item = self.query_one("#playlist", ListView).highlighted_child
+        if isinstance(item, TrackItem):
+            track = item.track
+        if (track is None or track.kind != "stream") and self._current is not None:
+            track = self._current
+        if track is None or track.kind != "stream":
+            self._status("No online track selected to download")
+            return
+        self._status(f"Downloading: {track.title}…")
+        threading.Thread(
+            target=self._download_worker, args=(track,), daemon=True
+        ).start()
+
+    def _download_worker(self, track: Track) -> None:
+        try:
+            fmt = config.FORMAT
+            if fmt != "webm" and not config.FFMPEG:
+                fmt = "webm"
+            youtube.download_url(track.ref, config.DOWNLOAD_DIR, fmt=fmt)
+        except Exception as exc:
+            self._call(self._status, f"Download failed: {exc}")
+            return
+        self._call(self._status, f"Downloaded: {track.title}")
 
     def action_toggle_play(self) -> None:
         if self._current is None:
@@ -534,6 +664,7 @@ class Flow(App):
             np.refresh_playing_icon()
             self.query_one("#btn-play", Button).label = ""
             self._ensure_timer()
+            mpris.set_status(mpris.PLAYING)
             self._update_status(True)
             return
         # Simulated resume: pick up where we paused.
@@ -545,6 +676,7 @@ class Flow(App):
             np.refresh_playing_icon()
             self.query_one("#btn-play", Button).label = ""
             self._ensure_timer()
+            mpris.set_status(mpris.PLAYING)
             self._update_status(True)
             return
         self._play(self._current)
@@ -555,6 +687,7 @@ class Flow(App):
         np.playing = False
         np.refresh_playing_icon()
         self.query_one("#btn-play", Button).label = ""
+        mpris.set_status(mpris.PAUSED)
         if (
             self._vlc_player is not None
             and self._vlc_player.get_media() is not None
@@ -675,6 +808,45 @@ class Flow(App):
         except Exception:
             return False
 
+    def _mpris_meta(self, track: Track):
+        vid = track.video_id
+        if track.kind == "local" and not vid:
+            try:
+                vid = pathlib.Path(track.ref).stem
+            except Exception:
+                vid = None
+        artist = album = ""
+        art = ""
+        if vid:
+            le = library.get(vid)
+            if le:
+                artist = le.get("artist") or ""
+                album = le.get("album") or ""
+            try:
+                p = pathlib.Path(library.thumbnail_path(vid))
+                if p.exists():
+                    art = str(p)
+            except Exception:
+                pass
+        return vid, artist, album, art
+
+    def _mpris_track(self, track: Track) -> None:
+        vid, artist, album, art = self._mpris_meta(track)
+        mpris.load_track(
+            vid,
+            track.title,
+            track.duration or 0,
+            artist=artist,
+            album=album,
+            art_path=art,
+            has_next=True,
+            has_prev=True,
+        )
+        mpris.set_position_getter(
+            lambda: self._vlc_player.get_time() if self._vlc_player else None
+        )
+        mpris.set_status(mpris.PLAYING)
+
     def _play(self, track: Track) -> None:
         """Select a track and begin playback (VLC or simulated fallback)."""
         np = self.now_playing
@@ -708,6 +880,7 @@ class Flow(App):
         np.refresh_playing_icon()
         self.query_one("#btn-play", Button).label = ""
         self._ensure_timer()
+        self._mpris_track(track)
         self._update_status(True)
 
     def _ensure_timer(self) -> None:
@@ -759,6 +932,7 @@ class Flow(App):
                 ms = self._vlc_player.get_time()
                 if ms and ms >= 0:
                     np.position = int(ms) // 1000
+                    mpris.set_position(int(ms) * 1000)
                 length_ms = self._vlc_player.get_length()
                 total = (
                     int(length_ms) // 1000
@@ -797,6 +971,8 @@ class Flow(App):
                 np.query_one("#np-progress", ProgressBar).progress = 0
             else:
                 self._advance(1)
+        else:
+            mpris.set_position(np.position * 1_000_000)
 
     def _recover_playback(self) -> None:
         if not self.is_playing or self._current is None:
@@ -804,6 +980,7 @@ class Flow(App):
         result = self._vlc_play(self._current, fresh=True)
         if result == "vlc":
             self._status("Playback recovered")
+            mpris.set_status(mpris.PLAYING)
             return
         if self._current.duration:
             self._status("VLC playback failed — simulated playback")
@@ -814,6 +991,11 @@ class Flow(App):
             np.refresh_playing_icon()
             self.query_one("#btn-play", Button).label = ""
             self._update_status(False)
+            # Nothing left to advance the clock for: stop the interval so it
+            # doesn't tick pointlessly forever.
+            if self._timer is not None:
+                self._timer.stop()
+                self._timer = None
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-play":

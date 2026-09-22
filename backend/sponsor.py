@@ -133,7 +133,12 @@ def fetch_segments(video_id, duration=None):
         logger.warning("SponsorBlock API request failed for %s: %s", video_id, exc)
         return []
 
+    if not isinstance(payload, list):
+        return []
+
     for item in payload or []:
+        if not isinstance(item, dict):
+            continue
         if item.get("videoID") != video_id:
             continue
         chapters = []

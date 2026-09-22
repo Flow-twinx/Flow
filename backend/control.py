@@ -1,4 +1,5 @@
 import json
+import os
 import pathlib
 import time
 
@@ -14,18 +15,30 @@ def send(command: str, delta=None):
     if delta is not None:
         data["delta"] = delta
     CONTROL_FILE.parent.mkdir(parents=True, exist_ok=True)
-    CONTROL_FILE.write_text(json.dumps(data))
+    tmp = CONTROL_FILE.with_name(CONTROL_FILE.name + ".tmp")
+    tmp.write_text(json.dumps(data))
+    os.replace(tmp, CONTROL_FILE)
 
 
 def take():
-    if not CONTROL_FILE.exists():
+    """Atomically consume the pending command.
+
+    The file is rename()'d out of the way before reading, so a command written
+    between our read and an earlier non-atomic unlink can't be deleted, and two
+    concurrent pollers can't double-deliver: only the poller that wins the
+    rename sees the command.
+    """
+    consumed = CONTROL_FILE.with_name(CONTROL_FILE.name + ".consumed")
+    try:
+        os.replace(CONTROL_FILE, consumed)
+    except FileNotFoundError:
         return ""
     try:
-        data = json.loads(CONTROL_FILE.read_text())
+        data = json.loads(consumed.read_text())
     except (json.JSONDecodeError, OSError):
         data = {}
     finally:
-        CONTROL_FILE.unlink(missing_ok=True)
+        consumed.unlink(missing_ok=True)
     command = data.get("command", "")
     if "delta" in data:
         return data

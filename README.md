@@ -75,7 +75,7 @@ uv run main.py
 | Flag          | Description                                                           |
 | ------------- | --------------------------------------------------------------------- |
 | `-bg`         | Play in background and exit to shell                                  |
-| `--stop-all`  | Stop all background VLC processes                                     |
+| `flow-web --stop-all` | Stop all background processes (web servers + VLC)              |
 | `-i`          | Use it in help command to show detailed help                          |
 | `-s`          | Use it shuffle or play random songs                                   |
 | `-r`          | Use it to repeat songs no of time [ -r n ] [ -r ] ( n = no of times ) |
@@ -125,8 +125,19 @@ flow -dl never gonna give you up    # dl → download
 To launch gui mode just type :
 
 ```bash
-flow --web
+flow-web
 ```
+
+The dedicated `flow-web` command picks the first free port starting at 5000
+(5000, then 5001, ...) and daemonizes.
+
+| Command | Action |
+| ------- | ------ |
+| `flow-web` | Start the web server (prompts to restart if one is already running) |
+| `flow-web --new` | Start another instance on the next free port |
+| `flow-web --port 8080` | Start on a specific port |
+| `flow-web --stop [PORT]` | Stop one web server (defaults to the running port) |
+| `flow-web --stop-all` | Stop all web servers and VLC |
 
 ### TUI Mode:
 
@@ -146,6 +157,8 @@ volume.
 | `space`         | Play / pause                                 |
 | `n` / `p`       | Next / previous track                        |
 | `s` / `r`       | Toggle shuffle / repeat                      |
+| `S`             | Focus the search box (works in both modes)    |
+| `d`             | Download current track (online mode only)     |
 | `+` / `-`       | Volume up / down                             |
 | `Tab`           | Switch online/offline mode                   |
 | `q`             | Quit                                         |

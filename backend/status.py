@@ -1,4 +1,5 @@
 import json
+import os
 import pathlib
 import time
 
@@ -16,7 +17,9 @@ def update(title, duration=0, playing=True, thumbnail=None):
         "ts": time.time(),
     }
     STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STATUS_FILE.write_text(json.dumps(data))
+    tmp = STATUS_FILE.with_name(STATUS_FILE.name + ".tmp")
+    tmp.write_text(json.dumps(data))
+    os.replace(tmp, STATUS_FILE)
 
 
 def _read():

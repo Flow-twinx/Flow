@@ -11,8 +11,7 @@ import time
 
 import vlc
 
-from backend import library, lyrics, sponsor, status, visualizer
-from backend import config
+from backend import config, library, lyrics, mpris, sponsor, status, visualizer
 
 _truncate_title = config._truncate_title
 
@@ -38,6 +37,8 @@ _reader_thread = None
 
 _next_req = False
 _prev_req = False
+_stop_req = False
+_nav = (False, False)
 
 
 def _clear_stale_pid():
@@ -69,6 +70,13 @@ def _sigusr3_prev(sig, frame):
         _player.stop()
 
 
+def _sigusr4_stop(sig, frame):
+    global _stop_req
+    _stop_req = True
+    if _player:
+        _player.stop()
+
+
 def _seek_current(sig, frame):
     delta_ms = config.read_seek()
     config.clear_seek()
@@ -82,6 +90,7 @@ def setup_nav_signals():
     signal.signal(signal.SIGUSR1, _sigusr1_toggle)
     signal.signal(signal.SIGUSR2, _sigusr2_next)
     signal.signal(config.SIG_PREV, _sigusr3_prev)
+    signal.signal(config.SIG_STOP_ALL, _sigusr4_stop)
     signal.signal(config.SIG_SEEK_FWD, _seek_current)
     signal.signal(config.SIG_SEEK_BWD, _seek_current)
 
@@ -158,16 +167,74 @@ def _flags_str(args):
     return "  ".join(parts)
 
 
+def _restart_current(player):
+    global _prev_req, _paused
+    if _next_req or _stop_req:
+        return False
+    if not _nav[1]:
+        _prev_req = False
+        _paused = False
+        try:
+            player.play()
+            player.set_time(0)
+        except Exception:
+            return False
+        return True
+    return False
+
+
+def _attach_vlc_events():
+    p = _player
+    if p is None:
+        return
+    try:
+        em = p.event_manager()
+    except Exception:
+        return
+
+    def _on_event(event):
+        try:
+            t = event.type
+            if t == vlc.EventType.MediaPlayerPlaying:
+                mpris.set_status(mpris.PLAYING)
+            elif t == vlc.EventType.MediaPlayerPaused:
+                mpris.set_status(mpris.PAUSED)
+            elif t in (
+                vlc.EventType.MediaPlayerStopped,
+                vlc.EventType.MediaPlayerEndReached,
+            ):
+                mpris.set_status(mpris.STOPPED)
+        except Exception:
+            pass
+
+    for etype in (
+        vlc.EventType.MediaPlayerPlaying,
+        vlc.EventType.MediaPlayerPaused,
+        vlc.EventType.MediaPlayerStopped,
+        vlc.EventType.MediaPlayerEndReached,
+    ):
+        try:
+            em.event_attach(etype, _on_event)
+        except Exception:
+            pass
+
+
 def _display_loop(
     player, title, video_id=None, stop_check=None, args=None, next_title=None
 ):
     global _paused
     display = config.Display
+    if display == "bars" and not (sys.stdin.isatty() and sys.stdout.isatty()):
+        display = "none"
     if display == "none":
         while player.get_state() not in (vlc.State.Ended, vlc.State.Error):
             if stop_check and stop_check():
                 break
-            if _next_req or _prev_req:
+            if _stop_req or _next_req:
+                break
+            if _prev_req:
+                if _restart_current(player):
+                    continue
                 break
             time.sleep(0.1)
         return
@@ -207,7 +274,11 @@ def _display_loop(
         while player.get_state() not in (vlc.State.Ended, vlc.State.Error):
             if stop_check and stop_check():
                 break
-            if _next_req or _prev_req:
+            if _stop_req or _next_req:
+                break
+            if _prev_req:
+                if _restart_current(player):
+                    continue
                 break
             if _paused:
                 if not paused_printed:
@@ -260,11 +331,22 @@ def _display_loop(
             sys.stdout.flush()
 
 
-def play_url(url, title, args=None, duration=0, thumbnail=None, next_title=None):
-    global _player, _paused, _next_req, _prev_req
+def play_url(
+    url,
+    title,
+    args=None,
+    duration=0,
+    thumbnail=None,
+    next_title=None,
+    entry=None,
+    nav=None,
+):
+    global _player, _paused, _next_req, _prev_req, _stop_req, _nav
     _paused = False
     _next_req = False
     _prev_req = False
+    _stop_req = False
+    _nav = tuple(nav) if nav else (False, False)
     config.save_pid(os.getpid())
     config.clear_seek()
     devnull = os.open(os.devnull, os.O_RDWR)
@@ -298,6 +380,25 @@ def play_url(url, title, args=None, duration=0, thumbnail=None, next_title=None)
             else f"    [{dur_min}:{dur_sec:02d}]"
         )
 
+        artist = ""
+        album = ""
+        if entry:
+            primary = (entry.get("artists") or {}).get("primary") or []
+            if primary:
+                artist = primary[0].get("name", "") or ""
+            album = (entry.get("album") or {}).get("name") or ""
+        mpris.load_track(
+            None,
+            title,
+            duration,
+            artist=artist,
+            album=album,
+            has_next=_nav[0],
+            has_prev=True,
+        )
+        mpris.set_position_getter(lambda: _player.get_time() if _player else 0)
+        _attach_vlc_events()
+
         try:
             _display_loop(_player, title, args=args)
         except KeyboardInterrupt:
@@ -308,16 +409,19 @@ def play_url(url, title, args=None, duration=0, thumbnail=None, next_title=None)
         finally:
             _restore_pause_input()
     finally:
+        _restore_pause_input()
         os.dup2(old_stderr, 2)
         os.close(old_stderr)
         os.close(devnull)
 
 
-def play_entry(entry, title, args=None, flags=None, next_title=None):
-    global _player, _paused, _next_req, _prev_req
+def play_entry(entry, title, args=None, flags=None, next_title=None, nav=None):
+    global _player, _paused, _next_req, _prev_req, _stop_req, _nav
     _paused = False
     _next_req = False
     _prev_req = False
+    _stop_req = False
+    _nav = tuple(nav) if nav else (False, False)
     config.save_pid(os.getpid())
     config.clear_seek()
     title = title.split("|")[0]
@@ -334,70 +438,99 @@ def play_entry(entry, title, args=None, flags=None, next_title=None):
     _player.set_media(media)
     _player.play()
     _setup_pause_input()
-
-    duration = entry.get("duration", 0)
-    video_id = entry.get("id")
-    thumb = entry.get("thumbnail") or (
-        library.thumbnail_url_for(video_id) if video_id else None
-    )
-
-    config.dev_print(
-        "Player (YouTube Entry)",
-        {
-            "title": title,
-            "video_id": video_id,
-            "stream_url": stream_url,
-            "duration": f"{duration}s | {duration / 60}min",
-            "uploader": entry.get("uploader"),
-            "webpage_url": entry.get("webpage_url"),
-            "thumbnail": thumb,
-        },
-    )
-
-    status.update(title, duration, thumbnail=thumb)
-    dur_min, dur_sec = divmod(int(duration), 60)
-    fstr = _flags_str(args)
-    i(f"\n[⥤ Now : {_truncate_title(title)}]")
-    m(
-        f"    [{dur_min}:{dur_sec:02d}]  {fstr}"
-        if fstr
-        else f"    [{dur_min}:{dur_sec:02d}]"
-    )
-
-    skipped = False
-
-    skip_segments = sponsor.segments(entry) if sponsor.enabled() else []
     skip_thread = None
-    if skip_segments:
-        skip_thread = sponsor.VlcSkipThread(_player, skip_segments)
-        skip_thread.start()
-
-    def stop_check():
-        nonlocal skipped
-        if flags:
-            if flags.get("quit", lambda: False)():
-                _player.stop()
-                return True
-            if flags.get("skip", lambda: False)():
-                skipped = True
-                _player.stop()
-                return True
-        return False
-
     try:
-        _display_loop(
-            _player,
-            title,
-            video_id=video_id,
-            stop_check=stop_check,
-            args=args,
-            next_title=next_title,
+        duration = entry.get("duration", 0)
+        video_id = entry.get("id")
+        thumb = entry.get("thumbnail") or (
+            library.thumbnail_url_for(video_id) if video_id else None
         )
-    except KeyboardInterrupt:
-        _player.stop()
-        sys.stdout.write("\n")
-        sys.stdout.flush()
-        raise
+
+        config.dev_print(
+            "Player (YouTube Entry)",
+            {
+                "title": title,
+                "video_id": video_id,
+                "stream_url": stream_url,
+                "duration": f"{duration}s | {duration / 60}min",
+                "uploader": entry.get("uploader"),
+                "webpage_url": entry.get("webpage_url"),
+                "thumbnail": thumb,
+            },
+        )
+
+        status.update(title, duration, thumbnail=thumb)
+        dur_min, dur_sec = divmod(int(duration), 60)
+        fstr = _flags_str(args)
+        i(f"\n[⥤ Now : {_truncate_title(title)}]")
+        m(
+            f"    [{dur_min}:{dur_sec:02d}]  {fstr}"
+            if fstr
+            else f"    [{dur_min}:{dur_sec:02d}]"
+        )
+
+        artist = ""
+        album = ""
+        if video_id:
+            lib_entry = library.get(video_id)
+            if lib_entry:
+                artist = lib_entry.get("artist") or ""
+                album = lib_entry.get("album") or ""
+        if not artist:
+            artist = entry.get("artist") or ""
+        if not album:
+            album = entry.get("album") or ""
+        art_path = ""
+        if video_id:
+            cached = library.thumbnail_path(video_id)
+            if os.path.exists(cached):
+                art_path = cached
+        mpris.load_track(
+            video_id,
+            title,
+            duration,
+            artist=artist,
+            album=album,
+            art_path=art_path,
+            has_next=_nav[0],
+            has_prev=True,
+        )
+        mpris.set_position_getter(lambda: _player.get_time() if _player else 0)
+        _attach_vlc_events()
+
+        skipped = False
+
+        skip_segments = sponsor.segments(entry) if sponsor.enabled() else []
+        if skip_segments:
+            skip_thread = sponsor.VlcSkipThread(_player, skip_segments)
+            skip_thread.start()
+
+        def stop_check():
+            nonlocal skipped
+            if flags:
+                if flags.get("quit", lambda: False)():
+                    _player.stop()
+                    return True
+                if flags.get("skip", lambda: False)():
+                    skipped = True
+                    _player.stop()
+                    return True
+            return False
+
+        try:
+            _display_loop(
+                _player,
+                title,
+                video_id=video_id,
+                stop_check=stop_check,
+                args=args,
+                next_title=next_title,
+            )
+        except KeyboardInterrupt:
+            _player.stop()
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+            raise
     finally:
         if skip_thread:
             skip_thread.stop()

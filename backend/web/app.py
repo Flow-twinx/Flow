@@ -1,6 +1,7 @@
 import json
 import logging
 import mimetypes
+import os
 import pathlib
 import threading
 import time
@@ -923,7 +924,7 @@ def serve_local(filepath):
         p = p.resolve()
     except OSError, ValueError:
         return jsonify({"error": "invalid path"}), 400
-    if not str(p).startswith(str(home)):
+    if not p.is_relative_to(home):
         return jsonify({"error": "access denied"}), 403
     if not p.exists() or not p.is_file():
         return jsonify({"error": "file not found"}), 404
@@ -944,8 +945,7 @@ def api_albums():
 @app.route("/api/album/<album_name>")
 def api_album_songs(album_name):
     album_dir = (MUSIC_DIR / album_name).resolve()
-    home = pathlib.Path.home()
-    if not str(album_dir).startswith(str(home)):
+    if not album_dir.is_relative_to(MUSIC_DIR.resolve()):
         return jsonify({"error": "access denied"}), 403
     if not album_dir.exists() or not album_dir.is_dir():
         return jsonify({"error": "album not found"}), 404
@@ -1053,11 +1053,16 @@ def api_like():
         library.download_thumbnail(video_id)
     except Exception:
         pass
-    fmt = data.get("format", config.FORMAT)
-    save_dir = data.get("save_dir", str(FLOW_DIR))
-    threading.Thread(
-        target=_like_download, args=(video_id, save_dir, fmt), daemon=True
-    ).start()
+    if config.DOWN_ON_LIKE:
+        fmt = data.get("format", config.FORMAT)
+        if fmt not in ("opus", "m4a", "mp3", "webm"):
+            fmt = config.FORMAT
+            if fmt not in ("opus", "m4a", "mp3", "webm"):
+                fmt = "webm"
+        save_dir = data.get("save_dir", str(FLOW_DIR))
+        threading.Thread(
+            target=_like_download, args=(video_id, save_dir, fmt), daemon=True
+        ).start()
     return jsonify({"liked": True, "video_id": video_id})
 
 
@@ -1088,22 +1093,31 @@ def api_settings():
     SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
     if request.method == "POST":
         data = request.get_json(force=True)
+        if not isinstance(data, dict):
+            return jsonify({"error": "invalid JSON payload"}), 400
         existing = {}
         if SETTINGS_FILE.exists():
             try:
-                existing = json.loads(SETTINGS_FILE.read_text())
+                loaded = json.loads(SETTINGS_FILE.read_text())
+                if isinstance(loaded, dict):
+                    existing = loaded
             except Exception:
                 pass
         if "format" in data:
             if not config.set_format(data["format"]):
                 return jsonify({"error": f"invalid format '{data['format']}'"}), 400
         existing.update(data)
-        SETTINGS_FILE.write_text(json.dumps(existing, indent=2))
+        SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = SETTINGS_FILE.with_name(SETTINGS_FILE.name + ".tmp")
+        tmp.write_text(json.dumps(existing, indent=2))
+        os.replace(tmp, SETTINGS_FILE)
         return jsonify({"saved": True, "settings": existing})
     result = {}
     if SETTINGS_FILE.exists():
         try:
-            result = json.loads(SETTINGS_FILE.read_text())
+            loaded = json.loads(SETTINGS_FILE.read_text())
+            if isinstance(loaded, dict):
+                result = loaded
         except Exception:
             pass
     result["format"] = config.FORMAT

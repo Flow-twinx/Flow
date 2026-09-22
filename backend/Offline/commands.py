@@ -43,7 +43,16 @@ def _fork_bg(label):
     return True
 
 
+class _StopPlayback(Exception):
+    """Raised by _nav_delta when playback should stop cleanly (MPRIS Stop)."""
+
+
 def _nav_delta():
+    if player._stop_req:
+        player._stop_req = False
+        player._next_req = False
+        player._prev_req = False
+        raise _StopPlayback
     if player._prev_req:
         player._prev_req = False
         player._next_req = False
@@ -181,8 +190,8 @@ def _pick_index(results):
     choice, used = pick(
         "Play which track?",
         choices,
-        default=0,
         instruction="(↑↓ navigate, Enter to play)",
+        mode="offline",
     )
     if used:
         return choice
@@ -216,8 +225,8 @@ def _pick_target(targets):
     choice, used = pick(
         "Pick a song",
         choices,
-        default=0,
-        instruction="(↑↓ navigate, Enter to select, Esc to cancel)",
+        instruction="(↑↓ navigate, Enter to select)",
+        mode="offline",
     )
     if used:
         return choice
@@ -258,8 +267,8 @@ def _select_song():
     choice, used = pick(
         "Play which song?",
         choices,
-        default=0,
         instruction="(↑↓ navigate, Enter to play)",
+        mode="offline",
     )
     if used:
         return choice
@@ -332,10 +341,13 @@ def play(extra: list[str], args):
         try:
             while True:
                 player.play_file(song_path, lib.display_name(song_path), args)
+                if player._stop_req:
+                    player._stop_req = False
+                    break
                 iteration += 1
                 if repeat_count > 0 and iteration >= repeat_count:
                     break
-        except KeyboardInterrupt:
+        except KeyboardInterrupt, _StopPlayback:
             pass
     else:
         player.play_file(song_path, lib.display_name(song_path), args)
@@ -391,14 +403,19 @@ def _play_liked(args):
             while 0 <= idx < len(songs):
                 song = songs[idx]
                 _last_played = song
-                player.play_file(song, lib.display_name(song), args)
+                player.play_file(
+                    song,
+                    lib.display_name(song),
+                    args,
+                    nav=(idx + 1 < len(songs), idx > 0),
+                )
                 idx += _nav_delta()
             if not repeat:
                 break
             iteration += 1
             if repeat_count > 0 and iteration >= repeat_count:
                 break
-    except KeyboardInterrupt:
+    except KeyboardInterrupt, _StopPlayback:
         pass
 
 
@@ -423,14 +440,19 @@ def _play_all(args):
             while 0 <= idx < len(songs):
                 song = songs[idx]
                 _last_played = song
-                player.play_file(song, lib.display_name(song), args)
+                player.play_file(
+                    song,
+                    lib.display_name(song),
+                    args,
+                    nav=(idx + 1 < len(songs), idx > 0),
+                )
                 idx += _nav_delta()
             if not repeat:
                 break
             iteration += 1
             if repeat_count > 0 and iteration >= repeat_count:
                 break
-    except KeyboardInterrupt:
+    except KeyboardInterrupt, _StopPlayback:
         pass
 
 
@@ -632,7 +654,11 @@ def playlist_cmd(extra, args=None):
                     )
                     _last_played = fpath
                     player.play_file(
-                        fpath, s.get("title", "Unknown"), args, next_title=next_title
+                        fpath,
+                        s.get("title", "Unknown"),
+                        args,
+                        next_title=next_title,
+                        nav=(idx + 1 < len(tracks), idx > 0),
                     )
                     idx += _nav_delta()
                 if not repeat:
@@ -640,7 +666,7 @@ def playlist_cmd(extra, args=None):
                 iteration += 1
                 if repeat_count > 0 and iteration >= repeat_count:
                     break
-        except KeyboardInterrupt:
+        except KeyboardInterrupt, _StopPlayback:
             pass
 
     def list_liked():
@@ -767,6 +793,8 @@ def radio(extra, args):
                         time.sleep(0.05)
                         continue
                     break
+                if not ch:
+                    break
                 if ch == b"\x10":
                     os.kill(os.getpid(), signal.SIGUSR1)
         except OSError:
@@ -793,13 +821,14 @@ def radio(extra, args):
                     args,
                     flags=flags,
                     next_title=next_title,
+                    nav=(idx + 1 < len(tracks), idx > 0),
                 )
                 if _radio_quit:
                     break
                 idx += _nav_delta()
             if _radio_quit:
                 break
-    except KeyboardInterrupt:
+    except KeyboardInterrupt, _StopPlayback:
         pass
     finally:
         player._radio_active = False

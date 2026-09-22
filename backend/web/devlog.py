@@ -1,6 +1,7 @@
 import logging
 import logging.handlers
 import pathlib
+import threading
 
 from backend import config
 
@@ -12,6 +13,7 @@ w = config.ORANGE
 LOGS_DIR = pathlib.Path.home() / ".flow/LOGS"
 
 _handler = None
+_emit_lock = threading.Lock()
 
 
 def _make_handler():
@@ -36,10 +38,11 @@ def _emit(level, msg):
     if not config.DEV_MODE:
         return
     global _handler
-    if _handler is None:
-        _handler = _make_handler()
-    print(msg, flush=True)
-    _handler.emit(logging.LogRecord("devlog", level, "", 0, msg, (), None))
+    with _emit_lock:
+        if _handler is None:
+            _handler = _make_handler()
+        print(msg, flush=True)
+        _handler.emit(logging.LogRecord("devlog", level, "", 0, msg, (), None))
 
 
 def log_error(method, status, route, source="", message=""):

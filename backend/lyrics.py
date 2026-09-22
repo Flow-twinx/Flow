@@ -17,9 +17,13 @@ def _extract_lines(result):
     if not lines:
         return None
     return [
-        {"text": l.text, "start": l.start_time / 1000, "end": l.end_time / 1000}
+        {
+            "text": l.text,
+            "start": (l.start_time or 0) / 1000,
+            "end": (l.end_time or l.start_time or 0) / 1000,
+        }
         for l in lines
-        if l.text.strip() != "♪"
+        if l.text.strip() != "♪" and l.start_time is not None
     ]
 
 

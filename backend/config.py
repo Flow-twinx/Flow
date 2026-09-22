@@ -15,6 +15,7 @@ SIG_SEEK_FWD = _signal.SIGRTMIN + 3
 SIG_SEEK_BWD = _signal.SIGRTMIN + 4
 SIG_REPEAT = _signal.SIGRTMIN + 5
 SIG_SHUFFLE = _signal.SIGRTMIN + 6
+SIG_STOP_ALL = _signal.SIGRTMIN + 7
 
 
 def merge_flags(extra: list[str], args) -> tuple[list[str], object]:
@@ -30,6 +31,14 @@ def merge_flags(extra: list[str], args) -> tuple[list[str], object]:
                 i += 1
             else:
                 setattr(args, "repeat_count", -1)
+        elif item == "-f":
+            # download <query> -f <format> — consume the format token so it
+            # doesn't leak into the search query.
+            if i + 1 < len(extra):
+                setattr(args, "format", extra[i + 1])
+                i += 1
+            else:
+                print(f"Unknown flag: {item}")
         elif item in mapping:
             setattr(args, mapping[item], True)
         elif item.startswith("-"):
@@ -98,6 +107,7 @@ DEV_MODE = False
 ###########################################################################################################
 
 FFMPEG = False
+_ffmpeg_configured = False  # True when the user explicitly set "ffmpeg" in config
 FORMAT = "webm"
 _VALID_FORMATS = {"opus", "m4a", "mp3", "webm"}
 
@@ -300,6 +310,7 @@ def _load_config():
         Sensitivity, \
         DEV_MODE, \
         FFMPEG, \
+        _ffmpeg_configured, \
         FORMAT, \
         AD_SKIP, \
         SPONSOR_CATEGORIES, \
@@ -354,6 +365,7 @@ def _load_config():
             DEV_MODE = data["dev"]
         if "ffmpeg" in data and isinstance(data["ffmpeg"], bool):
             FFMPEG = data["ffmpeg"]
+            _ffmpeg_configured = True
         if "ad_skip" in data and isinstance(data["ad_skip"], bool):
             AD_SKIP = data["ad_skip"]
         if "sponsor_categories" in data and isinstance(
@@ -598,12 +610,7 @@ def _apply_format(value):
 
 
 def _apply_int(attr, value, lo, hi, ok_msg):
-    global \
-        BarWidth, \
-        BarHeight, \
-        BarSpacing, \
-        MAX_SEARCH_RESULTS, \
-        MAX_RESULTS_RADIO
+    global BarWidth, BarHeight, BarSpacing, MAX_SEARCH_RESULTS, MAX_RESULTS_RADIO
     try:
         v = int(value)
     except ValueError:
@@ -769,8 +776,8 @@ def _interactive_config():
     color_choices = [questionary.Choice(title=n, value=n) for n in color_names]
     py_style = Style(
         [
-            ("qmark", "fg:cyan bold"),
-            ("question", "fg:cyan bold"),
+            ("qmark", f"fg:{_cname(Tertiary)}"),
+            ("question", f"fg:{_cname(Tertiary)}"),
             ("answer", f"fg:{_cname(Secondary)} bold"),
             ("pointer", f"fg:{_cname(Primary)} bold"),
             ("highlighted", f"fg:{_cname(Primary)} bold"),
@@ -879,67 +886,115 @@ def _interactive_config():
         },
     ]
 
+    from questionary.prompts import AVAILABLE_PROMPTS
+
+    answers = {}
+    interrupted = False
+
+    def _apply_collected():
+        global AD_SKIP, DOWN_ON_LIKE
+
+        if "display" in answers:
+            print(_apply_display(answers["display"]))
+        if "primary" in answers:
+            print(_apply_color("primary", answers["primary"]))
+        if "secondary" in answers:
+            print(_apply_color("secondary", answers["secondary"]))
+        if "tertiary" in answers:
+            print(_apply_color("tertiary", answers["tertiary"]))
+
+        if answers.get("display") == "bars":
+            if answers.get("bar_width", "").strip():
+                try:
+                    v = int(answers["bar_width"])
+                    if 4 <= v <= 80:
+                        print(_apply_bar_width(v))
+                except ValueError:
+                    pass
+            if answers.get("bar_height", "").strip():
+                try:
+                    v = int(answers["bar_height"])
+                    if 10 <= v <= 90:
+                        print(_apply_bar_height(v))
+                except ValueError:
+                    pass
+            if "bar_spacing" in answers:
+                try:
+                    val = answers["bar_spacing"]
+                    if str(val) in _BAR_SPACING:
+                        print(_apply_bar_spacing(val))
+                    else:
+                        print(_apply_bar_spacing(int(val)))
+                except ValueError:
+                    pass
+            if "bar_char" in answers:
+                print(_apply_bar_char(answers["bar_char"]))
+            if answers.get("sensitivity", "").strip():
+                try:
+                    v = float(answers["sensitivity"])
+                    if 0.5 <= v <= 5.0:
+                        print(_apply_sensitivity(v))
+                except ValueError:
+                    pass
+
+        if "format" in answers:
+            print(_apply_format(answers["format"]))
+        if "max_search" in answers:
+            print(
+                _apply_int(
+                    "MAX_SEARCH_RESULTS",
+                    answers["max_search"],
+                    1,
+                    20,
+                    "Max search results changed",
+                )
+            )
+        if "max_radio" in answers:
+            print(
+                _apply_int(
+                    "MAX_RESULTS_RADIO",
+                    answers["max_radio"],
+                    1,
+                    50,
+                    "Max radio tracks changed",
+                )
+            )
+        if "ad_skip" in answers:
+            AD_SKIP = answers["ad_skip"]
+            print(f"{Tertiary}Ad skip set to {AD_SKIP}{Reset}")
+        if "down_on_like" in answers:
+            DOWN_ON_LIKE = answers["down_on_like"]
+            print(f"{Tertiary}Auto-download on like set to {DOWN_ON_LIKE}{Reset}")
+
     try:
-        answers = questionary.prompt(questions, style=py_style)
+        for question in questions:
+            cfg = dict(question)
+            when = cfg.get("when")
+            if when and not when(answers):
+                continue
+            kwargs = {k: v for k, v in cfg.items() if k not in ("type", "name", "when")}
+            kwargs["style"] = py_style
+            try:
+                answer = AVAILABLE_PROMPTS[cfg["type"]](**kwargs).unsafe_ask()
+            except (KeyboardInterrupt, EOFError):
+                interrupted = True
+                break
+            answers[cfg["name"]] = answer
     except KeyboardInterrupt:
-        print(f"\n{GREY}Config setup cancelled.{Reset}")
-        return
+        interrupted = True
+
     if not answers:
-        print(f"\n{GREY}Config setup cancelled.{Reset}")
+        print(f"\n{GREY}Config setup cancelled. Nothing to save.{Reset}")
         return
 
-    print(_apply_display(answers["display"]))
-    print(_apply_color("primary", answers["primary"]))
-    print(_apply_color("secondary", answers["secondary"]))
-    print(_apply_color("tertiary", answers["tertiary"]))
-
-    bar_width_v = (
-        int(answers["bar_width"])
-        if answers["display"] == "bars" and answers["bar_width"].strip()
-        else None
-    )
-    if bar_width_v is not None and 4 <= bar_width_v <= 80:
-        print(_apply_bar_width(bar_width_v))
-    bar_height_v = (
-        int(answers["bar_height"])
-        if answers["display"] == "bars" and answers["bar_height"].strip()
-        else None
-    )
-    if bar_height_v is not None and 10 <= bar_height_v <= 90:
-        print(_apply_bar_height(bar_height_v))
-    if answers["display"] == "bars":
-        if str(answers["bar_spacing"]) in _BAR_SPACING:
-            print(_apply_bar_spacing(answers["bar_spacing"]))
-        else:
-            print(_apply_bar_spacing(int(answers["bar_spacing"])))
-        print(_apply_bar_char(answers["bar_char"]))
-        sens_v = (
-            float(answers["sensitivity"]) if answers["sensitivity"].strip() else None
-        )
-        if sens_v is not None and 0.5 <= sens_v <= 5.0:
-            print(_apply_sensitivity(sens_v))
-
-    print(_apply_format(answers["format"]))
-    print(
-        _apply_int(
-            "MAX_SEARCH_RESULTS",
-            answers["max_search"],
-            1,
-            20,
-            "Max search results changed",
-        )
-    )
-    print(
-        _apply_int(
-            "MAX_RESULTS_RADIO", answers["max_radio"], 1, 50, "Max radio tracks changed"
-        )
-    )
-    AD_SKIP = answers["ad_skip"]
-    DOWN_ON_LIKE = answers["down_on_like"]
+    if interrupted:
+        print(f"\n{GREY}Interrupted — saving the answers you already gave...{Reset}")
+    _apply_collected()
     _save_config()
-    print(f"{Tertiary}Ad skip set to {AD_SKIP}{Reset}")
-    print(f"{Tertiary}Auto-download on like set to {DOWN_ON_LIKE}{Reset}")
-    print(f"\n{GREY}Config saved.{Reset}")
+    if interrupted:
+        print(f"\n{GREY}Config saved (partial — {len(answers)} setting(s) applied).{Reset}")
+    else:
+        print(f"\n{GREY}Config saved.{Reset}")
 
 
 def _cname(ansi_code):
@@ -958,4 +1013,7 @@ def _BC_NAME(char):
 
 _load_config()
 
-FFMPEG = _detect_ffmpeg()
+if not _ffmpeg_configured:
+    FFMPEG = _detect_ffmpeg()
+if FORMAT != "webm" and not FFMPEG:
+    FORMAT = "webm"

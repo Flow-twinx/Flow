@@ -81,6 +81,11 @@ def main():
         action="store_true",
         help="toggle shuffle in a running Flow TUI; otherwise start the TUI with shuffle enabled",
     )
+    parser.add_argument(
+        "--status",
+        action="store_true",
+        help="show playback and web mode status, then exit",
+    )
     args = parser.parse_args()
 
     if args.status:

@@ -62,16 +62,36 @@ def _fork_bg(label):
     return True
 
 
+class _StopPlayback(Exception):
+    """Raised by _nav_delta when playback should stop cleanly (MPRIS Stop)."""
+
+
+def _clear_all_nav():
+    """Drop every nav flag on both player modules.
+
+    Called before a playback queue starts so an idle signal press (e.g. Stop
+    or Prev while nothing was playing) can't poison the next queue via a stale
+    flag left in the *other* module.
+    """
+    for mod in (player, off_player):
+        mod._stop_req = False
+        mod._prev_req = False
+        mod._next_req = False
+
+
 def _nav_delta():
+    # Snapshot both modules' flags, then clear all of them. The entry-reset in
+    # play_entry/play_file/play_url only touches their own module's flags, so a
+    # stale flag in the other module would otherwise be misread here.
+    stop = player._stop_req or off_player._stop_req
     prev = player._prev_req or off_player._prev_req
+    player._stop_req = off_player._stop_req = False
+    player._prev_req = off_player._prev_req = False
+    player._next_req = off_player._next_req = False
+    if stop:
+        raise _StopPlayback
     if prev:
-        player._prev_req = False
-        off_player._prev_req = False
-        player._next_req = False
-        off_player._next_req = False
         return -1
-    player._next_req = False
-    off_player._next_req = False
     return 1
 
 
@@ -315,6 +335,7 @@ def _choose_result(query, results, args=None):
 def play(extra: list[str], args):
     if config.kill_stored():
         print(f"{P}Stopped VLC{R}")
+    _clear_all_nav()
     global _last_results, _last_played
     arg = " ".join(extra) if extra else None
     if not arg:
@@ -348,10 +369,13 @@ def play(extra: list[str], args):
             try:
                 while True:
                     player.play_entry(entry, title, args)
+                    if player._stop_req:
+                        player._stop_req = False
+                        break
                     iteration += 1
                     if repeat_count > 0 and iteration >= repeat_count:
                         break
-            except KeyboardInterrupt:
+            except KeyboardInterrupt, _StopPlayback:
                 pass
         else:
             player.play_entry(entry, title, args)
@@ -366,6 +390,9 @@ def play(extra: list[str], args):
         results = list(_last_results)
         if shuffle:
             random.shuffle(results)
+        if getattr(args, "bg", False):
+            if not _fork_bg("Now playing"):
+                return
         repeat_count = getattr(args, "repeat_count", 0)
         iteration = 0
         try:
@@ -375,17 +402,19 @@ def play(extra: list[str], args):
                     entry, title, _ = results[idx]
                     entry = _resolve_entry(entry)
                     _last_played = (entry, title)
-                    if getattr(args, "bg", False):
-                        if not _fork_bg("Now playing"):
-                            return
-                    player.play_entry(entry, title, args)
+                    player.play_entry(
+                        entry,
+                        title,
+                        args,
+                        nav=(idx + 1 < len(results), idx > 0),
+                    )
                     idx += _nav_delta()
                 if not repeat:
                     break
                 iteration += 1
                 if repeat_count > 0 and iteration >= repeat_count:
                     break
-        except KeyboardInterrupt:
+        except KeyboardInterrupt, _StopPlayback:
             pass
     else:
         idx = _choose_result(arg, _last_results, args)
@@ -433,6 +462,9 @@ def _play_liked(args):
     if not liked:
         e("     No liked songs yet")
         return
+    if getattr(args, "bg", False):
+        if not _fork_bg("Now playing"):
+            return
     tracks = [(s["title"], "") for s in liked if s.get("title")]
     if not tracks:
         e("     No liked songs yet")
@@ -455,14 +487,19 @@ def _play_liked(args):
                 entry, _, _ = _last_results[0]
                 entry = _resolve_entry(entry)
                 _last_played = (entry, title)
-                player.play_entry(entry, title, args)
+                player.play_entry(
+                    entry,
+                    title,
+                    args,
+                    nav=(idx + 1 < len(tracks), idx > 0),
+                )
                 idx += _nav_delta()
             if not repeat:
                 break
             iteration += 1
             if repeat_count > 0 and iteration >= repeat_count:
                 break
-    except KeyboardInterrupt:
+    except KeyboardInterrupt, _StopPlayback:
         pass
 
 
@@ -472,6 +509,7 @@ _savan_results = []
 def savan_cmd(extra, args):
     if config.kill_stored():
         print(f"{P}Stopped VLC{R}")
+    _clear_all_nav()
     global _savan_results, _last_played
     arg = " ".join(extra) if extra else None
     if not arg:
@@ -500,14 +538,19 @@ def savan_cmd(extra, args):
             iteration = 0
             try:
                 while True:
-                    player.play_url(url, title, args, dur, savan.thumb_url(entry))
+                    player.play_url(
+                        url, title, args, dur, savan.thumb_url(entry), entry=entry
+                    )
+                    if player._stop_req:
+                        player._stop_req = False
+                        break
                     iteration += 1
                     if repeat_count > 0 and iteration >= repeat_count:
                         break
-            except KeyboardInterrupt:
+            except KeyboardInterrupt, _StopPlayback:
                 pass
         else:
-            player.play_url(url, title, args, dur, savan.thumb_url(entry))
+            player.play_url(url, title, args, dur, savan.thumb_url(entry), entry=entry)
         return
 
     stop = False
@@ -524,6 +567,9 @@ def savan_cmd(extra, args):
         results = list(_savan_results)
         if shuffle:
             random.shuffle(results)
+        if getattr(args, "bg", False):
+            if not _fork_bg("Now playing"):
+                return
         repeat_count = getattr(args, "repeat_count", 0)
         iteration = 0
         try:
@@ -537,17 +583,22 @@ def savan_cmd(extra, args):
                         idx += 1
                         continue
                     _last_played = (entry, title)
-                    if getattr(args, "bg", False):
-                        if not _fork_bg("Now playing"):
-                            return
-                    player.play_url(url, title, args, dur, savan.thumb_url(entry))
+                    player.play_url(
+                        url,
+                        title,
+                        args,
+                        dur,
+                        savan.thumb_url(entry),
+                        entry=entry,
+                        nav=(idx + 1 < len(results), idx > 0),
+                    )
                     idx += _nav_delta()
                 if not repeat:
                     break
                 iteration += 1
                 if repeat_count > 0 and iteration >= repeat_count:
                     break
-        except KeyboardInterrupt:
+        except KeyboardInterrupt, _StopPlayback:
             pass
     else:
         entry, title, dur = _savan_results[0]
@@ -559,7 +610,7 @@ def savan_cmd(extra, args):
         if getattr(args, "bg", False):
             if not _fork_bg("Now playing"):
                 return
-        player.play_url(url, title, args, dur, savan.thumb_url(entry))
+        player.play_url(url, title, args, dur, savan.thumb_url(entry), entry=entry)
 
 
 def savan_search(query):
@@ -587,6 +638,9 @@ def like_track():
         e("     No song currently playing")
         return
     entry, title = _last_played
+    if entry is None:
+        e("     No URL for current song (local track)")
+        return
     url = entry.get("webpage_url") or entry.get("original_url") or entry.get("url")
     if not url and entry.get("id"):
         url = f"https://www.youtube.com/watch?v={entry['id']}"
@@ -737,6 +791,9 @@ def unlike_track():
         e("     No song currently playing")
         return
     entry, title = _last_played
+    if entry is None:
+        e("     No URL for current song (local track)")
+        return
     url = entry.get("webpage_url") or entry.get("original_url") or entry.get("url")
     if not url and entry.get("id"):
         url = f"https://www.youtube.com/watch?v={entry['id']}"
@@ -771,6 +828,7 @@ def search(query: str, args=None):
     if not query:
         print("Search query required")
         return
+    _clear_all_nav()
     _do_search(query)
     if not _last_results:
         print("No results found")
@@ -796,10 +854,13 @@ def search(query: str, args=None):
         try:
             while True:
                 player.play_entry(entry, title, args)
+                if player._stop_req:
+                    player._stop_req = False
+                    break
                 iteration += 1
                 if repeat_count > 0 and iteration >= repeat_count:
                     break
-        except KeyboardInterrupt:
+        except KeyboardInterrupt, _StopPlayback:
             pass
     else:
         player.play_entry(entry, title, args)
@@ -823,6 +884,7 @@ def _select_radio_seed(query):
 def radio(extra, args):
     if config.kill_stored():
         print(f"{P}Stopped VLC{R}")
+    _clear_all_nav()
     global _radio_tracks
     query = " ".join(extra) if extra else None
     if not query:
@@ -982,6 +1044,8 @@ def radio(extra, args):
                         time.sleep(0.05)
                         continue
                     break
+                if not ch:
+                    break
                 if ch == b"\x10":
                     os.kill(os.getpid(), signal.SIGUSR1)
         except OSError:
@@ -999,7 +1063,7 @@ def radio(extra, args):
     try:
         while True:
             idx = 0
-            while idx < len(_radio_tracks) and not _radio_quit:
+            while 0 <= idx < len(_radio_tracks) and not _radio_quit:
                 title, vid, dur = _radio_tracks[idx]
                 url = f"https://www.youtube.com/watch?v={vid}"
                 config.dev_print(
@@ -1028,10 +1092,21 @@ def radio(extra, args):
                     i(
                         f"    Downloaded ({idx + 1}/{len(_radio_tracks)}): {_truncate_title(title)}"
                     )
-                    off_player.play_file(filepath, title, args, next_title=next_title)
+                    off_player.play_file(
+                        filepath,
+                        title,
+                        args,
+                        next_title=next_title,
+                        nav=(idx + 1 < len(_radio_tracks), idx > 0),
+                    )
                 else:
                     player.play_entry(
-                        entry, title, args, flags=flags, next_title=next_title
+                        entry,
+                        title,
+                        args,
+                        flags=flags,
+                        next_title=next_title,
+                        nav=(idx + 1 < len(_radio_tracks), idx > 0),
                     )
                 idx += _nav_delta()
             if not repeat or _radio_quit:
@@ -1039,7 +1114,7 @@ def radio(extra, args):
             iteration += 1
             if repeat_count > 0 and iteration >= repeat_count:
                 break
-    except KeyboardInterrupt:
+    except KeyboardInterrupt, _StopPlayback:
         _radio_quit = True
     finally:
         player._radio_active = False
@@ -1066,7 +1141,9 @@ def radio(extra, args):
 def download(extra: list[str], args=None):
     global _last_results
     fmt = None
-    if "-f" in extra:
+    if args is not None and getattr(args, "format", None):
+        fmt = str(args.format).lower()
+    elif "-f" in extra:
         fi = extra.index("-f")
         if fi + 1 < len(extra):
             fmt = extra[fi + 1].lower()
@@ -1144,64 +1221,64 @@ def download(extra: list[str], args=None):
         i(f"    Downloaded: {_truncate_title(title)}")
 
 
-def backfill_metadata():
-    """TEMP (--meta): pull metadata for already-downloaded songs into library.json.
+# def backfill_metadata():
+#     """TEMP (--meta): pull metadata for already-downloaded songs into library.json.
 
-    Saves after every song (update_meta writes library.json immediately), so a
-    YouTube block mid-run never loses what's already fetched. Songs that
-    already have metadata are skipped on re-runs, so you can restart after a
-    block instead of re-fetching all 84. One self-contained function so it's
-    easy to delete later.
-    """
-    ids = library.get_downloaded_ids()
-    if not ids:
-        e("     No downloaded songs in the library")
-        return 1
-    import yt_dlp
+#     Saves after every song (update_meta writes library.json immediately), so a
+#     YouTube block mid-run never loses what's already fetched. Songs that
+#     already have metadata are skipped on re-runs, so you can restart after a
+#     block instead of re-fetching all 84. One self-contained function so it's
+#     easy to delete later.
+#     """
+#     ids = library.get_downloaded_ids()
+#     if not ids:
+#         e("     No downloaded songs in the library")
+#         return 1
+#     import yt_dlp
 
-    i(f"    Fetching metadata for {len(ids)} downloaded songs...")
-    updated = 0
-    skipped = 0
-    failed = 0
-    for pos, video_id in enumerate(ids, 1):
-        tag = f"[{pos}/{len(ids)}] {video_id}"
-        existing = library.get(video_id) or {}
-        if existing.get("artist") or existing.get("duration"):
-            skipped += 1
-            continue
-        try:
-            with yt_dlp.YoutubeDL(youtube.ydl_opts_play) as ydl:
-                info = ydl.extract_info(
-                    f"https://www.youtube.com/watch?v={video_id}", download=False
-                )
-        except Exception as exc:
-            failed += 1
-            m(f"    {tag}: failed ({exc})")
-            continue
-        if not info:
-            failed += 1
-            m(f"    {tag}: no metadata returned")
-            continue
-        meta = library.meta_from_info(info)
-        meta["title"] = info.get("title", "")
-        library.update_meta(video_id, meta)  # saves library.json right here
-        updated += 1
-        label = meta.get("title") or video_id
-        artist = meta.get("artist") or ""
-        album = f" [{meta['album']}]" if meta.get("album") else ""
-        dur = meta.get("duration")
-        dur_s = f" ({dur // 60}:{dur % 60:02d})" if dur else ""
-        i(
-            f"    {tag}: {_truncate_title(label)}{dur_s}{album}"
-            + (f" — {artist}" if artist else "")
-        )
-    tail = (
-        f" ({skipped} already done, {failed} failed)"
-        if skipped or failed
-        else ""
-    )
-    print(f"\n{P}Backfilled metadata for {updated}/{len(ids)} songs{R}{tail}")
-    return 0
+#     i(f"    Fetching metadata for {len(ids)} downloaded songs...")
+#     updated = 0
+#     skipped = 0
+#     failed = 0
+#     for pos, video_id in enumerate(ids, 1):
+#         tag = f"[{pos}/{len(ids)}] {video_id}"
+#         existing = library.get(video_id) or {}
+#         if existing.get("artist") or existing.get("duration"):
+#             skipped += 1
+#             continue
+#         try:
+#             with yt_dlp.YoutubeDL(youtube.ydl_opts_play) as ydl:
+#                 info = ydl.extract_info(
+#                     f"https://www.youtube.com/watch?v={video_id}", download=False
+#                 )
+#         except Exception as exc:
+#             failed += 1
+#             m(f"    {tag}: failed ({exc})")
+#             continue
+#         if not info:
+#             failed += 1
+#             m(f"    {tag}: no metadata returned")
+#             continue
+#         meta = library.meta_from_info(info)
+#         meta["title"] = info.get("title", "")
+#         library.update_meta(video_id, meta)  # saves library.json right here
+#         updated += 1
+#         label = meta.get("title") or video_id
+#         artist = meta.get("artist") or ""
+#         album = f" [{meta['album']}]" if meta.get("album") else ""
+#         dur = meta.get("duration")
+#         dur_s = f" ({dur // 60}:{dur % 60:02d})" if dur else ""
+#         i(
+#             f"    {tag}: {_truncate_title(label)}{dur_s}{album}"
+#             + (f" — {artist}" if artist else "")
+#         )
+#     tail = (
+#         f" ({skipped} already done, {failed} failed)"
+#         if skipped or failed
+#         else ""
+#     )
+#     print(f"\n{P}Backfilled metadata for {updated}/{len(ids)} songs{R}{tail}")
+#     return 0
 
 
 _AUDIO_EXTS = {
@@ -1309,6 +1386,7 @@ def switch_mode():
 
 def playlist_cmd(extra, args):
     global _last_played
+    _clear_all_nav()
 
     def add_source(target_words, args):
         target = target_words[0]
@@ -1369,7 +1447,13 @@ def playlist_cmd(extra, args):
                         )
                         _last_played = (None, title)
                         playlist.backfill_local(actual, idx, src)
-                        off_player.play_file(src, title, args, next_title=next_title)
+                        off_player.play_file(
+                            src,
+                            title,
+                            args,
+                            next_title=next_title,
+                            nav=(idx + 1 < len(tracks), idx > 0),
+                        )
                         idx += _nav_delta()
                         continue
                     vid = s.get("id", "")
@@ -1381,14 +1465,20 @@ def playlist_cmd(extra, args):
                         idx += 1
                         continue
                     _last_played = (entry, title)
-                    player.play_entry(entry, title, args, next_title=next_title)
+                    player.play_entry(
+                        entry,
+                        title,
+                        args,
+                        next_title=next_title,
+                        nav=(idx + 1 < len(tracks), idx > 0),
+                    )
                     idx += _nav_delta()
                 if not repeat:
                     break
                 iteration += 1
                 if repeat_count > 0 and iteration >= repeat_count:
                     break
-        except KeyboardInterrupt:
+        except KeyboardInterrupt, _StopPlayback:
             pass
 
     def list_liked():

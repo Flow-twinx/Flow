@@ -1,5 +1,7 @@
+import fcntl
 import hashlib
 import json
+import os
 import pathlib
 import urllib.request
 
@@ -7,6 +9,7 @@ from backend.config import _truncate_title
 
 LIBRARY_FILE = pathlib.Path.home() / ".flow/library.json"
 THUMB_CACHE = pathlib.Path.home() / ".flow/downloads/.cache"
+_LOCK_FILE = pathlib.Path.home() / ".flow/library.lock"
 
 # Metadata fields once stored but no longer wanted; purged on every save.
 _REMOVED_META_KEYS = {
@@ -33,6 +36,42 @@ def load() -> dict:
     return {}
 
 
+def _atomic_write(path: pathlib.Path, data: dict):
+    """Write JSON atomically so a crash mid-write can never truncate the file."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2))
+    os.replace(tmp, path)
+
+
+class _library_lock:
+    """Exclusive cross-process lock guarding library read-modify-write cycles."""
+
+    def __init__(self):
+        self._fh = None
+
+    def __enter__(self):
+        LIBRARY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        self._fh = open(_LOCK_FILE, "a+")
+        fcntl.flock(self._fh, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *exc):
+        fcntl.flock(self._fh, fcntl.LOCK_UN)
+        self._fh.close()
+        self._fh = None
+
+
+def _mutate(fn):
+    """Serialize a load → mutate → save cycle. ``fn(library)`` may mutate
+    ``library`` in place and must return True when a save is needed."""
+    with _library_lock():
+        library = load()
+        changed = fn(library)
+        if changed:
+            save(library)
+        return library
+
+
 def save(library: dict):
     for entry in library.values():
         if isinstance(entry, dict):
@@ -41,7 +80,7 @@ def save(library: dict):
             for key in _REMOVED_META_KEYS:
                 entry.pop(key, None)
     LIBRARY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    LIBRARY_FILE.write_text(json.dumps(library, indent=2))
+    _atomic_write(LIBRARY_FILE, library)
 
 
 def thumbnail_path(video_id: str) -> str:
@@ -53,12 +92,15 @@ def thumbnail_url_for(video_id: str) -> str:
 
 
 def _set_thumbnail(video_id: str, path: str):
-    library = load()
-    entry = library.get(video_id)
-    if entry is not None:
+    def mutate(library):
+        entry = library.get(video_id)
+        if entry is None:
+            return False
         entry["thumbnail"] = path
         library[video_id] = entry
-        save(library)
+        return True
+
+    _mutate(mutate)
 
 
 def download_thumbnail(video_id: str, thumb_url: str = "") -> str | None:
@@ -143,113 +185,136 @@ def get_download_path(video_id: str) -> str | None:
 
 
 def get_downloaded_ids() -> list:
-    return sorted(k for k, v in load().items() if v.get("downloaded") and v.get("song"))
+    return sorted(
+        k for k, v in load().items()
+        if isinstance(v, dict) and v.get("downloaded") and v.get("song")
+    )
 
 
 def get_liked_ids() -> list:
-    return sorted(k for k, v in load().items() if v.get("liked"))
+    return sorted(
+        k for k, v in load().items() if isinstance(v, dict) and v.get("liked")
+    )
 
 
 def get_liked_entries() -> list:
     return [
         {"video_id": k, "title": v.get("title", "")}
         for k, v in load().items()
-        if v.get("liked")
+        if isinstance(v, dict) and v.get("liked")
     ]
 
 
 def get_speed_dial_ids() -> list:
-    return sorted(k for k, v in load().items() if v.get("speed_dial"))
+    return sorted(
+        k for k, v in load().items()
+        if isinstance(v, dict) and v.get("speed_dial")
+    )
 
 
 def get_speed_dial_entries() -> list:
     return [
         {"video_id": k, "title": v.get("title", "")}
         for k, v in load().items()
-        if v.get("speed_dial")
+        if isinstance(v, dict) and v.get("speed_dial")
     ]
 
 
 def mark_speed_dial(video_id: str, title: str = "", path: str = ""):
     if not video_id:
         return
-    library = load()
-    entry = library.get(video_id)
-    if entry is None:
-        entry = _default_entry(video_id, title)
-    entry["speed_dial"] = True
-    if title and not entry.get("title"):
-        entry["title"] = title
-    if path:
-        entry["song"] = path
-    entry["thumbnail"] = thumbnail_path(video_id)
-    library[video_id] = entry
-    save(library)
+
+    def mutate(library):
+        entry = library.get(video_id)
+        if entry is None:
+            entry = _default_entry(video_id, title)
+        entry["speed_dial"] = True
+        if title and not entry.get("title"):
+            entry["title"] = title
+        if path:
+            entry["song"] = path
+        entry["thumbnail"] = thumbnail_path(video_id)
+        library[video_id] = entry
+        return True
+
+    _mutate(mutate)
 
 
 def unmark_speed_dial(video_id: str):
     if not video_id:
         return
-    library = load()
-    entry = library.get(video_id)
-    if entry is None:
-        return
-    entry.pop("speed_dial", None)
-    if not entry.get("liked") and not entry.get("downloaded") and not entry.get("song"):
-        library.pop(video_id, None)
-    else:
-        library[video_id] = entry
-    save(library)
+
+    def mutate(library):
+        entry = library.get(video_id)
+        if entry is None:
+            return False
+        entry.pop("speed_dial", None)
+        if not entry.get("liked") and not entry.get("downloaded") and not entry.get("song"):
+            library.pop(video_id, None)
+        else:
+            library[video_id] = entry
+        return True
+
+    _mutate(mutate)
 
 
 def mark_liked(video_id: str, title: str = ""):
     if not video_id:
         return
-    library = load()
-    entry = library.get(video_id)
-    if entry is None:
-        entry = _default_entry(video_id, title)
-    entry["liked"] = True
-    if title and not entry.get("title"):
-        entry["title"] = title
-    entry["thumbnail"] = thumbnail_path(video_id)
-    library[video_id] = entry
-    save(library)
+
+    def mutate(library):
+        entry = library.get(video_id)
+        if entry is None:
+            entry = _default_entry(video_id, title)
+        entry["liked"] = True
+        if title and not entry.get("title"):
+            entry["title"] = title
+        entry["thumbnail"] = thumbnail_path(video_id)
+        library[video_id] = entry
+        return True
+
+    _mutate(mutate)
 
 
 def mark_unliked(video_id: str):
     if not video_id:
         return
-    library = load()
-    entry = library.get(video_id)
-    if entry is None:
-        return
-    entry["liked"] = False
-    if not entry.get("downloaded"):
-        library.pop(video_id, None)
-    else:
-        library[video_id] = entry
-    save(library)
+
+    def mutate(library):
+        entry = library.get(video_id)
+        if entry is None:
+            return False
+        entry["liked"] = False
+        if not entry.get("downloaded"):
+            library.pop(video_id, None)
+        else:
+            library[video_id] = entry
+        return True
+
+    _mutate(mutate)
 
 
 def track_download(video_id: str, path: str, title: str = "", meta=None):
     if not video_id:
         return
-    library = load()
-    entry = library.get(video_id)
-    if entry is None:
-        entry = _default_entry(video_id, title)
-    entry["downloaded"] = True
-    entry["song"] = path
-    if title and not entry.get("title"):
-        entry["title"] = title
-    if meta:
-        for k, v in meta.items():
-            if v not in (None, ""):
-                entry[k] = v
-    entry["thumbnail"] = thumbnail_path(video_id)
-    library[video_id] = entry
-    save(library)
+
+    def mutate(library):
+        entry = library.get(video_id)
+        if entry is None:
+            entry = _default_entry(video_id, title)
+        entry["downloaded"] = True
+        entry["song"] = path
+        if title and not entry.get("title"):
+            entry["title"] = title
+        if meta:
+            for k, v in meta.items():
+                if v not in (None, ""):
+                    entry[k] = v
+        entry["thumbnail"] = thumbnail_path(video_id)
+        library[video_id] = entry
+        return True
+
+    _mutate(mutate)
 
 
 def meta_from_info(info: dict) -> dict:
@@ -287,31 +352,37 @@ def update_meta(video_id: str, meta: dict):
     """Merge fetched/backfilled metadata into the library entry."""
     if not video_id or not meta:
         return
-    library = load()
-    entry = library.get(video_id)
-    if entry is None:
-        entry = _default_entry(video_id)
-    for k, v in meta.items():
-        if v not in (None, ""):
-            entry[k] = v
-    library[video_id] = entry
-    save(library)
+
+    def mutate(library):
+        entry = library.get(video_id)
+        if entry is None:
+            entry = _default_entry(video_id)
+        for k, v in meta.items():
+            if v not in (None, ""):
+                entry[k] = v
+        library[video_id] = entry
+        return True
+
+    _mutate(mutate)
 
 
 def clear_download(video_id: str):
     if not video_id:
         return
-    library = load()
-    entry = library.get(video_id)
-    if entry is None:
-        return
-    entry["downloaded"] = False
-    entry["song"] = None
-    if not entry.get("liked"):
-        library.pop(video_id, None)
-    else:
-        library[video_id] = entry
-    save(library)
+
+    def mutate(library):
+        entry = library.get(video_id)
+        if entry is None:
+            return False
+        entry["downloaded"] = False
+        entry["song"] = None
+        if not entry.get("liked"):
+            library.pop(video_id, None)
+        else:
+            library[video_id] = entry
+        return True
+
+    _mutate(mutate)
 
 
 def delete(video_id: str) -> bool:
