@@ -91,7 +91,7 @@ def _send_control(command, sig, label, payload=None):
 
 
 def _spinner(stop):
-    chars = "|/-\\"
+    chars = config.SPINNER
     i = 0
     while not stop():
         sys.stdout.write(f"\r{P}Checking connection... {chars[i]}{R}")
@@ -205,11 +205,19 @@ def main():
         description="Flow Music Player",
         epilog=(
             "Plugin commands:\n"
-            "  flow install <ref>       install a plugin (name | owner/name | git URL)\n"
+            "  flow install <ref>       install a plugin (name | owner/name | git URL);\n"
+            "                           bare 'flow install' opens an interactive picker\n"
             "  flow plugins list        list available plugins\n"
-            "  flow run <name> [args]   run an installed plugin\n"
+            "  flow plugins refresh     force-refresh plugin repos\n"
+            "  flow run <name> [args]   run a plugin (background by default; -t = foreground)\n"
+            "  flow plugin kill         stop running plugins (interactive, <name>, or all)\n"
             "  flow uninstall <name>    remove an installed plugin\n"
-            "  flow plugins update      update the plugin repos"
+            "  flow plugins update      update the plugin repos\n"
+            "Plugin developer flags:\n"
+            "  flow --config-get <key>  print a config value\n"
+            "  flow --config-set <k> <v>  set a config value (validated)\n"
+            "  flow --theme <name>      apply a theme preset\n"
+            "  flow --spinner <chars>   set the loading spinner"
         ),
     )
     parser.add_argument("--play", nargs="+", help="play a song")
@@ -284,6 +292,17 @@ def main():
     )
     parser.add_argument("command", nargs="?", default=None, help="subcommand (play, search, list, ...)")
     parser.add_argument("--check", action="store_true", help="check all dependencies")
+    parser.add_argument("--config-get", metavar="KEY", help="print a config value")
+    parser.add_argument(
+        "--config-set",
+        nargs=2,
+        metavar=("KEY", "VALUE"),
+        help="set a config value through the validated setter",
+    )
+    parser.add_argument("--theme", metavar="NAME", help="apply a theme preset ('list' shows themes)")
+    parser.add_argument(
+        "--spinner", metavar="CHARS", help="set the loading spinner characters"
+    )
 
     args, unknown = parser.parse_known_args()
 
@@ -291,8 +310,44 @@ def main():
         _setup_island()
         sys.exit(0)
 
-    # --- plugin commands (global; work without VLC / mode detection) ---
-    if args.command in ("plugins", "install", "uninstall", "remove", "run", "update"):
+    if getattr(args, "config_get", None) is not None:
+        val, ok = config.config_get(args.config_get)
+        if not ok:
+            print(f"{M}Unknown config key: {args.config_get}{R}")
+            sys.exit(1)
+        print(val if isinstance(val, str) else json.dumps(val))
+        sys.exit(0)
+
+    if getattr(args, "config_set", None) is not None:
+        key, value = args.config_set
+        msg = config.apply_config(key, value)
+        print(msg)
+        bad = any(t in msg for t in ("Unknown", "must be", "not found", "ffmpeg not found"))
+        sys.exit(1 if bad else 0)
+
+    if getattr(args, "theme", None) is not None:
+        msg = config._apply_theme(args.theme)
+        print(msg)
+        bad = any(t in msg for t in ("Unknown", "must be", "not found", "ffmpeg not found"))
+        sys.exit(1 if bad else 0)
+
+    if getattr(args, "spinner", None) is not None:
+        msg = config._apply_spinner(args.spinner)
+        print(msg)
+        bad = any(t in msg for t in ("Unknown", "must be", "not found", "ffmpeg not found"))
+        sys.exit(1 if bad else 0)
+
+    if args.command in (
+        "plugins",
+        "plugin",
+        "install",
+        "uninstall",
+        "remove",
+        "run",
+        "update",
+        "refresh",
+        "kill",
+    ):
         from backend import plugins
 
         sys.exit(plugins.dispatch(args.command, unknown, args))

@@ -4,9 +4,12 @@ import json
 import os
 import pathlib
 import shutil
+import signal
 import subprocess
 import sys
+import time
 
+from backend import config
 from backend.config import GREY, RED, Muted, Primary, Reset, Secondary
 
 P = Primary
@@ -19,43 +22,12 @@ E = RED
 PLUGINS_DIR = pathlib.Path.home() / ".flow/plugins"
 REPO_CACHE = PLUGINS_DIR / "_repo"
 OTHER_CACHE = PLUGINS_DIR / "_src"
+PIDS_DIR = PLUGINS_DIR / "_pids"
+LOGS_DIR = PLUGINS_DIR / "_logs"
 
 DEFAULT_REPO = "https://github.com/Twinx015/flow-plugins.git"
 
-API_VERSION = 1
-
-FLOW_API_SOURCE = '''"""Flow Plugin API v1 — read-only, process-isolated interface.
-
-Provided by Flow. Plugins must not import any flow internals; everything a
-plugin may do goes through this module.
-"""
-import json
-import os
-import pathlib
-import subprocess
-
-STATUS_FILE = pathlib.Path.home() / ".flow/status.json"
-FLOW_BIN = os.environ.get("FLOW_BIN", "flow")
-
-API_VERSION = 1
-
-
-def current_track():
-    """Return the current track info dict (title/duration/thumbnail/playing/ts),
-    or {} if nothing is playing / no status file exists."""
-    try:
-        return json.loads(STATUS_FILE.read_text())
-    except Exception:
-        return {}
-
-
-def control(*flow_args):
-    """Run a flow CLI command as a subprocess and return its exit code.
-
-    Examples: control("--pause"), control("--next"), control("--status")
-    """
-    return subprocess.call([FLOW_BIN, *flow_args])
-'''
+API_SOURCE = pathlib.Path(__file__).parent / "plugin_api" / "flow_api.py"
 
 
 def _ensure_plugins_dir():
@@ -75,12 +47,19 @@ def _git(args: list[str], timeout: int = 60) -> subprocess.CompletedProcess:
     )
 
 
+def _has_commits(cache: pathlib.Path) -> bool:
+    return _git(["-C", str(cache), "rev-parse", "HEAD"]).returncode == 0
+
+
 def _ensure_repo(url: str) -> pathlib.Path:
     _ensure_plugins_dir()
     cache = REPO_CACHE if url == DEFAULT_REPO else OTHER_CACHE / _repo_key(url)
     if (cache / ".git").exists():
-        _git(["-C", str(cache), "pull", "--ff-only", "-q"], timeout=30)
-    else:
+        if _has_commits(cache):
+            _git(["-C", str(cache), "pull", "--ff-only", "-q"], timeout=30)
+        else:
+            shutil.rmtree(cache, ignore_errors=True)
+    if not (cache / ".git").exists():
         cache.mkdir(parents=True, exist_ok=True)
         r = _git(["clone", "--depth", "1", url, str(cache)])
         if r.returncode != 0:
@@ -88,6 +67,9 @@ def _ensure_repo(url: str) -> pathlib.Path:
             raise RuntimeError(
                 f"git clone failed for {url}:\n{(r.stderr or r.stdout).strip()}"
             )
+        if not _has_commits(cache):
+            shutil.rmtree(cache, ignore_errors=True)
+            raise RuntimeError(f"repo {url} has no commits")
     return cache
 
 
@@ -128,7 +110,13 @@ def _resolve_ref(ref: str) -> tuple[str, str]:
 
 
 def _write_api(plugin_dir: pathlib.Path):
-    (plugin_dir / "flow_api.py").write_text(FLOW_API_SOURCE)
+    shutil.copyfile(API_SOURCE, plugin_dir / "flow_api.py")
+
+
+def _sync_api(plugin_dir: pathlib.Path):
+    target = plugin_dir / "flow_api.py"
+    if not target.exists() or target.read_bytes() != API_SOURCE.read_bytes():
+        _write_api(plugin_dir)
 
 
 def _write_plugin_json(plugin_dir: pathlib.Path, entry: dict):
@@ -136,7 +124,6 @@ def _write_plugin_json(plugin_dir: pathlib.Path, entry: dict):
 
 
 def installed() -> dict[str, dict]:
-    """Return {name: plugin.json contents} for installed plugins."""
     _ensure_plugins_dir()
     result = {}
     for child in PLUGINS_DIR.iterdir():
@@ -154,58 +141,54 @@ def installed() -> dict[str, dict]:
     return result
 
 
-def cmd_list(extra=None) -> int:
-    """flow plugins list — read the cached default-repo catalog (fast, offline)."""
-    if not REPO_CACHE.exists():
-        try:
-            _ensure_repo(DEFAULT_REPO)
-        except Exception as exc:
-            print(f"{E}Could not fetch plugin repo: {exc}{R}")
-            return 1
+def _catalog() -> list[dict]:
     manifest = _read_manifest(REPO_CACHE)
-    if not manifest:
-        print(f"{E}No manifest.json found in cached plugin repo{R}")
+    if manifest is None:
+        _ensure_repo(DEFAULT_REPO)
+        manifest = _read_manifest(REPO_CACHE)
+    return (manifest or {}).get("plugins") or []
+
+
+def cmd_list(extra=None) -> int:
+    try:
+        plugins = _catalog()
+    except Exception as exc:
+        print(f"{E}Could not fetch plugin repo: {exc}{R}")
+        return 1
+    if not plugins:
+        print(f"{E}No plugins available in the repository{R}")
         return 1
 
     inst = installed()
-    plugins = manifest.get("plugins") or []
-    if not plugins:
-        print(f"{M}No plugins available in the repository{R}")
-        return 0
-
-    print(f"\n{P}Available plugins:{R}\n")
+    lefts = []
+    name_w = max(len(p.get("name", "?")) for p in plugins) + 2
     for p in plugins:
         name = p.get("name", "?")
         ver = p.get("version", "?")
         desc = p.get("description", "")
-        mark = ""
+        lefts.append(f"  {P}{name:<{name_w}}{R} {G}v{ver:<6}{R} {desc}")
+    max_left = max(len(l) for l in lefts)
+
+    print(f"\n{P}Available plugins:{R}\n")
+    for p, left in zip(plugins, lefts):
+        name = p.get("name", "?")
+        marker = ""
         if name in inst:
             iv = inst[name].get("version")
-            mark = (
-                f" {S}installed v{iv}{R}"
-                if iv == ver
-                else f" {S}installed v{iv} → update v{ver}{R}"
+            ver = p.get("version")
+            marker = (
+                G + ("[installed]" if iv == ver else f"[installed v{iv}→update]") + R
             )
-        print(f"  {P}{name:<20}{R} {G}v{ver}{R}  {desc}{mark}")
+        line = left + " " * (max_left - len(left))
+        if marker:
+            line += "  " + marker
+        print(line)
     print()
     return 0
 
 
-def cmd_install(extra) -> int:
-    """flow install <REF> [--force]"""
-    force = "--force" in extra
-    extra = [x for x in extra if x != "--force"]
-    if not extra:
-        print(f"{E}Usage: flow install <plugin-name> [--force]{R}")
-        print(f"  {G}Examples:{R}")
-        print(f"    flow install thumbnail-circle")
-        print(f"    flow install Twinx015/harpy")
-        print(f"    flow install https://github.com/USER/repo.git")
-        return 1
-
-    ref = extra[0]
+def _install_one(ref: str, force: bool) -> int:
     repo_url, plugin_name = _resolve_ref(ref)
-
     print(f"{P}Fetching plugin '{plugin_name}'...{R}")
     try:
         cache = _ensure_repo(repo_url)
@@ -253,8 +236,82 @@ def cmd_install(extra) -> int:
     return 0
 
 
+def _is_tty() -> bool:
+    try:
+        return sys.stdin.isatty()
+    except Exception:
+        return False
+
+
+def _interactive_install(force: bool) -> int:
+    try:
+        plugins = _catalog()
+    except Exception as exc:
+        print(f"{E}Could not fetch plugin repo: {exc}{R}")
+        return 1
+    if not plugins:
+        print(f"{M}No plugins available in the repository{R}")
+        return 0
+
+    inst = installed()
+    choices = [
+        dict(
+            name=f"{p.get('name')}  v{p.get('version', '?')}  {p.get('description', '')}",
+            value=p.get("name"),
+            checked=p.get("name") in inst,
+        )
+        for p in plugins
+    ]
+
+    if not _is_tty():
+        names = ", ".join(p.get("name") for p in plugins)
+        print(f"{M}Interactive install needs a terminal.{R}")
+        print(f"{G}Install directly: flow install {names}{R}")
+        return 1
+
+    try:
+        from questionary import checkbox
+    except ImportError:
+        print(
+            f"{M}Interactive install requires 'questionary' (pip install questionary){R}"
+        )
+        return 1
+
+    try:
+        from backend.ui import questionary_style
+
+        qstyle = questionary_style()
+    except Exception:
+        qstyle = None
+
+    selected = checkbox(
+        "Plugins to install",
+        choices=choices,
+        style=qstyle,
+        instruction="(space to toggle, enter to install)",
+    ).ask()
+    if not selected:
+        print(f"{M}No plugins selected{R}")
+        return 0
+
+    rc = 0
+    for name in selected:
+        rc |= _install_one(name, force)
+    return rc
+
+
+def cmd_install(extra) -> int:
+    force = "--force" in extra
+    extra = [x for x in extra if x != "--force"]
+    if not extra:
+        return _interactive_install(force)
+    rc = 0
+    for ref in extra:
+        rc |= _install_one(ref, force)
+    return rc
+
+
 def cmd_uninstall(extra) -> int:
-    """flow uninstall <name>"""
     if not extra:
         print(f"{E}Usage: flow uninstall <plugin-name>{R}")
         return 1
@@ -264,17 +321,57 @@ def cmd_uninstall(extra) -> int:
         print(f"{E}Plugin '{name}' is not installed{R}")
         return 1
     shutil.rmtree(dest)
+    _pid_file(name).unlink(missing_ok=True)
     print(f"{P}Uninstalled plugin '{name}'{R}")
     return 0
 
 
+def _pid_file(name: str) -> pathlib.Path:
+    return PIDS_DIR / f"{name}.pid"
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def running() -> dict[str, int]:
+    result = {}
+    if not PIDS_DIR.exists():
+        return result
+    for f in PIDS_DIR.glob("*.pid"):
+        try:
+            pid = int(f.read_text().strip())
+        except Exception:
+            continue
+        if _alive(pid):
+            result[f.stem] = pid
+        else:
+            f.unlink(missing_ok=True)
+    return result
+
+
 def cmd_run(extra) -> int:
-    """flow run <name> [args...]"""
     if not extra:
-        print(f"{E}Usage: flow run <plugin-name> [args...]{R}")
+        print(f"{E}Usage: flow run <plugin-name> [args...] [-t]{R}")
         return 1
+
     name = extra[0]
-    plugin_args = extra[1:]
+    if "-t" in extra:
+        bg = False
+    elif "-bg" in extra:
+        bg = True
+    else:
+        bg = not config.DEV_MODE
+    plugin_args = [x for x in extra[1:] if x not in ("-t", "-bg")]
+
     dest = PLUGINS_DIR / name
     if not dest.exists():
         print(f"{E}Plugin '{name}' is not installed{R}")
@@ -296,52 +393,140 @@ def cmd_run(extra) -> int:
         print(f"{E}Plugin entry point not found: {entry_name}{R}")
         return 1
 
+    _sync_api(dest)
+
     flow_bin = shutil.which("flow") or f"{sys.executable} -m cli.main"
     env = os.environ.copy()
     env["FLOW_PLUGIN_NAME"] = name
     env["FLOW_PLUGIN_HOME"] = str(dest)
     env["FLOW_BIN"] = flow_bin
+    env["FLOW_PLUGIN_BG"] = "1" if bg else "0"
+
+    PIDS_DIR.mkdir(parents=True, exist_ok=True)
+    log_file = None
+    if bg:
+        LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        log_file = open(LOGS_DIR / f"{name}.log", "ab", buffering=0)
+
+    proc = subprocess.Popen(
+        [sys.executable, str(entry_path), *plugin_args],
+        cwd=str(dest),
+        env=env,
+        start_new_session=True,
+        stdout=log_file,
+        stderr=log_file,
+    )
+    _pid_file(name).write_text(str(proc.pid))
+
+    if bg:
+        print(f"{P}Running plugin '{name}' in background (pid {proc.pid}){R}")
+        print(f"{G}Stop it with: flow plugin kill {name}{R}")
+        return 0
 
     print(f"{P}Running plugin '{name}'{R}")
     try:
-        return subprocess.call(
-            [sys.executable, str(entry_path), *plugin_args],
-            cwd=str(dest),
-            env=env,
-        )
+        return proc.wait()
     except KeyboardInterrupt:
-        print(f"{M}\nStopped plugin '{name}'{R}")
+        _kill_pid(name, proc.pid)
         return 130
+    finally:
+        _pid_file(name).unlink(missing_ok=True)
+
+
+def _kill_pid(name: str, pid: int):
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    except OSError as exc:
+        print(f"{E}Failed to signal {name}: {exc}{R}")
+    for _ in range(50):
+        if not _alive(pid):
+            break
+        time.sleep(0.1)
+    else:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+    _pid_file(name).unlink(missing_ok=True)
+    print(f"{P}Stopped plugin '{name}'{R}")
+
+
+def cmd_kill(extra) -> int:
+    running_ = running()
+    if not running_:
+        print(f"{M}No plugins running{R}")
+        return 0
+
+    if extra:
+        target = extra[0]
+        if target == "all":
+            names = list(running_)
+        elif target in running_:
+            names = [target]
+        else:
+            print(f"{E}Plugin '{target}' is not running{R}")
+            print(f"{G}Running: {', '.join(running_)}{R}")
+            return 1
+    else:
+        if not _is_tty():
+            names = ", ".join(running_)
+            print(f"{M}Plugins running: {names}{R}")
+            print(f"{G}Kill with: flow plugin kill all{R}")
+            return 0
+        try:
+            from backend.ui import pick
+
+            selection, _ = pick(
+                "Kill running plugin",
+                [(f"{n} (pid {p})", n) for n, p in running_.items()]
+                + [("All plugins", "all"), ("Cancel", None)],
+                instruction="(↑↓ navigate, Enter to select)",
+            )
+        except Exception:
+            selection = None
+        if not selection or selection not in ("all", *running_):
+            return 0
+        names = list(running_) if selection == "all" else [selection]
+
+    for name in names:
+        _kill_pid(name, running_[name])
+    return 0
 
 
 def cmd_update() -> int:
-    """flow plugins update — pull all cached repo clones and report updates."""
     caches = [REPO_CACHE]
     if OTHER_CACHE.exists():
         caches += [d for d in OTHER_CACHE.iterdir() if d.is_dir()]
 
     updated = 0
     for cache_dir in caches:
-        git_dir = cache_dir / ".git"
-        if not git_dir.exists():
+        if not (cache_dir / ".git").exists():
             continue
-        try:
-            r = _git(["-C", str(cache_dir), "pull", "--ff-only", "-q"], timeout=30)
-            if r.returncode == 0:
-                updated += 1
-            else:
-                print(
-                    f"{E}Failed to update {cache_dir}: {(r.stderr or r.stdout).strip()}{R}"
-                )
-        except Exception as exc:
-            print(f"{E}Failed to update {cache_dir}: {exc}{R}")
+        if not _has_commits(cache_dir):
+            shutil.rmtree(cache_dir, ignore_errors=True)
+            updated += 1
+            continue
+        r = _git(["-C", str(cache_dir), "pull", "--ff-only", "-q"], timeout=30)
+        if r.returncode == 0:
+            updated += 1
+        else:
+            print(
+                f"{E}Failed to update {cache_dir}: {(r.stderr or r.stdout).strip()}{R}"
+            )
 
     print(f"{P}Updated {updated} plugin repo(s){R}")
 
     inst = installed()
-    manifest = _read_manifest(REPO_CACHE)
+    for name in inst:
+        _sync_api(PLUGINS_DIR / name)
     diffs = []
-    for p in (manifest or {}).get("plugins", []):
+    try:
+        plugins = _catalog()
+    except Exception:
+        plugins = []
+    for p in plugins:
         name = p.get("name")
         if name in inst and inst[name].get("version") != p.get("version"):
             diffs.append(f"  {name}: {inst[name].get('version')} → {p.get('version')}")
@@ -353,11 +538,40 @@ def cmd_update() -> int:
     return 0
 
 
-PLUGIN_CMDS = {"plugins", "install", "uninstall", "remove", "run", "update"}
+def cmd_refresh() -> int:
+    repos = [DEFAULT_REPO]
+    if OTHER_CACHE.exists():
+        for d in OTHER_CACHE.iterdir():
+            if d.is_dir() and (d / ".git").exists():
+                r = _git(["-C", str(d), "remote", "get-url", "origin"], timeout=30)
+                if r.returncode == 0 and r.stdout.strip():
+                    repos.append(r.stdout.strip())
+    ok = True
+    for url in repos:
+        try:
+            _ensure_repo(url)
+        except Exception as exc:
+            ok = False
+            print(f"{E}Failed to refresh {url}: {exc}{R}")
+    print(f"{P}Refreshed {len(repos)} plugin repo(s){R}")
+    return 0 if ok else 1
+
+
+PLUGIN_CMDS = {
+    "plugins",
+    "plugin",
+    "install",
+    "uninstall",
+    "remove",
+    "run",
+    "update",
+    "refresh",
+    "kill",
+}
 
 
 def dispatch(cmd: str, extra: list[str], args: argparse.Namespace | None = None):
-    if cmd == "plugins":
+    if cmd in ("plugins", "plugin"):
         subcmd = extra[0] if extra else "list"
         rest = extra[1:] if len(extra) > 1 else []
         if subcmd == "list":
@@ -370,9 +584,13 @@ def dispatch(cmd: str, extra: list[str], args: argparse.Namespace | None = None)
             return cmd_run(rest)
         if subcmd == "update":
             return cmd_update()
+        if subcmd == "refresh":
+            return cmd_refresh()
+        if subcmd == "kill":
+            return cmd_kill(rest)
         print(f"{E}Unknown plugin subcommand: {subcmd}{R}")
         print(
-            f"{G}Usage: {P}plugins {S}list|install <ref>|uninstall <name>|run <name>|update{R}"
+            f"{G}Usage: {P}plugins {S}list|install|uninstall|run|update|refresh|kill{R}"
         )
         return 1
     if cmd == "install":
@@ -383,4 +601,8 @@ def dispatch(cmd: str, extra: list[str], args: argparse.Namespace | None = None)
         return cmd_run(list(extra))
     if cmd == "update":
         return cmd_update()
+    if cmd == "refresh":
+        return cmd_refresh()
+    if cmd == "kill":
+        return cmd_kill(list(extra))
     return None

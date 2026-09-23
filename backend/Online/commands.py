@@ -169,7 +169,7 @@ def run(cmd: str, extra: list[str], args):
 
 
 def _spinner(stop, label="Searching"):
-    chars = "|/-\\"
+    chars = config.SPINNER
     i = 0
     while not stop():
         sys.stdout.write(f"\r{P}{label}... {chars[i]}{R}")

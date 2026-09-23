@@ -15,7 +15,7 @@ from backend import playlist
 from backend import sponsor
 from backend import status
 from backend import config
-from backend.web import devlog
+from web import devlog
 
 logger = logging.getLogger(__name__)
 

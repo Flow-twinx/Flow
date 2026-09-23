@@ -34,7 +34,7 @@ include = ["cli*", "backend*", "tui*", "web*"]
 
 [tool.setuptools.package-data]
 flow_twinx = ["Hyprland/*.qml"]
-backend = ["web/templates/*"]
+web = ["templates/*"]
 
 [dependency-groups]
 dev = [

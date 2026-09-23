@@ -34,7 +34,7 @@ def kill_port(port):
 
 
 def _run_web(port):
-    from backend.web.app import app
+    from web.app import app
 
     try:
         app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False)
