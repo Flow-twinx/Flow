@@ -187,6 +187,20 @@ def _online_help():
             f"{G}  Picks online/offline automatically from the thumbnail path.{R}",
             f"{G}  Use from shell: {M}flow --resume{R}",
         ],
+        "plugins": [
+            f"{T}> plugins{R} {M}list{R} | {M}install{R} | {M}run{R} {M}<name>{R} | {M}uninstall{R} {M}<name>{R} | {M}kill{R} | {M}refresh{R} | {M}update{R}",
+            f"{G}  Install and run Flow plugins (packages from git repos).{R}",
+            f"  {M}install{R}     {G}bare: interactive picker (space toggle / enter install);{R}",
+            f"                {G}or: flow install <ref> (multiple refs allowed, e.g. a b c){R}",
+            f"  {M}<ref>{R}       {G}name | owner/name | full git URL | /local/path#plugin{R}",
+            f"  {M}run{R} {M}<name>{R}   {G}run in background by default;{R} {M}-t{R} {G}= foreground (temp){R}",
+            f"  {M}kill{R}       {G}interactive, or: plugin kill <name> | plugin kill all{R}",
+            f"  {M}refresh{R}    {G}force-pull all plugin repos (repairs empty caches){R}",
+            f"  {M}update{R}     {G}pull repos and list available version updates{R}",
+            f"  {M}--force{R}    {G}reinstall an already-installed plugin{R}",
+            f"  {M}dev.mode{R}   {G}when true in config, 'flow run' stays foreground{R}",
+            f"{G}  Installed plugins live in {M}~/.flow/plugins/<name>/{R}",
+        ],
     }
 
 
@@ -327,6 +341,20 @@ def _offline_help():
             f"{G}  Replay the last played track listed in {B}~/.flow/status.json{R}",
             f"{G}  Picks online/offline automatically from the thumbnail path.{R}",
             f"{G}  Use from shell: {B}flow --resume{R}",
+        ],
+        "plugins": [
+            f"{T}> plugins{R} {B}list{R} | {B}install{R} | {B}run{R} {B}<name>{R} | {B}uninstall{R} {B}<name>{R} | {B}kill{R} | {B}refresh{R} | {B}update{R}",
+            f"{G}  Install and run Flow plugins (packages from git repos).{R}",
+            f"  {B}install{R}     {G}bare: interactive picker (space toggle / enter install);{R}",
+            f"                {G}or: flow install <ref> (multiple refs allowed, e.g. a b c){R}",
+            f"  {B}<ref>{R}       {G}name | owner/name | full git URL | /local/path#plugin{R}",
+            f"  {B}run{R} {B}<name>{R}   {G}run in background by default;{R} {B}-t{R} {G}= foreground (temp){R}",
+            f"  {B}kill{R}       {G}interactive, or: plugin kill <name> | plugin kill all{R}",
+            f"  {B}refresh{R}    {G}force-pull all plugin repos (repairs empty caches){R}",
+            f"  {B}update{R}     {G}pull repos and list available version updates{R}",
+            f"  {B}--force{R}    {G}reinstall an already-installed plugin{R}",
+            f"  {B}dev.mode{R}   {G}when true in config, 'flow run' stays foreground{R}",
+            f"{G}  Installed plugins live in {B}~/.flow/plugins/<name>/{R}",
         ],
     }
 

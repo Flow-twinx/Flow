@@ -4,7 +4,6 @@ import pathlib
 import time
 
 STATUS_FILE = pathlib.Path.home() / ".flow/status.json"
-WEB_PID_FILE = pathlib.Path.home() / ".flow/web.pid"
 WEB_PORT_FILE = pathlib.Path.home() / ".flow/web_port"
 
 
@@ -34,18 +33,17 @@ def read():
 
 
 def _web_active():
-    try:
-        if not WEB_PID_FILE.exists():
-            return False
-        import psutil
+    from backend import registry
 
-        pid = int(WEB_PID_FILE.read_text().strip())
-        return psutil.Process(pid).is_running()
-    except Exception:
-        return False
+    return registry.resolve("web") is not None
 
 
 def _web_port():
+    from backend import registry
+
+    entry = registry.resolve("web")
+    if entry and entry.get("port"):
+        return entry["port"]
     try:
         return int(WEB_PORT_FILE.read_text().strip())
     except Exception:
@@ -85,6 +83,9 @@ def show():
     from . import library
     from .config import CYAN, GREY, WHITE, Muted, Primary, Reset
 
+    from backend import registry
+
+    registry.prune()  # drop dead players from ~/.flow/players.json
     data = _read()
     web = _web_active()
     port = _web_port()

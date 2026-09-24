@@ -86,7 +86,7 @@ _COLORS = {
 
 _COLOR_NAMES = {v: k for k, v in _COLORS.items()}
 
-_TARGET_ALIASES = {"pri": "primary", "sec": "secondary", "ter": "tertiary"}
+_TARGET_ALIASES = {"pri": "primary", "sec": "secondary", "ter": "tertiary", "spin": "spinner"}
 _TARGETS = {"primary", "secondary", "tertiary", "display"}
 _DISPLAY_MODES = {"none", "bars", "lyrics"}
 _BAR_SPACING = {"min", "fit", "max"}
@@ -101,6 +101,16 @@ BarHeight = 40
 BarSpacing = 1
 BarChar = "\u2588"
 Sensitivity = 1.0
+SPINNER = "|/-\\"
+
+THEMES = {
+    "ocean": ("cyan", "purple", "blue"),
+    "sunset": ("orange", "pink", "gold"),
+    "forest": ("green", "lime", "teal"),
+    "fire": ("red", "orange", "gold"),
+    "mono": ("grey", "white", "maroon"),
+    "royal": ("indigo", "violet", "skyblue"),
+}
 
 ####### Be carefull this will make everything print on screen including links title view and all things ###
 DEV_MODE = False
@@ -308,6 +318,7 @@ def _load_config():
         BarSpacing, \
         BarChar, \
         Sensitivity, \
+        SPINNER, \
         DEV_MODE, \
         FFMPEG, \
         _ffmpeg_configured, \
@@ -361,6 +372,12 @@ def _load_config():
             and data["bar_char"]
         ):
             BarChar = data["bar_char"][:1]
+        if (
+            "spinner" in data
+            and isinstance(data["spinner"], str)
+            and 2 <= len(data["spinner"]) <= 16
+        ):
+            SPINNER = data["spinner"]
         if "dev" in data and isinstance(data["dev"], bool):
             DEV_MODE = data["dev"]
         if "ffmpeg" in data and isinstance(data["ffmpeg"], bool):
@@ -406,6 +423,7 @@ def _save_config():
         "bar_spacing": BarSpacing,
         "bar_char": BarChar,
         "sensitivity": Sensitivity,
+        "spinner": SPINNER,
         "dev": DEV_MODE,
         "ffmpeg": FFMPEG,
         "ad_skip": AD_SKIP,
@@ -457,6 +475,9 @@ def clear_seek():
 def save_pid(pid: int):
     PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     PID_FILE.write_text(str(pid))
+    from backend import registry
+
+    registry.register("vlc", pid)
 
 
 def read_pid() -> int | None:
@@ -471,11 +492,17 @@ def read_pid() -> int | None:
 def clear_pid():
     if PID_FILE.exists():
         PID_FILE.unlink()
+    from backend import registry
+
+    registry.unregister("vlc")
 
 
 def save_tui_pid(pid: int):
     TUI_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     TUI_PID_FILE.write_text(str(pid))
+    from backend import registry
+
+    registry.register("tui", pid)
 
 
 def read_tui_pid() -> int | None:
@@ -490,6 +517,9 @@ def read_tui_pid() -> int | None:
 def clear_tui_pid():
     if TUI_PID_FILE.exists():
         TUI_PID_FILE.unlink()
+    from backend import registry
+
+    registry.unregister("tui")
 
 
 def save_pid_if_free(pid: int) -> bool:
@@ -598,6 +628,29 @@ def _apply_sensitivity(v):
     return f"{Tertiary}Sensitivity changed to {v}{Reset}"
 
 
+def _apply_spinner(value):
+    global SPINNER
+    if not (2 <= len(value) <= 16):
+        return "Spinner must be 2-16 characters"
+    SPINNER = value
+    _save_config()
+    return f"{Tertiary}Spinner set to '{value}'{Reset}"
+
+
+def _apply_theme(name):
+    global Primary, Secondary, Tertiary
+    if name == "list":
+        return f"{Muted}Themes: {', '.join(sorted(THEMES))}{Reset}"
+    trio = THEMES.get(name.lower())
+    if trio is None:
+        return f"Unknown theme '{name}'. Themes: {', '.join(sorted(THEMES))}"
+    Primary = _COLORS[trio[0]]
+    Secondary = _COLORS[trio[1]]
+    Tertiary = _COLORS[trio[2]]
+    _save_config()
+    return f"{Tertiary}Theme changed to '{name}'{Reset}"
+
+
 def _apply_format(value):
     if not set_format(value):
         if value not in _VALID_FORMATS:
@@ -607,6 +660,121 @@ def _apply_format(value):
             f"{GREY}  Keeping current format: {FORMAT}{Reset}"
         )
     return f"{Tertiary}Default download format changed to {value}{Reset}"
+
+
+PLUGIN_SAFE_KEYS = {
+    "primary",
+    "secondary",
+    "tertiary",
+    "theme",
+    "spinner",
+    "display",
+    "barwidth",
+    "barheight",
+    "barspacing",
+    "barchar",
+    "sensitivity",
+    "format",
+    "max_search",
+    "max_radio",
+    "ad_skip",
+    "down_on_like",
+}
+
+
+def apply_config(key, value):
+    global AD_SKIP, DOWN_ON_LIKE
+    target = _TARGET_ALIASES.get(key.lower(), key.lower())
+    if target not in PLUGIN_SAFE_KEYS:
+        return f"Unknown config key '{key}'"
+    if target == "theme":
+        return _apply_theme(value)
+    if target == "spinner":
+        return _apply_spinner(value)
+    if target == "primary":
+        return _apply_color("primary", value)
+    if target == "secondary":
+        return _apply_color("secondary", value)
+    if target == "tertiary":
+        return _apply_color("tertiary", value)
+    if target == "display":
+        return _apply_display(value)
+    if target in ("barwidth", "width"):
+        return _apply_int("BarWidth", value, 4, 80, "Bar width changed")
+    if target in ("barheight", "height"):
+        return _apply_int("BarHeight", value, 10, 90, "Bar height changed")
+    if target in ("barspacing", "spacing"):
+        if value in _BAR_SPACING:
+            return _apply_bar_spacing(value)
+        return _apply_int("BarSpacing", value, 0, 4, "Bar spacing changed")
+    if target == "sensitivity":
+        try:
+            v = float(value)
+        except ValueError:
+            return "sensitivity must be a number (0.5-5.0)"
+        if 0.5 <= v <= 5.0:
+            return _apply_sensitivity(v)
+        return "sensitivity must be between 0.5 and 5.0"
+    if target in ("barchar", "bar_char"):
+        return _apply_bar_char(value)
+    if target == "format":
+        return _apply_format(value)
+    if target == "ad_skip":
+        if value in ("true", "false"):
+            AD_SKIP = value == "true"
+            _save_config()
+            return f"{Tertiary}Sponsor segment skipping set to {AD_SKIP}{Reset}"
+        return "ad_skip must be true/false"
+    if target in ("down_on_like", "downlike"):
+        if value in ("true", "false"):
+            DOWN_ON_LIKE = value == "true"
+            _save_config()
+            return f"{Tertiary}Auto-download on like set to {DOWN_ON_LIKE}{Reset}"
+        return "down_on_like must be true/false"
+    if target in ("max_search", "maxresults"):
+        return _apply_int("MAX_SEARCH_RESULTS", value, 1, 20, "Max search results changed")
+    if target in ("max_radio", "maxradio"):
+        return _apply_int("MAX_RESULTS_RADIO", value, 1, 50, "Max radio tracks changed")
+    return f"Unknown config key '{key}'"
+
+
+def _current_theme():
+    cur = (
+        _COLOR_NAMES.get(Primary),
+        _COLOR_NAMES.get(Secondary),
+        _COLOR_NAMES.get(Tertiary),
+    )
+    for name, trio in THEMES.items():
+        if tuple(trio) == cur:
+            return name
+    return None
+
+
+def config_get(key):
+    target = _TARGET_ALIASES.get(key.lower(), key.lower())
+    getters = {
+        "primary": lambda: _COLOR_NAMES.get(Primary),
+        "secondary": lambda: _COLOR_NAMES.get(Secondary),
+        "tertiary": lambda: _COLOR_NAMES.get(Tertiary),
+        "theme": _current_theme,
+        "spinner": lambda: SPINNER,
+        "display": lambda: Display,
+        "barwidth": lambda: BarWidth,
+        "barheight": lambda: BarHeight,
+        "barspacing": lambda: BarSpacing,
+        "barchar": lambda: BarChar,
+        "sensitivity": lambda: Sensitivity,
+        "format": lambda: FORMAT,
+        "dev": lambda: DEV_MODE,
+        "ad_skip": lambda: AD_SKIP,
+        "down_on_like": lambda: DOWN_ON_LIKE,
+        "max_search": lambda: MAX_SEARCH_RESULTS,
+        "max_radio": lambda: MAX_RESULTS_RADIO,
+    }
+    getter = getters.get(target)
+    if getter is None:
+        return None, False
+    return getter(), True
 
 
 def _apply_int(attr, value, lo, hi, ok_msg):
@@ -652,6 +820,8 @@ def cmd_config(extra: list[str], args=None):
             f"  {GREY}barchar{Reset}    (dot, block, circle, or any single char — current: {BarChar})"
         )
         print(f"  {GREY}sensitivity{Reset} (0.5-5.0, current: {Sensitivity})")
+        print(f"  {GREY}theme{Reset}      (ocean, sunset, forest, fire, mono, royal — or 'list')")
+        print(f"  {GREY}spinner{Reset}     (2-16 chars, current: {SPINNER})")
         print(f"  {GREY}format{Reset}     (opus, m4a, mp3, webm — current: {FORMAT})")
         print(
             f"  {GREY}ad_skip{Reset}     (true/false — SponsorBlock segment skipping, current: {AD_SKIP})"
@@ -739,6 +909,10 @@ def cmd_config(extra: list[str], args=None):
         )
     elif target in ("max_radio", "maxradio"):
         print(_apply_int("MAX_RESULTS_RADIO", value, 1, 50, "Max radio tracks changed"))
+    elif target == "theme":
+        print(_apply_theme(value))
+    elif target == "spinner":
+        print(_apply_spinner(value))
     else:
         aliases = ", ".join(f"{k}->{v}" for k, v in _TARGET_ALIASES.items())
         print(

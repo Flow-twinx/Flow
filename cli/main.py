@@ -9,8 +9,6 @@ import time
 import urllib.request
 from pathlib import Path
 
-import psutil
-
 if __name__ == "__main__" and __package__ is None:
     __package__ = "flow_twinx"
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -37,15 +35,6 @@ R = config.Reset
 SHELL_AUTO_BG = {"radio", "savan"}
 
 
-def _web_alive(WEB_PID):
-    if not WEB_PID.exists():
-        return False
-    try:
-        return psutil.Process(int(WEB_PID.read_text().strip())).is_running()
-    except Exception:
-        return False
-
-
 def _send_web_command(port, command, payload=None):
     data = {"command": command}
     if payload:
@@ -64,26 +53,21 @@ def _send_web_command(port, command, payload=None):
 
 
 def _send_control(command, sig, label, payload=None):
-    WEB_PID = Path.home() / ".flow/web.pid"
-    WEB_PORT = Path.home() / ".flow/web_port"
+    from backend import registry
 
-    pid = config.read_pid()
-    if pid is not None:
+    entry = registry.resolve("vlc")
+    if entry is not None:
+        pid = entry["pid"]
         try:
             os.kill(pid, sig)
             print(f"{P}{label} (VLC PID: {pid}){R}")
             return
         except ProcessLookupError:
-            config.clear_pid()
+            config.clear_pid_if(pid)
 
-    if _web_alive(WEB_PID):
-        port = None
-        if WEB_PORT.exists():
-            try:
-                port = int(WEB_PORT.read_text().strip())
-            except ValueError, OSError:
-                port = None
-        if port and _send_web_command(port, command, payload):
+    web = registry.resolve("web")
+    if web is not None and web.get("port"):
+        if _send_web_command(web["port"], command, payload):
             print(f"{P}{label} (web player){R}")
             return
 
@@ -91,7 +75,7 @@ def _send_control(command, sig, label, payload=None):
 
 
 def _spinner(stop):
-    chars = "|/-\\"
+    chars = config.SPINNER
     i = 0
     while not stop():
         sys.stdout.write(f"\r{P}Checking connection... {chars[i]}{R}")
@@ -174,8 +158,11 @@ def _act_current(action):
         print(f"{M}No last-played track in ~/.flow/status.json{R}")
         return 1
 
-    web_pid = Path.home() / ".flow/web.pid"
-    has_player = config.read_pid() is not None or _web_alive(web_pid)
+    from backend import registry
+
+    has_player = (
+        registry.resolve("vlc") is not None or registry.resolve("web") is not None
+    )
     if not has_player:
         print(f"{M}No player is currently running (no pid file){R}")
         return 1
@@ -201,7 +188,25 @@ def _act_current(action):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Flow Music Player")
+    parser = argparse.ArgumentParser(
+        description="Flow Music Player",
+        epilog=(
+            "Plugin commands:\n"
+            "  flow install <ref>       install a plugin (name | owner/name | git URL);\n"
+            "                           bare 'flow install' opens an interactive picker\n"
+            "  flow plugins list        list available plugins\n"
+            "  flow plugins refresh     force-refresh plugin repos\n"
+            "  flow run <name> [args]   run a plugin (background by default; -t = foreground)\n"
+            "  flow plugin kill         stop running plugins (interactive, <name>, or all)\n"
+            "  flow uninstall <name>    remove an installed plugin\n"
+            "  flow plugins update      update the plugin repos\n"
+            "Plugin developer flags:\n"
+            "  flow --config-get <key>  print a config value\n"
+            "  flow --config-set <k> <v>  set a config value (validated)\n"
+            "  flow --theme <name>      apply a theme preset\n"
+            "  flow --spinner <chars>   set the loading spinner"
+        ),
+    )
     parser.add_argument("--play", nargs="+", help="play a song")
     parser.add_argument(
         "--play-off", nargs="+", help="play a song from the local library (offline)"
@@ -262,24 +267,92 @@ def main():
         action="store_true",
         help="download the currently playing song (requires an active player)",
     )
-    # parser.add_argument(
-    #     "--meta",
-    #     action="store_true",
-    #     help="backfill metadata in library.json for already downloaded songs (temporary)",
-    # )
+    parser.add_argument(
+        "--meta",
+        action="store_true",
+        help="backfill metadata in library.json for already downloaded songs (temporary)",
+    )
     parser.add_argument(
         "--setup-island",
         action="store_true",
         help="install the Hyprland music island into ~/.config/quickshell",
     )
-    parser.add_argument("command", nargs="?", default=None, help="subcommand (play, search, list, ...)")
+    parser.add_argument(
+        "command", nargs="?", default=None, help="subcommand (play, search, list, ...)"
+    )
     parser.add_argument("--check", action="store_true", help="check all dependencies")
+    parser.add_argument("--config-get", metavar="KEY", help="print a config value")
+    parser.add_argument(
+        "--config-set",
+        nargs=2,
+        metavar=("KEY", "VALUE"),
+        help="set a config value through the validated setter",
+    )
+    parser.add_argument(
+        "--theme", metavar="NAME", help="apply a theme preset ('list' shows themes)"
+    )
+    parser.add_argument(
+        "--spinner", metavar="CHARS", help="set the loading spinner characters"
+    )
 
     args, unknown = parser.parse_known_args()
 
     if getattr(args, "setup_island", False):
         _setup_island()
         sys.exit(0)
+
+    if getattr(args, "config_get", None) is not None:
+        val, ok = config.config_get(args.config_get)
+        if not ok:
+            print(f"{M}Unknown config key: {args.config_get}{R}")
+            sys.exit(1)
+        print(val if isinstance(val, str) else json.dumps(val))
+        sys.exit(0)
+
+    if getattr(args, "config_set", None) is not None:
+        key, value = args.config_set
+        msg = config.apply_config(key, value)
+        print(msg)
+        bad = any(
+            t in msg for t in ("Unknown", "must be", "not found", "ffmpeg not found")
+        )
+        sys.exit(1 if bad else 0)
+
+    if getattr(args, "theme", None) is not None:
+        msg = config._apply_theme(args.theme)
+        print(msg)
+        bad = any(
+            t in msg for t in ("Unknown", "must be", "not found", "ffmpeg not found")
+        )
+        sys.exit(1 if bad else 0)
+
+    if getattr(args, "spinner", None) is not None:
+        msg = config._apply_spinner(args.spinner)
+        print(msg)
+        bad = any(
+            t in msg for t in ("Unknown", "must be", "not found", "ffmpeg not found")
+        )
+        sys.exit(1 if bad else 0)
+
+    if args.command in (
+        "plugins",
+        "plugin",
+        "install",
+        "uninstall",
+        "remove",
+        "run",
+        "update",
+        "refresh",
+        "kill",
+        "daemon",
+    ):
+        from backend import plugins
+
+        if args.command != "daemon":
+            from backend.plugins import _ensure_daemon
+
+            _ensure_daemon()
+        sys.exit(plugins.dispatch(args.command, unknown, args))
 
     _check_vlc()
 
@@ -316,7 +389,9 @@ def main():
     if control_args:
         for command, sig, label, delta in control_args:
             if delta is not None:
-                if config.read_pid() is not None:
+                from backend import registry
+
+                if registry.resolve("vlc") is not None:
                     config.write_seek(delta * 1000)
                 label = f"{label} {abs(delta)}s"
             _send_control(
@@ -333,8 +408,8 @@ def main():
         sys.exit(_act_current("unlike"))
     if getattr(args, "download", False):
         sys.exit(_act_current("download"))
-    # if getattr(args, "meta", False):
-    #     sys.exit(_online_commands.backfill_metadata())
+    if getattr(args, "meta", False):
+        sys.exit(_online_commands.backfill_metadata())
 
     forced_offline = False
     if getattr(args, "resume", False):
@@ -437,6 +512,10 @@ def main():
                 for flag in ("bg", "download", "repeat", "shuffle"):
                     setattr(cmd_args, flag, False)
                 cmd_args.repeat_count = 0
+                from backend import plugins
+
+                if plugins.dispatch(cmd, extra, cmd_args) is not None:
+                    continue
                 try:
                     commands.run(cmd, extra, cmd_args)
                 except KeyboardInterrupt:

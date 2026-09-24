@@ -34,13 +34,16 @@ def kill_port(port):
 
 
 def _run_web(port):
-    from backend.web.app import app
+    from web.app import app
 
     try:
         app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False)
     finally:
         WEB_PID.unlink(missing_ok=True)
         WEB_PORT_FILE.unlink(missing_ok=True)
+        from backend import registry
+
+        registry.unregister("web")
 
 
 def _web_alive():
@@ -94,6 +97,9 @@ def _stop_port(port):
                 pid = int(WEB_PID.read_text().strip())
             WEB_PID.unlink(missing_ok=True)
             WEB_PORT_FILE.unlink(missing_ok=True)
+            from backend import registry
+
+            registry.unregister("web", pid)
     except ValueError, OSError:
         pass
 
@@ -115,6 +121,9 @@ def _stop_all():
             stopped.append(f"web server on port {p}")
     WEB_PID.unlink(missing_ok=True)
     WEB_PORT_FILE.unlink(missing_ok=True)
+    from backend import registry
+
+    registry.unregister("web")
     if stopped:
         print(f"{P}Stopped: {', '.join(stopped)}{R}")
     else:
@@ -168,6 +177,9 @@ def _start_server(new, port):
                     pass
             WEB_PID.unlink(missing_ok=True)
             WEB_PORT_FILE.unlink(missing_ok=True)
+            from backend import registry
+
+            registry.unregister("web", existing_pid)
 
     if port is None:
         port = _first_free_port()
@@ -185,6 +197,9 @@ def _start_server(new, port):
         if pid > 0:
             WEB_PID.write_text(str(pid))
             WEB_PORT_FILE.write_text(str(port))
+            from backend import registry
+
+            registry.register("web", pid, port=port)
             print(f"{P}Flow web server → http://127.0.0.1:{port}{R}")
             return
         devnull = os.open(os.devnull, os.O_RDWR)
@@ -194,6 +209,9 @@ def _start_server(new, port):
     else:
         WEB_PID.write_text(str(os.getpid()))
         WEB_PORT_FILE.write_text(str(port))
+        from backend import registry
+
+        registry.register("web", os.getpid(), port=port)
         print(f"{P}Flow web server → http://127.0.0.1:{port} (dev){R}")
         _run_web(port)
 

@@ -1,10 +1,6 @@
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "flow-twinx"
-version = "0.7.1"
+version = "0.8.0"
 description = "A terminal music player with online and offline modes sourced from youtube."
 readme = "README.md"
 requires-python = ">=3.14"
@@ -29,16 +25,26 @@ flow = "cli.main:main"
 flow-tui = "tui:main"
 flow-web = "web.main:main"
 
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [tool.setuptools.packages.find]
-where = ["."]
 include = ["cli*", "backend*", "tui*", "web*"]
 
 [tool.setuptools.package-data]
 flow_twinx = ["Hyprland/*.qml"]
-backend = ["web/templates/*"]
+web = ["templates/*"]
 
 [dependency-groups]
 dev = [
     "pyinstaller>=6.21.0",
     "textual-dev>=1.8.0",
+    "pytest>=8.0",
 ]
+temp = [
+    "pyside6>=6.11.2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
