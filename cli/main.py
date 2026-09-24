@@ -267,17 +267,19 @@ def main():
         action="store_true",
         help="download the currently playing song (requires an active player)",
     )
-    # parser.add_argument(
-    #     "--meta",
-    #     action="store_true",
-    #     help="backfill metadata in library.json for already downloaded songs (temporary)",
-    # )
+    parser.add_argument(
+        "--meta",
+        action="store_true",
+        help="backfill metadata in library.json for already downloaded songs (temporary)",
+    )
     parser.add_argument(
         "--setup-island",
         action="store_true",
         help="install the Hyprland music island into ~/.config/quickshell",
     )
-    parser.add_argument("command", nargs="?", default=None, help="subcommand (play, search, list, ...)")
+    parser.add_argument(
+        "command", nargs="?", default=None, help="subcommand (play, search, list, ...)"
+    )
     parser.add_argument("--check", action="store_true", help="check all dependencies")
     parser.add_argument("--config-get", metavar="KEY", help="print a config value")
     parser.add_argument(
@@ -286,7 +288,9 @@ def main():
         metavar=("KEY", "VALUE"),
         help="set a config value through the validated setter",
     )
-    parser.add_argument("--theme", metavar="NAME", help="apply a theme preset ('list' shows themes)")
+    parser.add_argument(
+        "--theme", metavar="NAME", help="apply a theme preset ('list' shows themes)"
+    )
     parser.add_argument(
         "--spinner", metavar="CHARS", help="set the loading spinner characters"
     )
@@ -309,19 +313,25 @@ def main():
         key, value = args.config_set
         msg = config.apply_config(key, value)
         print(msg)
-        bad = any(t in msg for t in ("Unknown", "must be", "not found", "ffmpeg not found"))
+        bad = any(
+            t in msg for t in ("Unknown", "must be", "not found", "ffmpeg not found")
+        )
         sys.exit(1 if bad else 0)
 
     if getattr(args, "theme", None) is not None:
         msg = config._apply_theme(args.theme)
         print(msg)
-        bad = any(t in msg for t in ("Unknown", "must be", "not found", "ffmpeg not found"))
+        bad = any(
+            t in msg for t in ("Unknown", "must be", "not found", "ffmpeg not found")
+        )
         sys.exit(1 if bad else 0)
 
     if getattr(args, "spinner", None) is not None:
         msg = config._apply_spinner(args.spinner)
         print(msg)
-        bad = any(t in msg for t in ("Unknown", "must be", "not found", "ffmpeg not found"))
+        bad = any(
+            t in msg for t in ("Unknown", "must be", "not found", "ffmpeg not found")
+        )
         sys.exit(1 if bad else 0)
 
     if args.command in (
@@ -339,10 +349,6 @@ def main():
         from backend import plugins
 
         if args.command != "daemon":
-            # Plugin API v3 plugins talk to the resident daemon; make sure the
-            # host is up before dispatch so `flow run` never starts a plugin
-            # with no socket to talk to. (`flow daemon status` must report the
-            # truth, so it skips the auto-start.)
             from backend.plugins import _ensure_daemon
 
             _ensure_daemon()
@@ -402,8 +408,8 @@ def main():
         sys.exit(_act_current("unlike"))
     if getattr(args, "download", False):
         sys.exit(_act_current("download"))
-    # if getattr(args, "meta", False):
-    #     sys.exit(_online_commands.backfill_metadata())
+    if getattr(args, "meta", False):
+        sys.exit(_online_commands.backfill_metadata())
 
     forced_offline = False
     if getattr(args, "resume", False):

@@ -269,11 +269,6 @@ def _install_one(ref: str, force: bool) -> int:
     shutil.copytree(src, dest)
     _write_api(dest)
 
-    # "raw" capability is a host-side decision recorded in the *installed*
-    # manifest (which is what the daemon validates against). Repo manifests
-    # may declare it; a user can force it at install time via
-    # FLOW_PLUGIN_RAW=1 (dev/test use). A plugin cannot self-grant raw by
-    # editing its copied flow_api.py — the daemon only trusts entry + env.
     entry = dict(entry)
     if os.environ.get("FLOW_PLUGIN_RAW") == "1":
         entry["raw"] = True
@@ -460,11 +455,6 @@ def cmd_run(extra) -> int:
     env["FLOW_BIN"] = flow_bin
     env["FLOW_PLUGIN_BG"] = "1" if bg else "0"
 
-    # Plugin API v3: plugins talk to the resident daemon over the socket
-    # instead of spawning `flow` subprocesses. Make sure the daemon is up and
-    # tell the plugin where the socket is. `raw_cli` capability is enforced
-    # daemon-side from the installed manifest, but we mirror it into the env
-    # so plugins can gate their own UI without an extra round trip.
     if not _ensure_daemon():
         print(f"{E}Could not start the flow daemon (needed for plugin API v3){R}")
         print(f"{G}Start it manually with: flow daemon start{R}")
@@ -651,7 +641,7 @@ def _dispatch_daemon(extra: list[str]) -> int:
 def dispatch(cmd: str, extra: list[str], args: argparse.Namespace | None = None):
     if cmd == "daemon":
         return _dispatch_daemon(extra)
-    if cmd in ("plugins", "plugin"):
+    if cmd in ("plugins", "plugin", "pl"):
         subcmd = extra[0] if extra else "list"
         rest = extra[1:] if len(extra) > 1 else []
         if subcmd == "list":
