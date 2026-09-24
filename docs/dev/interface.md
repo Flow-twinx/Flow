@@ -1,5 +1,31 @@
 # Interfaces
 
+## Daemon host (`backend/daemon.py` + `backend/rpc.py`)
+
+The resident daemon is the always-on owner of the plugin socket
+(`~/.flow/flow.sock`, mode 0600) and its pid file (`~/.flow/flowd.pid`). It
+is an interface in its own right: plugins reach every other interface
+through it rather than spawning the `flow` CLI.
+
+- **Transport** — line-delimited JSON-RPC over AF_UNIX. Frames are
+  `{"method", "params"}` → `{"result"}` or `{"error"}`; connections get
+  their own thread so one slow plugin can't stall others; frames are capped
+  at 1 MiB.
+- **Handshake** — the first frame is `hello` with the plugin name (`FLOW_PLUGIN_NAME`); the daemon stamps it on the connection and uses it for capability gating (raw).
+- **Typed surface** — `status` / `current_track` / `is_playing` /
+  `library_stats` read `status.json`/`library.json` file state;
+  `pause`/`resume`/`next`/`previous`/`seek`/`seek_back`/`like`/`unlike`/
+  `download` use `_send_player` (host routing mirroring `_send_control`);
+  `players` lists the live player registry (kind/pid/port);
+  `get_config`/`get_configs`/`set_config`/`set_theme`/`list_themes`/
+  `set_spinner` are host-validated against `PLUGIN_SAFE_KEYS`; `raw_cli` is
+  the gated flag passthrough behind the installed manifest's `raw`;
+  `introspect` lists the method surface/version.
+- **Lifecycle** — started/stopped via `flow daemon start|quit|status|socket`, and lazily by `flow run` (`_ensure_daemon`). Stale pid/socket are cleaned on start via `_alive()`.
+
+See [plugins.md](plugins.md) for the protocol contract and
+[control.md](control.md) for how player control is routed through it.
+
 ## TUI (`tui/main.py`)
 
 `Flow(App)` is a single Textual screen composed of two panels: the
@@ -36,7 +62,9 @@ Tracks are `Track` dataclasses (`title`, `ref`, `kind`,
 The TUI participates in Flow's control plane fully:
 
 - `config.save_pid_if_free(os.getpid())` + `config.save_tui_pid(...)` claim
-  the player slots on mount; both are cleared on quit.
+  the player slots on mount; both are cleared on quit. Each registers the
+  TUI in `~/.flow/players.json` (`backend/registry.py`) alongside the legacy
+  pid files, so routing and status see the TUI as a live player.
 - `_update_status()` writes `status.json` with a thumbnail resolved to the
   local cache path (offline) or the remote URL (online).
 - All control signals are installed and dispatched onto the asyncio loop

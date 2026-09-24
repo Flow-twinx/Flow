@@ -3,33 +3,22 @@ import os
 
 
 def _running_pid():
-    from backend import config
+    """Pid of a live Flow player: registry first, legacy pid files as fallback."""
+    from backend import registry
 
-    for getter, clearer in (
-        (config.read_tui_pid, config.clear_tui_pid),
-        (config.read_pid, config.clear_pid),
-    ):
-        pid = getter()
-        if pid is None:
-            continue
-        try:
-            import psutil
-
-            alive = psutil.Process(pid).is_running()
-        except Exception:
-            alive = False
-        if not alive:
-            clearer()
-            continue
-        return pid
+    for kind in ("tui", "vlc"):
+        entry = registry.resolve(kind)
+        if entry is not None:
+            return entry["pid"]
     return None
 
 
 def _is_tui_pid(pid):
     """True when the pid belongs to a running Flow TUI."""
-    from backend import config
+    from backend import registry
 
-    return config.read_tui_pid() == pid
+    entry = registry.resolve("tui")
+    return entry is not None and entry["pid"] == pid
 
 
 def _control(sig, label, require_tui=False):

@@ -14,6 +14,7 @@ Declared in `pyproject.toml` `[project.scripts]`:
 | `flow` | `cli.main:main` | Interactive command shell (readline-style prompt) plus one-shot flags |
 | `flow-tui` | `tui:main` | Full-screen Textual UI |
 | `flow-web` | `web.main:main` | Daemonized Flask web server |
+| `flow daemon` | `backend/daemon.py` | Resident RPC host for plugins (`~/.flow/flow.sock`) |
 
 ## Package layout
 
@@ -28,6 +29,7 @@ backend/               # all logic
   playlist.py          #   per-playlist JSON store + ops
   plist_cli.py         #   playlist command-line parsing
   control.py           #   ~/.flow/web_command.json (web player control)
+  registry.py          #   ~/.flow/players.json (live-player registry/routing)
   shortcuts.py         #   ~/.flow/shortcuts.json aliases
   ping.py              #   is_connected() connectivity probe
   mpris.py             #   MPRIS D-Bus integration
@@ -35,6 +37,10 @@ backend/               # all logic
   lyrics.py            #   synced lyrics (ytmusicapi)
   sponsor.py           #   SponsorBlock segment skip / cut
   plugins.py           #   plugin install/run/update
+  daemon.py            #   resident RPC host (socket owner, plugin lifecycle)
+  rpc.py               #   typed plugin method surface + capability gating
+  cli_raw.py           #   gated raw-CLI bridge for the daemon
+  plugin_api/          #   flow_api.py — self-contained v3 plugin client
   help_detail.py       #   `help -i` text
   Hyprland/island.qml  #   optional quickshell widget (--setup-island)
   Online/              # online mode
@@ -57,9 +63,10 @@ web/                   # `flow-web` entry point
 
 ## How a `flow` launch works
 
-1. `cli.main.main()` parses arguments. Plugin commands
-   (`plugins`, `install`, `uninstall`/`remove`, `run`, `update`) are handled
-   globally before anything else and exit — they don't need VLC or a mode.
+1. `cli.main.main()` parses arguments. Plugin/host commands
+   (`plugins`, `install`, `uninstall`/`remove`, `run`, `update`, `daemon`)
+   are handled globally before anything else and exit — they don't need VLC
+   or a mode. `flow run` lazily starts the daemon (`_ensure_daemon`).
 2. `_check_vlc()` imports `python-vlc` and exits with install hints if missing.
 3. `--check`, `--status`, `--setup-island` short-circuit.
 4. Control flags (`--pause`, `--next`, `--previous`, `--seek SEC`,
@@ -105,7 +112,14 @@ shared state is coordinated through files under `~/.flow/`:
   `playlists/`).
 - `status.json` is a plain "latest writer wins" file; each interface updates
   it opportunistically.
+- `players.json` (`backend/registry.py`) is the live-player registry — every
+  interface registers on start and unregisters on exit, and routing resolves
+  "who is live" through it (legacy pid files remain as mirrors).
 - Player control is delegated to OS signals or a command file, never shared
   memory (see [Playback control](control.md)).
+- Plugin traffic goes over the resident daemon's typed RPC socket
+  (`~/.flow/flow.sock`, one thread per connection, 1 MiB frame cap) — the
+  daemon is the only process that spawns `flow` for plugins (and only behind
+  the gated `raw_cli` capability).
 
 See [Storage](storage.md) for the file formats.

@@ -9,8 +9,6 @@ import time
 import urllib.request
 from pathlib import Path
 
-import psutil
-
 if __name__ == "__main__" and __package__ is None:
     __package__ = "flow_twinx"
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -37,15 +35,6 @@ R = config.Reset
 SHELL_AUTO_BG = {"radio", "savan"}
 
 
-def _web_alive(WEB_PID):
-    if not WEB_PID.exists():
-        return False
-    try:
-        return psutil.Process(int(WEB_PID.read_text().strip())).is_running()
-    except Exception:
-        return False
-
-
 def _send_web_command(port, command, payload=None):
     data = {"command": command}
     if payload:
@@ -64,26 +53,21 @@ def _send_web_command(port, command, payload=None):
 
 
 def _send_control(command, sig, label, payload=None):
-    WEB_PID = Path.home() / ".flow/web.pid"
-    WEB_PORT = Path.home() / ".flow/web_port"
+    from backend import registry
 
-    pid = config.read_pid()
-    if pid is not None:
+    entry = registry.resolve("vlc")
+    if entry is not None:
+        pid = entry["pid"]
         try:
             os.kill(pid, sig)
             print(f"{P}{label} (VLC PID: {pid}){R}")
             return
         except ProcessLookupError:
-            config.clear_pid()
+            config.clear_pid_if(pid)
 
-    if _web_alive(WEB_PID):
-        port = None
-        if WEB_PORT.exists():
-            try:
-                port = int(WEB_PORT.read_text().strip())
-            except ValueError, OSError:
-                port = None
-        if port and _send_web_command(port, command, payload):
+    web = registry.resolve("web")
+    if web is not None and web.get("port"):
+        if _send_web_command(web["port"], command, payload):
             print(f"{P}{label} (web player){R}")
             return
 
@@ -174,8 +158,11 @@ def _act_current(action):
         print(f"{M}No last-played track in ~/.flow/status.json{R}")
         return 1
 
-    web_pid = Path.home() / ".flow/web.pid"
-    has_player = config.read_pid() is not None or _web_alive(web_pid)
+    from backend import registry
+
+    has_player = (
+        registry.resolve("vlc") is not None or registry.resolve("web") is not None
+    )
     if not has_player:
         print(f"{M}No player is currently running (no pid file){R}")
         return 1
@@ -347,9 +334,18 @@ def main():
         "update",
         "refresh",
         "kill",
+        "daemon",
     ):
         from backend import plugins
 
+        if args.command != "daemon":
+            # Plugin API v3 plugins talk to the resident daemon; make sure the
+            # host is up before dispatch so `flow run` never starts a plugin
+            # with no socket to talk to. (`flow daemon status` must report the
+            # truth, so it skips the auto-start.)
+            from backend.plugins import _ensure_daemon
+
+            _ensure_daemon()
         sys.exit(plugins.dispatch(args.command, unknown, args))
 
     _check_vlc()
@@ -387,7 +383,9 @@ def main():
     if control_args:
         for command, sig, label, delta in control_args:
             if delta is not None:
-                if config.read_pid() is not None:
+                from backend import registry
+
+                if registry.resolve("vlc") is not None:
                     config.write_seek(delta * 1000)
                 label = f"{label} {abs(delta)}s"
             _send_control(

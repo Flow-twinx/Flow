@@ -123,6 +123,49 @@ def _write_plugin_json(plugin_dir: pathlib.Path, entry: dict):
     (plugin_dir / "plugin.json").write_text(json.dumps(entry, indent=2) + "\n")
 
 
+def _ensure_daemon() -> bool:
+    """Lazily start the resident daemon so plugins have a socket to talk to.
+
+    One host owns the socket (`~/.flow/flow.sock`); the daemon is idempotent:
+    if it's already running this is a no-op. Returns True when up.
+
+    This must NOT call `daemon.cmd_start()` directly — that daemonizes the
+    *current* process (first fork's parent `os._exit(0)`), killing the CLI.
+    Instead we spawn the daemon as a detached subprocess and wait for its
+    socket.
+    """
+    from backend import daemon as _daemon
+
+    if _daemon.is_running():
+        return True
+    try:
+        # `-m backend.daemon` resolves the package the same way the flow
+        # entry point does (editable install, site-packages, or a source
+        # checkout on sys.path) — a bare script path would depend on the
+        # cwd/editable-finder and can break for users.
+        subprocess.Popen(
+            [sys.executable, "-m", "backend.daemon", "start"],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return False
+    # Give the daemon a moment to bind + write its pid file.
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline:
+        if _daemon.is_running():
+            return True
+        time.sleep(0.1)
+    return _daemon.is_running()
+
+
+def _daemon_socket() -> str:
+    from backend import daemon as _daemon
+
+    return str(_daemon.socket_path())
+
+
 def installed() -> dict[str, dict]:
     _ensure_plugins_dir()
     result = {}
@@ -225,6 +268,15 @@ def _install_one(ref: str, force: bool) -> int:
         shutil.rmtree(dest)
     shutil.copytree(src, dest)
     _write_api(dest)
+
+    # "raw" capability is a host-side decision recorded in the *installed*
+    # manifest (which is what the daemon validates against). Repo manifests
+    # may declare it; a user can force it at install time via
+    # FLOW_PLUGIN_RAW=1 (dev/test use). A plugin cannot self-grant raw by
+    # editing its copied flow_api.py — the daemon only trusts entry + env.
+    entry = dict(entry)
+    if os.environ.get("FLOW_PLUGIN_RAW") == "1":
+        entry["raw"] = True
     _write_plugin_json(dest, entry)
 
     ver = entry.get("version", "?")
@@ -402,6 +454,18 @@ def cmd_run(extra) -> int:
     env["FLOW_BIN"] = flow_bin
     env["FLOW_PLUGIN_BG"] = "1" if bg else "0"
 
+    # Plugin API v3: plugins talk to the resident daemon over the socket
+    # instead of spawning `flow` subprocesses. Make sure the daemon is up and
+    # tell the plugin where the socket is. `raw_cli` capability is enforced
+    # daemon-side from the installed manifest, but we mirror it into the env
+    # so plugins can gate their own UI without an extra round trip.
+    if not _ensure_daemon():
+        print(f"{E}Could not start the flow daemon (needed for plugin API v3){R}")
+        print(f"{G}Start it manually with: flow daemon start{R}")
+        return 1
+    env["FLOW_SOCKET"] = str(_daemon_socket())
+    env["FLOW_PLUGIN_RAW"] = "1" if info.get("raw") else "0"
+
     PIDS_DIR.mkdir(parents=True, exist_ok=True)
     log_file = None
     if bg:
@@ -567,10 +631,34 @@ PLUGIN_CMDS = {
     "update",
     "refresh",
     "kill",
+    "daemon",
 }
 
 
+def _dispatch_daemon(extra: list[str]) -> int:
+    """flow daemon start|quit|status|socket — manage the resident host."""
+    from backend import daemon as _daemon
+
+    sub = extra[0] if extra else "status"
+    rest = extra[1:]
+    if sub == "start":
+        fg = "-f" in rest or "--foreground" in rest
+        return _daemon.cmd_start(foreground=fg)
+    if sub == "quit":
+        return _daemon.cmd_quit()
+    if sub == "status":
+        return _daemon.cmd_status()
+    if sub == "socket":
+        print(_daemon.socket_path())
+        return 0
+    print(f"{E}Unknown daemon subcommand: {sub}{R}")
+    print(f"{G}Usage: {P}daemon {S}start|quit|status|socket{R}")
+    return 1
+
+
 def dispatch(cmd: str, extra: list[str], args: argparse.Namespace | None = None):
+    if cmd == "daemon":
+        return _dispatch_daemon(extra)
     if cmd in ("plugins", "plugin"):
         subcmd = extra[0] if extra else "list"
         rest = extra[1:] if len(extra) > 1 else []

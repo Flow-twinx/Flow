@@ -475,6 +475,9 @@ def clear_seek():
 def save_pid(pid: int):
     PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     PID_FILE.write_text(str(pid))
+    from backend import registry
+
+    registry.register("vlc", pid)
 
 
 def read_pid() -> int | None:
@@ -489,11 +492,17 @@ def read_pid() -> int | None:
 def clear_pid():
     if PID_FILE.exists():
         PID_FILE.unlink()
+    from backend import registry
+
+    registry.unregister("vlc")
 
 
 def save_tui_pid(pid: int):
     TUI_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     TUI_PID_FILE.write_text(str(pid))
+    from backend import registry
+
+    registry.register("tui", pid)
 
 
 def read_tui_pid() -> int | None:
@@ -508,6 +517,9 @@ def read_tui_pid() -> int | None:
 def clear_tui_pid():
     if TUI_PID_FILE.exists():
         TUI_PID_FILE.unlink()
+    from backend import registry
+
+    registry.unregister("tui")
 
 
 def save_pid_if_free(pid: int) -> bool:

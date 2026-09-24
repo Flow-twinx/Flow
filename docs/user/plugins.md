@@ -12,14 +12,29 @@ Installed plugins live in `~/.flow/plugins/<name>/`. Each one contains:
 - the plugin's own source (entry point defaults to `main.py`).
 
 Plugins run as **external processes** (`python <entry> [args...]`, working
-directory set to the plugin folder). A plugin can only:
+directory set to the plugin folder), and talk to Flow over a local typed
+IPC socket owned by Flow's resident daemon. A plugin can:
 
-- read the current-track status via `flow_api.current_track()`, and
-- invoke Flow itself via `flow_api.control("--pause", ...)` — which shells
-  out to the `flow` CLI as a subprocess.
+- read the current-track status via `flow_api.current_track()` /
+  `flow_api.is_playing()`,
+- control the player via typed calls like `flow_api.pause()` / `next()` /
+  `seek(30)`,
+- read and set a small set of config values via `flow_api.get_config()` /
+  `set_config()` (only keys Flow marks safe for plugins).
 
-Everything else is off-limits by construction: plugins never import Flow
-internals, and Flow internals stay isolated.
+Plugins never import Flow internals; everything goes through `flow_api`,
+and the daemon validates every call host-side. The old
+`flow_api.control("--pause", ...)` subprocess passthrough is deprecated;
+use the typed methods instead.
+
+Plugins are managed and the daemon is started automatically by `flow run`.
+You can also manage the daemon explicitly:
+
+```bash
+flow daemon start      # start the resident daemon
+flow daemon status     # is it running?
+flow daemon quit       # stop it
+```
 
 `flow run <name>` goes to the **background by default** (it returns
 immediately and the plugin keeps running). Use `flow run <name> -t` for a

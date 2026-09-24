@@ -13,10 +13,11 @@ crash mid-write can never truncate them.
 ├── shortcuts.json         # command aliases (backend/shortcuts.py)
 ├── ignore.txt             # filler words stripped from titles
 ├── seek.txt               # pending seek delta in milliseconds
-├── vlc.pid                # pid of the background VLC player
-├── tui.pid                # pid of a running TUI
-├── web.pid                # pid of the web server
-├── web_port               # port of the web server
+├── players.json           # live-player registry (backend/registry.py)
+├── vlc.pid                # legacy mirror: pid of the background VLC player
+├── tui.pid                # legacy mirror: pid of a running TUI
+├── web.pid                # legacy mirror: pid of the web server
+├── web_port               # legacy mirror: port of the web server
 ├── web_command.json       # pending control command for the web player
 ├── web_ui.json            # web UI settings (download format)
 ├── downloads/             # downloaded audio (named by video id)
@@ -138,10 +139,14 @@ shell mode and bare aliases in the prompt are resolved through
 
 ## Ephemeral control files
 
-- `vlc.pid` / `tui.pid` — claim the "player slot" (`save_pid_if_free`
-  refuses to overwrite a live player's pid); cleared on exit.
-- `web.pid` + `web_port` — written by the forked `flow-web` parent so the
-  CLI can find and control the web player.
+- `players.json` — the live-player registry (see [Playback
+  control](control.md)). Keyed by kind (`vlc`, `tui`, `web`), each record has
+  `pid` + `ts` (and `port` for `web`). Written atomically
+  (`backend/registry.py`). Routing reads it first.
+- `vlc.pid` / `tui.pid` / `web.pid` + `web_port` — **legacy mirrors** of the
+  same state, still written so pre-registry readers keep working.
+  `vlc.pid` is the "player slot" (`save_pid_if_free` refuses to overwrite a
+  live player's pid); cleared on exit.
 - `seek.txt` — `--seek N` writes `N*1000`, `--seekb N` writes `-N*1000`
   (milliseconds); the receiver reads and clears it.
 - `web_command.json` — see [Playback control](control.md).

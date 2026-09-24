@@ -34,18 +34,17 @@ def read():
 
 
 def _web_active():
-    try:
-        if not WEB_PID_FILE.exists():
-            return False
-        import psutil
+    from backend import registry
 
-        pid = int(WEB_PID_FILE.read_text().strip())
-        return psutil.Process(pid).is_running()
-    except Exception:
-        return False
+    return registry.resolve("web") is not None
 
 
 def _web_port():
+    from backend import registry
+
+    entry = registry.resolve("web")
+    if entry and entry.get("port"):
+        return entry["port"]
     try:
         return int(WEB_PORT_FILE.read_text().strip())
     except Exception:

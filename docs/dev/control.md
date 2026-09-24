@@ -1,8 +1,9 @@
 # Playback control
 
 Every interface can control every other interface. The mechanisms are
-**OS signals** for live players, a **command file** for the web player, and
-**`status.json`** as the shared "what's playing" source of truth.
+**OS signals** for live players, a **command file** for the web player,
+the **daemon RPC socket** for plugins, and **`status.json`** as the shared
+"what's playing" source of truth.
 
 ## Signal protocol
 
@@ -38,22 +39,36 @@ Handler installation:
   `SIGRTMIN+3`/`+4`. The receiver reads and clears `seek.txt` and shifts the
   VLC position (or the simulated clock in the TUI).
 
-`_send_control` aims the signal at the pid in `~/.flow/vlc.pid`; if that pid
-is gone, it falls back to `POST /api/control` on the web player
-(`~/.flow/web.pid`/`web_port`). `flow-tui` uses `~/.flow/tui.pid` first and
-then the VLC pid (`tui/__init__.py`).
+`_send_control` routes through the **player registry**
+(`backend/registry.py`, `~/.flow/players.json`) first: it aims the signal at
+the registered `vlc` player's pid; if that is gone it falls back to
+`POST /api/control` on the web player (`registry.resolve("web")`, falling
+back to `~/.flow/web.pid`/`web_port`). `flow-tui` uses the registered `tui`
+player first and then the `vlc` slot (`tui/__init__.py`).
 
-## Pid slots
+## Player registry
 
-- `~/.flow/vlc.pid` holds the pid of the background VLC player.
-  `save_pid_if_free()` refuses to overwrite a still-live player, so a second
-  background player doesn't steal the slot; `clear_pid_if()` removes it only
-  when it belongs to the exiting process.
-- `~/.flow/tui.pid` tracks a running TUI so its repeat/shuffle toggles can
-  be sent `--repeat`/`--shuffle` (which require a TUI, not just VLC).
-- `~/.flow/web.pid` + `~/.flow/web_port` are written by `flow-web`'s fork
-  parent and used by `_send_control` and `flow --status` to reach the web
-  player.
+`~/.flow/players.json` is the single source of truth for *which players are
+alive right now*. Keyed by kind:
+
+```json
+{"vlc": {"pid": 1234, "ts": 1700000000.0},
+ "tui": {"pid": 5678, "ts": 1700000000.0},
+ "web": {"pid": 9012, "port": 5000, "ts": 1700000000.0}}
+```
+
+- **`vlc`** — the CLI/background VLC player (also claimed by a running TUI).
+  Registered by `config.save_pid()`/`save_pid_if_free()`, cleared by
+  `clear_pid()`/`clear_pid_if()` and `kill_stored()`.
+- **`tui`** — a running `flow-tui`. Registered by `config.save_tui_pid()`.
+- **`web`** — the web server. Registered by `flow-web`'s fork parent (with
+  its `port`); unregistered on stop/exit.
+
+`registry.resolve(kind)` returns the live record — registry first, then the
+legacy pid file as a fallback — so a slot written by a pre-registry Flow
+still routes. `registry.live()` lists all live players (used by the daemon's
+`players` RPC and `flow --status`). Legacy `vlc.pid`/`tui.pid`/`web.pid` +
+`web_port` files remain as write-only mirrors for backward compatibility.
 
 ## status.json
 
@@ -99,3 +114,17 @@ through a command file, `~/.flow/web_command.json`:
 One consequence of this split: online/offline CLI playback is signal-driven,
 web playback is file-driven, and the TUI publishes enough state
 (status.json + pid) to be driven by either.
+
+## Plugin control (daemon RPC)
+
+Plugins do not spawn the `flow` CLI to control playback. They call typed
+methods over the resident daemon socket (`~/.flow/flow.sock`) in
+`backend/rpc.py`, which applies the **same routing `_send_control` uses**:
+signal the registered `vlc` player when one is live (writing `seek.txt`
+deltas for seek commands), else fall back to
+`backend/control.py::send` for the web-player command file. The typed
+surface is `pause` / `resume` / `next` / `previous` / `seek(sec)` /
+`seek_back(sec)` / `like` / `unlike` / `download`, plus `players` to list
+the live players (see [plugins.md](plugins.md)). State stays file-based
+(`status.json`), so a plugin's control choice is never re-entrant into the
+CLI.

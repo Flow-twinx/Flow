@@ -71,7 +71,8 @@ Everything lives under `~/.flow/`.
 | `shortcuts.json`                            | User command shortcuts                                             |
 | `ignore.txt`                                | Filler words stripped from titles (edit freely; `#` lines ignored) |
 | `plugins/`                                  | Installed plugins and plugin repo caches                           |
-| `vlc.pid`, `tui.pid`, `web.pid`, `web_port` | Pid/port tracking for running players                              |
+| `players.json`                             | Live-player registry (`kind`, `pid`, `port` for the web player)    |
+| `vlc.pid`, `tui.pid`, `web.pid`, `web_port` | Legacy pid/port mirrors of `players.json` (kept for compat)        |
 | `seek.txt`                                  | Pending seek delta (milliseconds) for `--seek`/`--seekb`           |
 | `web_command.json`                          | Pending control command for the web player                         |
 | `web_ui.json`                               | Web UI settings (e.g. chosen download format)                      |

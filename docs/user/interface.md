@@ -42,8 +42,9 @@ offline mode filters the local library.
 
 The TUI is fully wired into Flow's control system:
 
-- It writes playback state to `~/.flow/status.json` and its pid to
-  `~/.flow/tui.pid`, so `flow --status`, `flow --pause`, `flow --next`, and
+- It writes playback state to `~/.flow/status.json` and registers itself in
+  `~/.flow/players.json` (plus the legacy `~/.flow/tui.pid` mirror), so
+  `flow --status`, `flow --pause`, `flow --next`, and
   `flow --previous` work against a running TUI.
 - It accepts the standard control flags itself (run `flow-tui --pause` while
   a TUI is running to toggle playback from another terminal):
