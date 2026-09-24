@@ -621,20 +621,6 @@ def cmd_refresh() -> int:
     return 0 if ok else 1
 
 
-PLUGIN_CMDS = {
-    "plugins",
-    "plugin",
-    "install",
-    "uninstall",
-    "remove",
-    "run",
-    "update",
-    "refresh",
-    "kill",
-    "daemon",
-}
-
-
 def _dispatch_daemon(extra: list[str]) -> int:
     """flow daemon start|quit|status|socket — manage the resident host."""
     from backend import daemon as _daemon

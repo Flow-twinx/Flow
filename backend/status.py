@@ -4,7 +4,6 @@ import pathlib
 import time
 
 STATUS_FILE = pathlib.Path.home() / ".flow/status.json"
-WEB_PID_FILE = pathlib.Path.home() / ".flow/web.pid"
 WEB_PORT_FILE = pathlib.Path.home() / ".flow/web_port"
 
 
@@ -84,6 +83,9 @@ def show():
     from . import library
     from .config import CYAN, GREY, WHITE, Muted, Primary, Reset
 
+    from backend import registry
+
+    registry.prune()  # drop dead players from ~/.flow/players.json
     data = _read()
     web = _web_active()
     port = _web_port()

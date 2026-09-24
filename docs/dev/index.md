@@ -102,6 +102,18 @@ into the other mode's commands (online's `switch` goes offline, offline's
 afterward. The TUI keeps its own `mode` string and re-populates the track
 list on `Tab`.
 
+## Testing
+
+`tests/` is a pytest suite that runs against a scratch `HOME` (set in
+`tests/conftest.py`), so it never touches the real `~/.flow`. It covers the
+player registry (live-process registration, pid-file fallback, prune) and
+the daemon RPC surface (typed dispatch, `PLUGIN_SAFE_KEYS` gating, raw gating,
+`players`), plus a real socket E2E against `flow daemon`:
+
+```sh
+uv run pytest        # or: .venv/bin/python -m pytest
+```
+
 ## Concurrency
 
 Multiple players may exist at once (background VLC, a TUI, a web player), so

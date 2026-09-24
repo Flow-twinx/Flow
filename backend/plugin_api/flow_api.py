@@ -200,10 +200,11 @@ _flags_to_click = {
 
 
 def control(*flow_args):
-    """Deprecated: generic flow CLI control passthrough.
+    """Deprecated: generic flow CLI control passthrough (v2 compat surface).
 
-    Replaced by the typed surface below. Kept so old plugins don't break —
-    it warns and falls back to a subprocess when the daemon socket is down.
+    Replaced by the typed surface below. Kept so old plugins don't break: it
+    warns and runs the `flow` CLI as a subprocess. The daemon deliberately
+    has no generic passthrough method, so this never touches the socket.
     """
     warnings.warn(
         "flow_api.control() is deprecated; use flow_api.pause()/resume()/"
@@ -211,7 +212,7 @@ def control(*flow_args):
         DeprecationWarning,
         stacklevel=2,
     )
-    return _call("control_passthrough", args=list(flow_args))
+    return _run(*flow_args).returncode
 
 
 # ---------------------------------------------------------------------------

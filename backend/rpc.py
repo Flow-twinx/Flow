@@ -84,7 +84,7 @@ def rpc_status():
 
 
 def rpc_current_track():
-    return _status._read_current() or {}
+    return _status.read() or {}
 
 
 def rpc_is_playing():
@@ -205,6 +205,8 @@ def rpc_get_configs():
 
 
 def rpc_set_config(key: str, value):
+    if value is None:
+        return {"error": f"Config value for '{key}' cannot be None"}
     if key.lower() not in config.PLUGIN_SAFE_KEYS:
         return {"error": f"Config key '{key}' is not writable by plugins"}
     msg = config.apply_config(key, value)

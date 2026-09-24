@@ -244,6 +244,9 @@ def cmd_start(foreground: bool = False) -> int:
         print(f"{P}Flow daemon is already running{R}")
         print(f"{G}Socket: {SOCKET_FILE}{R}")
         return 0
+    from backend import registry
+
+    registry.prune()  # drop dead players before we start serving
     return serve(foreground=foreground)
 
 

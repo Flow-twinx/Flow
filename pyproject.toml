@@ -40,7 +40,11 @@ web = ["templates/*"]
 dev = [
     "pyinstaller>=6.21.0",
     "textual-dev>=1.8.0",
+    "pytest>=8.0",
 ]
 temp = [
     "pyside6>=6.11.2",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
