@@ -416,12 +416,6 @@ def cmd_run(extra) -> int:
         return 1
 
     name = extra[0]
-    if "-t" in extra:
-        bg = False
-    elif "-bg" in extra:
-        bg = True
-    else:
-        bg = not config.DEV_MODE
     plugin_args = [x for x in extra[1:] if x not in ("-t", "-bg")]
 
     dest = PLUGINS_DIR / name
@@ -444,6 +438,18 @@ def cmd_run(extra) -> int:
     if not entry_path.exists():
         print(f"{E}Plugin entry point not found: {entry_name}{R}")
         return 1
+
+    # Background/foreground: explicit flags win, then the plugin's own
+    # manifest ("bg": false = runs in the foreground, e.g. console plugins
+    # that need Ctrl-C / the terminal), then the DEV_MODE default.
+    if "-t" in extra:
+        bg = False
+    elif "-bg" in extra:
+        bg = True
+    elif isinstance(info.get("bg"), bool):
+        bg = info["bg"]
+    else:
+        bg = not config.DEV_MODE
 
     _sync_api(dest)
 

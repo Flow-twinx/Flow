@@ -134,7 +134,8 @@ The repo root must contain `manifest.json`:
       "entry": "main.py",
       "deps": ["pyside6"],
       "gui": false,
-      "raw": false
+      "raw": false,
+      "bg": false
     }
   ]
 }
@@ -142,8 +143,13 @@ The repo root must contain `manifest.json`:
 
 `entry` defaults to `main.py`; `deps` are printed at install time but never
 auto-installed; `gui` is informational. `raw: true` marks a plugin that may
-use the gated `raw_cli()` surface. A plugin's sources live under
-`<repo>/plugins/<name>/`.
+use the gated `raw_cli()` surface. `bg` decides how `flow run` launches it:
+`true` backgrounds it (stdout/stderr → `~/.flow/plugins/_logs/<name>.log`,
+stop with `plugin kill <name>`), `false` runs it in the foreground
+(Ctrl-C stops it) — the right choice for console plugins like `nowplaying`
+that don't work detached. When `bg` is absent, `flow run` falls back to its
+default (background, or foreground in dev mode); explicit `-bg` / `-t`
+flags always win. A plugin's sources live under `<repo>/plugins/<name>/`.
 
 ## Commands
 

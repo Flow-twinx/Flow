@@ -13,7 +13,12 @@ Installed plugins live in `~/.flow/plugins/<name>/`. Each one contains:
 
 Plugins run as **external processes** (`python <entry> [args...]`, working
 directory set to the plugin folder), and talk to Flow over a local typed
-IPC socket owned by Flow's resident daemon. A plugin can:
+IPC socket owned by Flow's resident daemon. By default `flow run` launches
+a plugin in the **background** (stop it with `flow plugin kill <name>`);
+pass `-t` to run it in the foreground. A plugin's own manifest can pin the
+launch mode with `"bg": true|false` — for example the `nowplaying` console
+plugin sets `"bg": false` so it runs in the terminal and quits on Ctrl-C. A
+plugin can:
 
 - read the current-track status via `flow_api.current_track()` /
   `flow_api.is_playing()`,
