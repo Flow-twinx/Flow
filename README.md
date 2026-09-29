@@ -16,7 +16,8 @@ between the CLI shell, the Textual TUI, and the web GUI.
 - **Downloads** — save tracks from YouTube (`-d`), formats: webm/opus/m4a/mp3
 - **Repeat & shuffle** — `-r [n]` loops, `-s` randomizes
 - **Playlists** — create, edit, merge, dedupe, reorder, export/import `.m3u`
-- **Like/unlike** — favorites in `~/.flow/library.json`, auto-download on like
+- **Like/unlike** — favorites in `~/.flow/library.db`, auto-download on like
+- **Play history** — per-song play counts in both modes, an online play log, `flow summary` on the CLI and a **History** panel in the web GUI
 - **Background play** — play in the background and go back to your shell
 - **Visualizer** — audio-reactive spectrum bars (or synced lyrics) while playing
 - **Three interfaces** — interactive CLI shell, full-screen [TUI](docs/user/interface.md), and a [web GUI](docs/user/interface.md) on port 5000

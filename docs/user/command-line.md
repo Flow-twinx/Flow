@@ -3,7 +3,7 @@
 `flow` has three personalities:
 
 1. **Interactive shell** — run `flow` with no arguments to get a prompt.
-2. **One-shot flags** — `flow --play "song"`, `flow --status`, control flags, etc.
+2. **One-shot flags** — `flow --play "song"`, `flow --status`, `flow --summary`, control flags, etc.
 3. **Shell-mode commands** — `flow <command> <args>` runs a single command and exits.
 
 ## One-shot flags
@@ -25,6 +25,7 @@
 | `--seek SEC` | Seek SEC seconds forward in the running player |
 | `--seekb SEC` | Seek SEC seconds backward in the running player |
 | `--status` | Print the playback status card and exit |
+| `--summary` | Play statistics; see [summary](#summary) below |
 | `--like` | Like the currently playing song (requires an active player) |
 | `--unlike` | Unlike the currently playing song |
 | `--download` | Download the currently playing song |
@@ -109,9 +110,47 @@ download the matching index can be used the same way.
 | `config [target [value]]` | Change settings; run bare for an interactive wizard |
 | `short` | Show/update command shortcuts |
 | `check` | Check all dependencies |
+| `summary` | Play statistics and the ranked per-song table — see below |
 | `export` | Back up `~/.flow` to `~/Downloads/flow_backup.zip` |
 | `help` / `help -i` | Command list / detailed help |
 | `exit` | Leave the interactive shell |
+
+### summary
+
+`summary` reports what you've been playing. Play counts come from
+`~/.flow/library.db` and cover **both** online and offline playback; the
+online totals come from `~/.flow/history.db`.
+
+```bash
+flow summary                          # stats card + a 7-day bar chart
+flow summary -l                       # the ranked per-song table
+flow summary -l -s artist --top 50    # sort by artist, 50 rows
+flow summary -c                       # clear the online play history
+```
+
+| Flag | Description |
+| ---- | ----------- |
+| `-l` | Show the per-song table instead of the stats card |
+| `-s <sort>` | Table sort: `plays` (default), `recent`, `name`, `artist` |
+| `--top <N>` | Rows to show in the table (default: 20) |
+| `-c` | Clear the logged online plays (`history.db`) |
+
+`-c` only empties the play timeline — the `song_count` totals in
+`library.db` are untouched.
+
+In shell mode `flow summary …` takes the same flags. As a one-shot flag,
+`flow --summary …` also accepts the long `--sort <key>` and `--top <N>`
+spellings:
+
+```bash
+flow --summary -l --sort recent --top 10
+```
+
+The **web History panel** shows the other half of the data: an online-only
+timeline you can sort by *newest*, *oldest*, *most played* or *least played*
+and filter to today / 7 days / 30 days. The split is deliberate — the CLI
+ranks a per-song table (a terminal is bad at a long event log), the web panel
+sorts an event stream (a scrollable column is bad at aggregates).
 
 ### Playlist subcommands
 

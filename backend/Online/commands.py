@@ -9,7 +9,15 @@ import termios
 import threading
 import time
 
-from backend import config, help_detail, library, playlist, plist_cli, shortcuts
+from backend import (
+    config,
+    help_detail,
+    library,
+    playlist,
+    plist_cli,
+    shortcuts,
+    summary,
+)
 from backend.config import merge_flags
 from backend.Offline import player as off_player
 from backend.Online import player, savan, youtube
@@ -111,6 +119,7 @@ COMMANDS = {
     "short": "Show/update command shortcuts",
     "config": "Change primary/secondary/tertiary colors, format, display",
     "check": "Check all dependencies (ffmpeg, vlc, yt-dlp, psutil)",
+    "summary": "Play summary | -l per-song table | -s <sort> | --top N",
     "export": "Backup ~/.flow config to ~/Downloads",
     "exit": "Exit Flow",
 }
@@ -129,7 +138,7 @@ def run(cmd: str, extra: list[str], args):
         setattr(args, "save_playlist", playlist_name or True)
     extra, args = (
         merge_flags(extra, args)
-        if cmd not in ("config", "check", "short")
+        if cmd not in ("config", "check", "short", "summary")
         else (extra, args)
     )
     if cmd == "play":
@@ -162,6 +171,8 @@ def run(cmd: str, extra: list[str], args):
         config.cmd_config(extra, args)
     elif cmd == "check":
         config.check_deps()
+    elif cmd == "summary":
+        summary.cmd_summary(extra, args)
     elif cmd == "export":
         config.export_flow()
     else:
@@ -1253,7 +1264,7 @@ def download(extra: list[str], args=None):
 #             continue
 #         meta = library.meta_from_info(info)
 #         meta["title"] = info.get("title", "")
-#         library.update_meta(video_id, meta)  # saves library.json right here
+#         library.update_meta(video_id, meta)  # saves library.db right here
 #         updated += 1
 #         label = meta.get("title") or video_id
 #         artist = meta.get("artist") or ""
@@ -1270,9 +1281,9 @@ def download(extra: list[str], args=None):
 
 
 def backfill_metadata():
-    """Rebuild library.json entries for the downloaded songs on disk.
+    """Rebuild library.db entries for the downloaded songs on disk.
 
-    If ~/.flow gets wiped, library.json is gone but the audio files under
+    If ~/.flow gets wiped, library.db is gone but the audio files under
     ~/.flow/downloads/ usually survive — they are named <video_id>.<ext>,
     so the video id is recoverable straight from the filename. This scans
     the download dir, fetches metadata + thumbnail for each id and
@@ -1320,7 +1331,7 @@ def backfill_metadata():
                 continue
             title = info.get("title") or ""
             meta = library.meta_from_info(info)
-            library.track_download(video_id, str(f), title, meta)  # saves library.json right here
+            library.track_download(video_id, str(f), title, meta)  # saves library.db right here
             try:
                 library.download_thumbnail(video_id)
             except Exception:

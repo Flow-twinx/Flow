@@ -2,13 +2,15 @@
 
 All persistent state lives in `~/.flow/`. Most files are plain JSON written
 atomically (write to a `.tmp` sibling, `os.replace` onto the target) so a
-crash mid-write can never truncate them.
+crash mid-write can never truncate them. The two databases
+(`library.db`, `history.db`) are SQLite and use WAL journaling instead.
 
 ```
 ~/.flow/
 ├── config.json            # settings (backend/config.py)
-├── library.json           # per-song data, keyed by video id (backend/library.py)
-├── library.lock           # flock guard for library.json read-modify-write
+├── library.db             # per-song data + play counts (backend/library.py)
+├── history.db             # online play log (backend/history.py)
+├── library.json.bak       # pre-v0.9 store, kept after the one-time import
 ├── status.json            # current/last track (backend/status.py)
 ├── shortcuts.json         # command aliases (backend/shortcuts.py)
 ├── ignore.txt             # filler words stripped from titles
@@ -35,6 +37,10 @@ crash mid-write can never truncate them.
 └── LOGS/                  # flow2.log rotating log (dev mode only)
 ```
 
+WAL mode means each database also has a `-wal` and `-shm` sidecar next to it
+while a process holds it open. They are recreated automatically; deleting them
+while no process is running is safe.
+
 ## config.json
 
 Loaded at import by `config._load_config()` and saved on every change; keys
@@ -43,37 +49,122 @@ guide](../user/configuration.md) for the full key list. `format` may be
 `opus|m4a|mp3|webm` (non-webm requires ffmpeg, which is auto-detected at
 startup unless explicitly configured).
 
-## library.json
+## library.db
 
-Top-level object keyed by YouTube video id:
+SQLite (`backend/library.py`), one row per song keyed by video id:
 
-```json
-{
-  "AbCdEf12345": {
-    "liked": true,
-    "downloaded": true,
-    "title": "Song title",
-    "song": "/home/you/.flow/downloads/AbCdEf12345.webm",
-    "thumbnail": "/home/you/.flow/downloads/.cache/AbCdEf12345.jpg",
-    "artist": "...",
-    "album": "...",
-    "duration": 214,
-    "speed_dial": true
-  }
-}
+```sql
+CREATE TABLE songs (
+    video_id     TEXT PRIMARY KEY,
+    liked        INTEGER NOT NULL DEFAULT 0,
+    downloaded   INTEGER NOT NULL DEFAULT 0,
+    speed_dial   INTEGER NOT NULL DEFAULT 0,
+    title        TEXT    NOT NULL DEFAULT '',
+    artist       TEXT,
+    album        TEXT,
+    duration     INTEGER,
+    song         TEXT,
+    thumbnail    TEXT    NOT NULL DEFAULT '',
+    song_count   INTEGER NOT NULL DEFAULT 0,
+    first_played REAL,
+    last_played  REAL
+);
+CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
 ```
+
+`meta` holds migration flags only. `song` is the download path (`NULL`
+unless downloaded) and `speed_dial` marks web-UI favorites.
+
+**The API is still dict-shaped.** `library.load()` returns
+`{video_id: {...}}` and every write goes through `library._mutate(fn)`, so
+the four external callers (`web/app.py`, `tui/main.py`, `Offline/file.py`,
+the mode command modules) needed no changes when this moved off JSON.
 
 Notes:
 
-- `song` is only present for downloads; `speed_dial` marks web-UI favorites.
-- Every write goes through `library._mutate(fn)`, which takes an exclusive
-  `flock` on `~/.flow/library.lock`, loads, applies `fn`, and saves when the
-  function reports a change. This makes cross-process read-modify-write safe
-  (TUI, web server, and CLI all touch the same file).
-- `save()` truncates titles (`_truncate_title`) and purges a denylist of
-  metadata keys (`track`, `uploader`, `channel`, `upload_date`,
-  `release_date`, `view_count`, `like_count`, `url`) — only
-  artist/album/duration are kept.
+- Every write goes through `_mutate(fn)`, which opens `BEGIN IMMEDIATE`,
+  loads, applies `fn`, and diffs the result — only rows that actually changed
+  are written. A mutator that returns `False` rolls back, so "no change
+  needed" never touches the database. This is what replaced the `flock` on
+  `~/.flow/library.lock`.
+- Connections are per-call (the Flask server and the daemon are both
+  threaded, so a shared connection is not safe), opened with
+  `journal_mode=WAL`, `synchronous=NORMAL` and a 10 s `busy_timeout`. WAL
+  lets readers run while a writer holds the write lock, which is what makes
+  the TUI, web server and CLI safe against each other.
+- Titles are cleaned on write (`config._truncate_title`: drops filler words
+  from `ignore.txt`, caps at six words). Only artist/album/duration are kept
+  as metadata.
+- **A row is only deleted when nothing is left to remember** — not liked, not
+  downloaded, not on speed dial, no `song` path, *and* `song_count == 0` —
+  so a play count survives an unlike or a delete.
+
+### Play counting
+
+`library.bump_play(video_id, title, artist, duration)` increments
+`song_count` and stamps `first_played` / `last_played`, filling in
+title/artist/duration only when they are not already known. It is called for
+**every** play in both modes, from four entry points:
+
+| Entry point | File |
+| --- | --- |
+| `play_entry` (YouTube) | `backend/Online/player.py` |
+| `play_url` (JioSaavn) | `backend/Online/player.py` |
+| `play_file` | `backend/Offline/player.py` |
+| `_play` | `tui/main.py` |
+
+Offline playback identifies a track by its filename stem, which *is* its
+video id, so a downloaded song shares one counter with its online plays.
+JioSaavn tracks have no video id, so `play_url` namespaces the JioSaavn song
+id as `j:<song_id>` to keep it from colliding with a real video id.
+
+The web player counts through `POST /api/history/play` (see
+[history.db](#historydb)) rather than `/api/now-playing`, because the player
+bar posts to the latter on play, pause *and* `loadedmetadata`.
+
+## history.db
+
+SQLite (`backend/history.py`) — the online-only play log:
+
+```sql
+CREATE TABLE plays (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id  TEXT NOT NULL DEFAULT '',
+    title     TEXT NOT NULL,
+    artist    TEXT,
+    played_at REAL NOT NULL
+);
+```
+
+One row per play event, holding only the song name, the artist and the
+timestamp. **Local playback is deliberately not logged here** — it is counted
+by `song_count` in `library.db` but never produces a timeline row, so the
+history stays a record of what you streamed.
+
+The two databases answer different questions on purpose:
+
+| | `library.db` | `history.db` |
+| --- | --- | --- |
+| Question | how many times have I played this song | what did I stream, and when |
+| Scope | every mode | online only |
+| Shape | one row per song | one row per play event |
+| Surfaced by | `flow summary` (CLI) | `history` (web panel) |
+
+`video_id` is stored even though the UI never shows it: the web History panel
+needs it to re-play a row, and the `most` / `least` sorts group by it.
+
+## Migration from library.json
+
+`library._migrate_from_json()` runs once, guarded by the `meta` flag
+`json_migrated`. If a pre-v0.9 `~/.flow/library.json` exists it is imported
+into `songs` and then renamed to `library.json.bak` (the same convention as
+the `playlists.json` migration). Keys the new schema dropped
+(`track`, `uploader`, `channel`, `upload_date`, `release_date`, `view_count`,
+`like_count`, `url`) are discarded.
+
+> **TODO(remove after v0.9):** delete `_migrate_from_json`, `_legacy_to_row`,
+> `LEGACY_FILE` and `_REMOVED_META_KEYS` once v0.9 ships — no pre-v0.9 install
+> will be left to upgrade from.
 
 ## status.json
 

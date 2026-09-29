@@ -26,7 +26,7 @@ from textual.widgets import (
     Static,
 )
 
-from backend import config, library, mpris, sponsor, status
+from backend import config, history, library, mpris, sponsor, status
 from backend.Offline import file as offline_file
 from backend.Online import youtube
 
@@ -882,6 +882,27 @@ class Flow(App):
         self._ensure_timer()
         self._mpris_track(track)
         self._update_status(True)
+        self._record_play(track)
+
+    def _record_play(self, track: Track) -> None:
+        """Bump song_count (and log online plays) for a track that started."""
+        try:
+            video_id = track.video_id or ""
+            if not video_id and track.ref:
+                video_id = pathlib.Path(str(track.ref)).stem
+            artist = ""
+            if video_id:
+                entry = library.get(video_id) or {}
+                artist = entry.get("artist") or ""
+            history.record_play(
+                video_id,
+                track.title or "",
+                artist,
+                mode="offline" if track.kind == "local" else "online",
+                duration=int(track.duration or 0),
+            )
+        except Exception:
+            pass
 
     def _ensure_timer(self) -> None:
         if self._timer is None:

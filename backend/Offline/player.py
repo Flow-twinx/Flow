@@ -12,7 +12,7 @@ import time
 
 import vlc
 
-from backend import config, library, mpris, status, visualizer
+from backend import config, history, library, mpris, status, visualizer
 
 _truncate_title = config._truncate_title
 
@@ -362,6 +362,12 @@ def play_file(filepath, title, args=None, flags=None, next_title=None, nav=None)
         if lib_entry:
             artist = lib_entry.get("artist") or ""
             album = lib_entry.get("album") or ""
+        # Local playback is counted but never logged to the play timeline —
+        # and a downloaded track's stem is its video id, so this bumps the
+        # same counter as its online play.
+        history.record_play(
+            video_id, title, artist, mode="offline", duration=int(duration)
+        )
         art_path = ""
         if thumb:
             art_path = str(thumb)

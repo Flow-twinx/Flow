@@ -1,12 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
+
 a = Analysis(
-    ["flow_twinx/main.py"],
-    pathex=[],
+    ["cli/main.py"],
+    pathex=[SPECPATH],
     binaries=[],
     datas=[
-        ("backend/web/templates", "backend/web/templates"),
-        ("flow_twinx/Hyprland/island.qml", "flow_twinx/Hyprland"),
+        ("web/templates", "web/templates"),
+        ("backend/Hyprland/island.qml", "backend/Hyprland"),
+        ("backend/plugin_api/flow_api.py", "backend/plugin_api"),
         ("pyproject.toml", "."),
     ],
     hiddenimports=[
@@ -16,6 +19,8 @@ a = Analysis(
         "ytmusicapi",
         "yt_dlp",
         "flask",
+        "cli",
+        "cli.tui",
         "backend",
         "backend.Online",
         "backend.Online.commands",
@@ -26,9 +31,9 @@ a = Analysis(
         "backend.Offline.commands",
         "backend.Offline.player",
         "backend.Offline.file",
-        "backend.web",
-        "backend.web.app",
-        "backend.web.devlog",
+        "web",
+        "web.app",
+        "web.devlog",
         "dbus",
         "dbus.mainloop",
         "dbus.mainloop.glib",
@@ -45,6 +50,20 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+
+# python-vlc loads libvlc with ctypes and needs the *system* libvlc plus its
+# plugin directory. PyInstaller picks libvlc.so.5/libvlccore.so.9 up from the
+# ctypes.CDLL() literals in vlc.py, and inside the onefile bundle they are
+# loaded from _MEIPASS -- so libvlccore searches for its plugins next to itself
+# instead of /usr/lib/vlc/plugins, finds none, and libvlc_new() returns NULL
+# (Instance() becomes None -> "'NoneType' object has no attribute
+# 'media_player_new'"). Drop the bundled copies and let ctypes resolve the
+# system library through ldconfig.
+_VLC_BUNDLED = {"libvlc.so.5", "libvlccore.so.9"}
+_dropped = [b for b in a.binaries if os.path.basename(b[0]) not in _VLC_BUNDLED]
+if len(_dropped) != len(a.binaries):
+    print("[flow.spec] dropping bundled VLC libs: libvlc/libvlccore must come from the system")
+a.binaries = _dropped
 
 pyz = PYZ(a.pure)
 

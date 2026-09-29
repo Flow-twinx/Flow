@@ -10,16 +10,19 @@ import urllib.request
 from pathlib import Path
 
 if __name__ == "__main__" and __package__ is None:
-    __package__ = "flow_twinx"
+    # `python cli/main.py` puts `cli/` on sys.path instead of the repo root, so
+    # the absolute `backend` / `cli` imports below would not resolve. The frozen
+    # build runs this file as top-level `main` (so `__package__` is None there
+    # too) and its own bootloader already puts the bundle dir on sys.path.
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from backend import config, shortcuts
 from backend.Offline import commands as _offline_commands
 from backend.Online import commands as _online_commands
 from backend.ping import is_connected
-
-from .tui import input as tui_input
-from .tui import show_banner
+from backend.summary import SORTS as _SUMMARY_SORTS
+from cli.tui import input as tui_input
+from cli.tui import show_banner
 
 _COMMAND_MODULES = {
     "Online": _online_commands,
@@ -90,6 +93,39 @@ def _load_commands():
     return _COMMAND_MODULES[config.Mode]
 
 
+def _summary_extra(args, unknown, command="summary"):
+    """Rebuild `summary`'s own flags out of what argparse handed us.
+
+    `--sort` and `--top` are declared as real options so `flow --summary --top 3`
+    parses, but the short spellings (`-s recent`, `-l`, `-c`) can only be
+    declared on the `summary` command itself — `-s` and friends already mean
+    something to playback. Both halves therefore arrive mixed together:
+
+    * declared long options land on `args.sort` / `args.top`,
+    * unrecognised short options stay in `unknown`,
+    * and the *value* of an unrecognised option gets parked on the `command`
+      positional, e.g. `-l -s recent` parses as `command='recent'`.
+
+    This puts all three back into the flat list `summary._parse_args` expects.
+    """
+    extra = list(unknown)
+    if args.sort:
+        extra += ["-s", args.sort]
+    if args.top is not None:
+        extra += ["--top", str(args.top)]
+    trailing = args.command
+    if trailing and trailing != command:
+        if extra and extra[-1] in ("-s", "--sort", "--top", "-n"):
+            extra.append(trailing)
+        elif trailing in _SUMMARY_SORTS:
+            extra += ["-s", trailing]
+        elif trailing.isdigit():
+            extra += ["--top", trailing]
+        else:
+            extra.append(trailing)
+    return extra
+
+
 def _check_vlc():
     try:
         import vlc
@@ -109,8 +145,21 @@ def _check_vlc():
         sys.exit(1)
 
 
+def _bundle_root():
+    """Repo root for a source run, PyInstaller's unpack dir for the frozen build.
+
+    Data files are shipped inside the bundle next to their package, and the
+    frozen entry script lives at `<bundle>/main.py` — so this file's own
+    `parent.parent` is the system temp dir, not the bundle. Only usable when
+    running from a checkout.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    return Path(__file__).resolve().parent.parent
+
+
 def _setup_island():
-    src = Path(__file__).resolve().parent.parent / "backend" / "Hyprland" / "island.qml"
+    src = _bundle_root() / "backend" / "Hyprland" / "island.qml"
     dest_dir = Path.home() / ".config" / "quickshell"
     dest = dest_dir / "flow-island.qml"
     if not src.exists():
@@ -270,7 +319,24 @@ def main():
     parser.add_argument(
         "--meta",
         action="store_true",
-        help="backfill metadata in library.json for already downloaded songs (temporary)",
+        help="backfill metadata in library.db for already downloaded songs (temporary)",
+    )
+    parser.add_argument(
+        "--summary",
+        action="store_true",
+        help="play statistics; add -l for the ranked per-song table, -c to clear history",
+    )
+    parser.add_argument(
+        "--sort",
+        choices=sorted(_SUMMARY_SORTS),
+        metavar="KEY",
+        help=f"per-song table sort for --summary ({'/'.join(_SUMMARY_SORTS)})",
+    )
+    parser.add_argument(
+        "--top",
+        type=int,
+        metavar="N",
+        help="rows to show in the --summary per-song table",
     )
     parser.add_argument(
         "--setup-island",
@@ -353,6 +419,13 @@ def main():
 
             _ensure_daemon()
         sys.exit(plugins.dispatch(args.command, unknown, args))
+
+    # A storage read — no player, no VLC.
+    if getattr(args, "summary", False):
+        from backend import summary
+
+        summary.cmd_summary(_summary_extra(args, unknown, command=None))
+        sys.exit(0)
 
     _check_vlc()
 
@@ -451,6 +524,7 @@ def main():
         "rd",
         "playlist",
         "plist",
+        "summary",
         "exit",
     ):
         unknown = [args.command] + unknown
@@ -488,6 +562,9 @@ def main():
 
         if args.command in SHELL_AUTO_BG:
             args.bg = True
+
+        if args.command == "summary":
+            unknown = _summary_extra(args, unknown)
 
         try:
             commands.run(args.command, unknown, args)

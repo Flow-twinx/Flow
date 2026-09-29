@@ -60,7 +60,8 @@ Everything lives under `~/.flow/`.
 | Path                                        | Purpose                                                            |
 | ------------------------------------------- | ------------------------------------------------------------------ |
 | `config.json`                               | Settings above                                                     |
-| `library.json`                              | Per-song data, keyed by YouTube video id                           |
+| `library.db`                                | Per-song data + play counts, keyed by YouTube video id             |
+| `history.db`                                | Play log for online streams (song name, artist, when)              |
 | `status.json`                               | Current/last played track                                          |
 | `downloads/`                                | Downloaded audio, named by video id (e.g. `TucWbkH5WX0.webm`)      |
 | `downloads/.cache/`                         | Thumbnails (`<video_id>.jpg`)                                      |
@@ -76,33 +77,38 @@ Everything lives under `~/.flow/`.
 | `seek.txt`                                  | Pending seek delta (milliseconds) for `--seek`/`--seekb`           |
 | `web_command.json`                          | Pending control command for the web player                         |
 | `web_ui.json`                               | Web UI settings (e.g. chosen download format)                      |
-| `library.lock`                              | Lock guarding `library.json` writes                                |
+| `library.json.bak`                          | Pre-0.9 store, kept as a backup after the one-time import          |
 
-### library.json entry
+### library.db
 
-Each entry is keyed by the video id and holds:
+A SQLite database with one row per song, keyed by video id:
 
-```json
-{
-  "liked": true,
-  "downloaded": true,
-  "title": "Song name",
-  "song": "/home/you/.flow/downloads/abc123.webm",
-  "thumbnail": "/home/you/.flow/downloads/.cache/abc123.jpg",
-  "artist": "...",
-  "album": "...",
-  "duration": 214,
-  "speed_dial": true
-}
-```
+| Column                     | Meaning                                             |
+| -------------------------- | --------------------------------------------------- |
+| `liked`, `downloaded`, `speed_dial` | Flags                                    |
+| `title`, `artist`, `album`, `duration` | Cleaned metadata                       |
+| `song`                     | Local file path of a download (empty if not)          |
+| `thumbnail`                | Cached thumbnail path                                |
+| `song_count`               | How many times you've played it, online **and** offline |
+| `first_played`, `last_played` | Unix timestamps of the first / most recent play    |
 
-`liked`, `downloaded`, and `speed_dial` are flags; `song` is the local file
-path of a download. Entries are truncated to a clean title whenever saved
-(extra metadata like uploader/channel/view counts is dropped intentionally).
+Titles are cleaned on save (see [Title cleanup](#title-cleanup); extra
+metadata like uploader/channel/view counts is dropped intentionally).
+
+A song's row is only removed once you have unliked it, deleted the download,
+removed it from Speed Dial **and** never played it — so `song_count` survives
+an unlike.
+
+### history.db
+
+A SQLite database with one row per **online** play: the song name, the
+artist, and when you played it. Local playback is not logged here; it only
+moves the `song_count` in `library.db`. See [`flow
+summary`](../user/command-line.md) and the web **History** panel.
 
 ### Title cleanup
 
-Names shown for downloaded tracks come from `library.json` titles. Extra
+Names shown for downloaded tracks come from `library.db` titles. Extra
 words like "official", "lyrics", "video" are stripped using the word list in
 `~/.flow/ignore.txt` — edit it to customize what gets removed.
 
@@ -110,4 +116,6 @@ words like "official", "lyrics", "video" are stripped using the word list in
 
 `flow export` zips `~/.flow` into `~/Downloads/flow_backup.zip`, skipping the
 bulk directories (`downloads/`, `playlist/`, `playlists/`, `LOGS/`) and
-`vlc.pid`. Use `playlist export <name>` to get a single playlist as `.m3u`.
+`vlc.pid`. It includes `library.db` and `history.db` along with their WAL
+sidecars, so close Flow before exporting to get a consistent copy. Use
+`playlist export <name>` to get a single playlist as `.m3u`.

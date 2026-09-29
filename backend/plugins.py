@@ -27,7 +27,16 @@ LOGS_DIR = PLUGINS_DIR / "_logs"
 
 DEFAULT_REPO = "https://github.com/Twinx015/flow-plugins.git"
 
-API_SOURCE = pathlib.Path(__file__).parent / "plugin_api" / "flow_api.py"
+# The plugin SDK is shipped as a data file next to this module, not imported,
+# so in the frozen build it lives in the unpack dir rather than beside
+# `__file__` (which points inside the PYZ).
+_BUNDLE_ROOT = (
+    pathlib.Path(sys._MEIPASS)
+    if getattr(sys, "frozen", False)
+    else pathlib.Path(__file__).resolve().parent
+)
+
+API_SOURCE = _BUNDLE_ROOT / "plugin_api" / "flow_api.py"
 
 
 def _ensure_plugins_dir():

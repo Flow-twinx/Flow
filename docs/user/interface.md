@@ -14,7 +14,7 @@ flow-tui
 The screen has two panels:
 
 - **Left — track list.** In offline mode this is your local library (from
-  `~/.flow/downloads/`, titles resolved from `~/.flow/library.json`). In
+  `~/.flow/downloads/`, titles resolved from `~/.flow/library.db`). In
   online mode it starts empty; type a query in the search box and press Enter
   to search YouTube.
 - **Right — Now Playing.** Current track title, a live progress bar,
@@ -85,6 +85,13 @@ The web UI can:
   (including `~/.flow/music/<album>/` folders), like/unlike, delete
   downloads, and create/add/remove/rename/duplicate/merge/reorder/export
   playlists.
+- **Browse your play history** in the **History** panel — an online-only
+  timeline you can sort by newest, oldest, most played or least played,
+  filter to today / 7 days / 30 days / all time, and tick **Unique songs**
+  to collapse repeats into a ranked list. Click a row to play it again.
+  Local playback is counted but not listed here; use
+  [`flow summary`](command-line.md#summary) for per-song counts across both
+  modes.
 - **Download** tracks (also in opus/m4a/mp3/webm when ffmpeg is present).
 - **Auto-skip SponsorBlock segments** while playing (toggleable via
   `ad_skip`).

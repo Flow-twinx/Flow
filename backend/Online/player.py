@@ -11,7 +11,7 @@ import time
 
 import vlc
 
-from backend import config, library, lyrics, mpris, sponsor, status, visualizer
+from backend import config, history, library, lyrics, mpris, sponsor, status, visualizer
 
 _truncate_title = config._truncate_title
 
@@ -387,6 +387,16 @@ def play_url(
             if primary:
                 artist = primary[0].get("name", "") or ""
             album = (entry.get("album") or {}).get("name") or ""
+        # JioSaavn tracks have no YouTube id; namespace the song id so it can
+        # never collide with a real video id in the library.
+        savan_id = (entry or {}).get("id") or ""
+        history.record_play(
+            f"j:{savan_id}" if savan_id else "",
+            title,
+            artist,
+            mode="online",
+            duration=duration,
+        )
         mpris.load_track(
             None,
             title,
@@ -484,6 +494,9 @@ def play_entry(entry, title, args=None, flags=None, next_title=None, nav=None):
             artist = entry.get("artist") or ""
         if not album:
             album = entry.get("album") or ""
+        history.record_play(
+            video_id or "", title, artist, mode="online", duration=duration
+        )
         art_path = ""
         if video_id:
             cached = library.thumbnail_path(video_id)

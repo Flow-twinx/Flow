@@ -9,7 +9,15 @@ import termios
 import threading
 import time
 
-from backend import config, help_detail, library, playlist, plist_cli, shortcuts
+from backend import (
+    config,
+    help_detail,
+    library,
+    playlist,
+    plist_cli,
+    shortcuts,
+    summary,
+)
 from backend.config import merge_flags
 from backend.Offline import file as lib
 from backend.Offline import player
@@ -99,6 +107,7 @@ COMMANDS = {
     "short": "Show/update command shortcuts",
     "config": "Change primary/secondary/tertiary colors, format, display",
     "check": "Check all dependencies (ffmpeg, vlc, yt-dlp, psutil)",
+    "summary": "Play summary | -l per-song table | -s <sort> | --top N",
     "export": "Backup ~/.flow config to ~/Downloads",
     "exit": "Exit Flow",
 }
@@ -148,7 +157,7 @@ def run(cmd: str, extra: list[str], args):
     extra = [x for x in extra if x != "-i"]
     extra, args = (
         merge_flags(extra, args)
-        if cmd not in ("config", "check", "short")
+        if cmd not in ("config", "check", "short", "summary")
         else (extra, args)
     )
     if cmd == "play":
@@ -177,6 +186,8 @@ def run(cmd: str, extra: list[str], args):
         config.cmd_config(extra, args)
     elif cmd == "check":
         config.check_deps()
+    elif cmd == "summary":
+        summary.cmd_summary(extra, args)
     elif cmd == "export":
         config.export_flow()
     else:

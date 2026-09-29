@@ -49,6 +49,13 @@ const existsOverwriteBtn = document.getElementById("existsOverwriteBtn");
 const sidebarPlaylists = document.getElementById("sidebarPlaylists");
 const speedDialGrid = document.getElementById("speedDialGrid");
 const lastPlayedSection = document.getElementById("lastPlayedSection");
+const historyContainer = document.getElementById("historyContainer");
+const historySummary = document.getElementById("historySummary");
+const historySort = document.getElementById("historySort");
+const historyRange = document.getElementById("historyRange");
+const historyUnique = document.getElementById("historyUnique");
+const refreshHistoryBtn = document.getElementById("refreshHistoryBtn");
+const clearHistoryBtn = document.getElementById("clearHistoryBtn");
 
 let queue = [];
 let queueIndex = -1;
@@ -197,6 +204,13 @@ document
 scanLocalBtn.addEventListener("click", scanLocal);
 refreshLikedBtn.addEventListener("click", loadLiked);
 newPlaylistBtn.addEventListener("click", openNewPlaylistModal);
+refreshHistoryBtn.addEventListener("click", loadHistory);
+clearHistoryBtn.addEventListener("click", () => {
+  if (confirm("Clear the logged online play history?")) clearHistory();
+});
+historySort.addEventListener("change", loadHistory);
+historyRange.addEventListener("change", loadHistory);
+historyUnique.addEventListener("change", loadHistory);
 
 settingsBtn.addEventListener("click", () =>
   settingsModal.classList.add("open"),
@@ -275,10 +289,19 @@ function panelFromPath() {
       return "liked";
     case "/queue":
       return "queue";
+    case "/history":
+      return "history";
     default:
       return "home";
   }
 }
+
+// Panels that load their data the first time they are opened. The other
+// loaders are eager (they run once at boot) because their panels are the
+// common entry points; History is not, so it stays lazy.
+const lazyPanels = {
+  history: () => loadHistory(),
+};
 
 function setPanel(panel, noPush) {
   activePanel = panel;
@@ -295,6 +318,7 @@ function setPanel(panel, noPush) {
   if (!noPush && path && window.location.pathname !== path) {
     history.pushState({ panel }, "", path);
   }
+  if (lazyPanels[panel]) lazyPanels[panel]();
 }
 
 window.addEventListener("popstate", () => {
@@ -347,6 +371,39 @@ function reportNowPlaying(track, playing) {
   }).catch(() => {});
 }
 
+function historyVideoId(track) {
+  if (track.video_id) return track.video_id;
+  // Local tracks are identified by filename stem, exactly like the CLI's
+  // Offline player, so a downloaded song keeps one counter across both modes.
+  const src = track.path || track.url || "";
+  if (src && !/^https?:/i.test(src)) {
+    const base = src.split("/").pop().split("?")[0];
+    const dot = base.lastIndexOf(".");
+    return dot > 0 ? base.slice(0, dot) : base;
+  }
+  return "";
+}
+
+function reportHistoryPlay(track) {
+  if (!track || !track.title) return;
+  const videoId = historyVideoId(track);
+  const known = librarySongs[videoId] || {};
+  let artist = track.artist || known.artist || "";
+  if (!artist && track.channel && track.channel !== "Local Music")
+    artist = track.channel;
+  fetch("/api/history/play", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      video_id: videoId,
+      title: track.title,
+      artist: artist,
+      mode: (track.source || "yt") === "local" ? "offline" : "online",
+      duration: track.duration || 0,
+    }),
+  }).catch(() => {});
+}
+
 function handlePlaybackFailure(track) {
   if (!track || track !== queue[queueIndex]) {
     playbackRetries = 0;
@@ -376,6 +433,9 @@ function loadAndPlay(track, isRetry) {
   checkDownload(track.video_id);
   reportNowPlaying(track, true);
   setTimeout(() => reportNowPlaying(nowPlayingTrack, !audio.paused), 800);
+  // Counted here rather than in reportNowPlaying: that one fires again on
+  // pause and on loadedmetadata, which would count a single track 3+ times.
+  if (!isRetry) reportHistoryPlay(track);
   refreshLastPlayed();
 
   if (currentTrackType === "local") {
@@ -1882,6 +1942,118 @@ function loadLibrary() {
     .catch(() => {});
 }
 
+// --- History panel -------------------------------------------------------
+// Reads the online play log (history.db). `flow summary -l` is the other half
+// of this feature and deliberately answers a different question: it ranks a
+// per-song table across every mode, where this panel shows the play-event
+// timeline online only.
+
+function historyQuery() {
+  const q = new URLSearchParams();
+  q.set("sort", historySort ? historySort.value : "recent");
+  q.set("range", historyRange ? historyRange.value : "all");
+  q.set("unique", historyUnique && historyUnique.checked ? "1" : "0");
+  q.set("limit", "200");
+  return q.toString();
+}
+
+function loadHistory() {
+  if (!historyContainer) return;
+  historyContainer.innerHTML = '<div class="empty-state">Loading...</div>';
+  fetch("/api/history?" + historyQuery())
+    .then((r) => r.json())
+    .then((data) => renderHistory(data))
+    .catch(() => {
+      historyContainer.innerHTML =
+        '<div class="empty-state">Could not load history</div>';
+    });
+}
+
+function renderHistory(data) {
+  const plays = (data && data.plays) || [];
+  const totals = (data && data.totals) || {};
+  const unique = !!(data && data.unique);
+  // The most/least sorts group server-side, so reflect the effective value
+  // rather than letting the checkbox disagree with what is on screen.
+  if (historyUnique) {
+    historyUnique.checked = unique;
+    historyUnique.disabled = ["most", "least"].includes(
+      historySort ? historySort.value : "",
+    );
+  }
+  if (historySummary) {
+    historySummary.innerHTML = data
+      ? `<span><strong>${totals.online_plays || 0}</strong> online plays</span>
+         <span><strong>${totals.online_songs || 0}</strong> distinct songs</span>
+         <span><strong>${totals.online_today || 0}</strong> today</span>
+         <span class="history-hint">local playback is counted in <code>flow summary</code>, not here</span>`
+      : "";
+  }
+  if (!plays.length) {
+    historyContainer.innerHTML =
+      '<div class="empty-state">No online plays logged yet</div>';
+    return;
+  }
+  historyContainer.innerHTML = "";
+  plays.forEach((play) => {
+    const card = document.createElement("div");
+    card.className = "song-card";
+    card.dataset.title = play.title;
+    card.dataset.videoId = play.video_id || "";
+    const when = historyWhen(play.played_at, historyRange ? historyRange.value : "all");
+    card.innerHTML = `
+            ${artImgTag(play.thumbnail, null)}
+            <div class="song-info">
+                <div class="song-title">${play.title || "Unknown"}</div>
+                <div class="song-artist">${play.artist || "Unknown"}</div>
+            </div>
+            ${
+              unique && play.play_count > 1
+                ? `<span class="history-plays">${play.play_count} plays</span>`
+                : ""
+            }
+            <span class="history-time">${when}</span>
+        `;
+    if (play.video_id) {
+      card.addEventListener("click", () => {
+        const known = librarySongs[play.video_id] || {};
+        playTrack({
+          video_id: play.video_id,
+          title: play.title,
+          artist: play.artist || known.artist || "",
+          thumbnail: play.thumbnail || known.thumbnail || "",
+          channel: play.artist || "",
+        });
+      });
+    } else {
+      card.classList.add("unplayable");
+      card.title = "This play has no source id, so it cannot be replayed";
+    }
+    historyContainer.appendChild(card);
+  });
+}
+
+function historyWhen(ts, rangeKey) {
+  if (!ts) return "";
+  const d = new Date(ts * 1000);
+  const sameDay = (a, b) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (rangeKey === "today" || sameDay(d, new Date())) return time;
+  if (rangeKey === "7d") {
+    return `${d.toLocaleDateString([], { weekday: "short" })} ${time}`;
+  }
+  return `${d.toLocaleDateString([], { day: "2-digit", month: "short" })} ${time}`;
+}
+
+function clearHistory() {
+  fetch("/api/history/clear", { method: "POST" })
+    .then(() => loadHistory())
+    .catch(() => {});
+}
+
 function setDownloadBtnState(downloaded) {
   currentDownloaded = downloaded;
   downloadBtn.classList.toggle("downloaded", downloaded);
@@ -2111,6 +2283,10 @@ likeBtn.addEventListener("click", toggleLike);
 
 document.addEventListener("keydown", (e) => {
   if (e.target === searchInput) return;
+  // Form controls need their own keys: space toggles a checkbox, arrows cycle
+  // a <select> (the History panel's sort/range dropdowns).
+  const tag = e.target && e.target.tagName;
+  if (tag === "SELECT" || tag === "INPUT" || tag === "TEXTAREA") return;
   switch (e.key) {
     case " ":
     case "k":
