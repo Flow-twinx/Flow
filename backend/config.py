@@ -18,8 +18,11 @@ SIG_SHUFFLE = _signal.SIGRTMIN + 6
 SIG_STOP_ALL = _signal.SIGRTMIN + 7
 
 
+_FLAG_MAP = {"-bg": "bg", "-s": "shuffle", "-d": "download", "-m": "multi"}
+_SHORT_FLAGS = {"d": "download", "s": "shuffle", "m": "multi"}
+
+
 def merge_flags(extra: list[str], args) -> tuple[list[str], object]:
-    mapping = {"-bg": "bg", "-s": "shuffle", "-d": "download"}
     rest = []
     i = 0
     while i < len(extra):
@@ -32,15 +35,21 @@ def merge_flags(extra: list[str], args) -> tuple[list[str], object]:
             else:
                 setattr(args, "repeat_count", -1)
         elif item == "-f":
-            # download <query> -f <format> — consume the format token so it
-            # doesn't leak into the search query.
             if i + 1 < len(extra):
                 setattr(args, "format", extra[i + 1])
                 i += 1
             else:
                 print(f"Unknown flag: {item}")
-        elif item in mapping:
-            setattr(args, mapping[item], True)
+        elif item in _FLAG_MAP:
+            setattr(args, _FLAG_MAP[item], True)
+        elif (
+            item.startswith("-")
+            and not item.startswith("--")
+            and len(item) > 2
+            and all(ch in _SHORT_FLAGS for ch in item[1:])
+        ):
+            for ch in item[1:]:
+                setattr(args, _SHORT_FLAGS[ch], True)
         elif item.startswith("-"):
             print(f"Unknown flag: {item}")
         else:
@@ -86,7 +95,12 @@ _COLORS = {
 
 _COLOR_NAMES = {v: k for k, v in _COLORS.items()}
 
-_TARGET_ALIASES = {"pri": "primary", "sec": "secondary", "ter": "tertiary", "spin": "spinner"}
+_TARGET_ALIASES = {
+    "pri": "primary",
+    "sec": "secondary",
+    "ter": "tertiary",
+    "spin": "spinner",
+}
 _TARGETS = {"primary", "secondary", "tertiary", "display"}
 _DISPLAY_MODES = {"none", "bars", "lyrics"}
 _BAR_SPACING = {"min", "fit", "max"}
@@ -124,6 +138,7 @@ _VALID_FORMATS = {"opus", "m4a", "mp3", "webm"}
 AD_SKIP = True
 SPONSOR_CATEGORIES = ["sponsor", "selfpromo", "intro", "outro"]
 DOWN_ON_LIKE = True
+NOTIFY = True
 
 
 def set_format(fmt):
@@ -220,28 +235,183 @@ def check_deps():
         print(f"  | {name:10s} | {status:13s} | {test:6s} |")
 
 
-def export_flow():
-    import zipfile
+#: Containers treated as songs. The offline library scans for these and
+#: `export_flow` only copies/tags these.
+AUDIO_EXTENSIONS = {
+    ".mp3",
+    ".flac",
+    ".wav",
+    ".m4a",
+    ".ogg",
+    ".opus",
+    ".wma",
+    ".aac",
+    ".webm",
+}
 
-    flow_dir = pathlib.Path.home() / ".flow"
-    dest = pathlib.Path.home() / "Downloads" / "flow_backup.zip"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    skip_dirs = {"downloads", "playlist", "playlists", "LOGS"}
-    skip_files = {"vlc.pid"}
-    included = 0
-    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, dirs, files in os.walk(flow_dir):
-            rel_root = pathlib.Path(root).relative_to(flow_dir)
-            dirs[:] = [d for d in dirs if d not in skip_dirs]
-            for fname in files:
-                if fname in skip_files:
-                    continue
-                fpath = pathlib.Path(root) / fname
-                arcname = rel_root / fname
-                zf.write(fpath, arcname)
-                included += 1
-    size_kb = dest.stat().st_size // 1024
-    print(f"Exported {included} files to {dest} ({size_kb} KB)")
+#: Text tags written into every exported song. Fields the library does not
+#: know are skipped rather than written empty.
+_EXPORT_TAGS = ("title", "artist", "album")
+
+#: Containers ffmpeg can carry cover art in. Its ogg/opus muxers have no
+#: attached-picture stream, so art is left out there instead of failing.
+_ART_EXTENSIONS = {".mp3", ".m4a", ".flac", ".wav"}
+
+
+def export_dest(extra: list[str]) -> str | None:
+    """The ``-p PATH`` destination in a command's extra arguments, if any.
+
+    ``None`` means "no path given" — the caller then falls back to ~/Downloads.
+    """
+    rest = list(extra)
+    dest = None
+    for flag in ("-p", "--path"):
+        while flag in rest:
+            idx = rest.index(flag)
+            rest.pop(idx)
+            if idx < len(rest) and not rest[idx].startswith("-"):
+                dest = rest.pop(idx)
+    if dest is not None:
+        return dest
+    if any(f in extra for f in ("-p", "--path")):
+        print(f"{YELLOW}Path flag needs a directory, e.g. -p ~/Music{Reset}")
+    return None
+
+
+def _safe_filename(name: str) -> str:
+    """Strip separators and control characters so a title can be a file name."""
+    cleaned = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "", name).strip(" .")
+    return cleaned[:120].strip(" .") or "song"
+
+
+def _export_sources() -> list:
+    """``(path, tags)`` for every downloaded song, one entry per file stem.
+
+    Downloads are named after the video id, so the library is what supplies
+    the title; a file the library knows nothing about falls back to its own
+    name. ``liked songs/`` holds copies of top-level files, so a stem is only
+    exported once (the top-level copy wins).
+    """
+    from backend import library
+
+    if not DOWNLOAD_DIR.exists():
+        return []
+    try:
+        index = library.load()
+    except Exception:
+        index = {}
+    paths = sorted(
+        (p for p in DOWNLOAD_DIR.rglob("*") if p.is_file()),
+        key=lambda p: (len(p.relative_to(DOWNLOAD_DIR).parts), p.stem.lower()),
+    )
+    sources, seen = [], set()
+    for path in paths:
+        if path.suffix.lower() not in AUDIO_EXTENSIONS or path.stem in seen:
+            continue
+        seen.add(path.stem)
+        entry = index.get(path.stem) or {}
+        tags = {k: str(entry.get(k) or "").strip() for k in _EXPORT_TAGS}
+        tags["title"] = tags["title"] or path.stem
+        tags["cover"] = str(entry.get("thumbnail") or library.thumbnail_path(path.stem))
+        sources.append((path, tags))
+    return sources
+
+
+def _ffmpeg_exe() -> str | None:
+    """Path to ffmpeg, or None when tagging is not possible."""
+    if not FFMPEG:
+        return None
+    return shutil.which("ffmpeg")
+
+
+def _ffmpeg_tag(exe, src, dst, tags, cover=""):
+    """Run one tagging pass, stream-copying the audio. True when it worked."""
+    cmd = [exe, "-y", "-loglevel", "error", "-i", str(src)]
+    if cover:
+        cmd += ["-i", str(cover), "-map", "0:a", "-map", "1:v"]
+    else:
+        cmd += ["-map", "0"]
+    for key in _EXPORT_TAGS:
+        if tags.get(key):
+            cmd += ["-metadata", f"{key}={tags[key]}"]
+    if cover:
+        cmd += ["-c:a", "copy", "-c:v", "mjpeg", "-disposition:v:0", "attached_pic"]
+    else:
+        cmd += ["-c", "copy"]
+    cmd += [str(dst)]
+    try:
+        return subprocess.run(cmd, check=True, capture_output=True).returncode == 0
+    except OSError, subprocess.CalledProcessError:
+        return False
+
+
+def _tag_song(path: pathlib.Path, tags: dict) -> bool:
+    """Write title/artist/album (and cover art) into ``path`` in place.
+
+    The audio is stream-copied, so only the container headers change. Cover
+    art is a best-effort extra: if the muxer refuses it, the text tags are
+    retried on their own rather than lost.
+    """
+    exe = _ffmpeg_exe()
+    if not exe:
+        return False
+    cover = tags.get("cover") if path.suffix.lower() in _ART_EXTENSIONS else ""
+    if cover and not pathlib.Path(cover).exists():
+        cover = ""
+    tmp = path.parent / f".{path.stem}.flowtag{path.suffix}"
+    try:
+        ok = _ffmpeg_tag(exe, path, tmp, tags, cover)
+        if not ok and cover:
+            ok = _ffmpeg_tag(exe, path, tmp, tags)
+        if not ok:
+            return False
+        tmp.replace(path)
+        return True
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def export_flow(dest: str | None = None):
+    out_dir = (
+        pathlib.Path(dest).expanduser()
+        if dest
+        else pathlib.Path.home() / "Downloads" / "songs"
+    )
+    sources = _export_sources()
+    if not sources:
+        print(f"{Muted}No downloaded songs in {DOWNLOAD_DIR}{Reset}")
+        return
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        print(f"{RED}Cannot write to {out_dir}: {exc}{Reset}")
+        return
+    if not _ffmpeg_exe():
+        print(f"{YELLOW}ffmpeg not found — copying songs without tags.{Reset}")
+        print(f"{GREY}  Install ffmpeg to write title/artist/album into them.{Reset}")
+
+    copied = tagged = 0
+    used: set = set()
+    for src, tags in sources:
+        stem = _safe_filename(tags["title"])
+        name = f"{stem}{src.suffix.lower()}"
+        count = 2
+        while name in used:
+            name = f"{stem} ({count}){src.suffix.lower()}"
+            count += 1
+        used.add(name)
+        out = out_dir / name
+        try:
+            shutil.copy2(src, out)
+        except OSError as exc:
+            print(f"{RED}  {src.name}: {exc}{Reset}")
+            continue
+        copied += 1
+        if _tag_song(out, tags):
+            tagged += 1
+        print(f"  {Primary}{out.name}{Reset} {Muted}<- {src.name}{Reset}")
+    line = f"Exported {copied} song{'' if copied == 1 else 's'} to {out_dir}"
+    print(f"{GREEN}{line}{Reset} {GREY}({tagged} tagged){Reset}")
 
 
 _FILLER_WORDS = {
@@ -327,7 +497,8 @@ def _load_config():
         SPONSOR_CATEGORIES, \
         DOWN_ON_LIKE, \
         MAX_SEARCH_RESULTS, \
-        MAX_RESULTS_RADIO
+        MAX_RESULTS_RADIO, \
+        NOTIFY
     if not CONFIG_FILE.exists():
         return
     try:
@@ -393,6 +564,8 @@ def _load_config():
                 SPONSOR_CATEGORIES = cats
         if "down_on_like" in data and isinstance(data["down_on_like"], bool):
             DOWN_ON_LIKE = data["down_on_like"]
+        if "notify" in data and isinstance(data["notify"], bool):
+            NOTIFY = data["notify"]
         if "format" in data and data["format"] in _VALID_FORMATS:
             FORMAT = data["format"]
         if (
@@ -429,6 +602,7 @@ def _save_config():
         "ad_skip": AD_SKIP,
         "sponsor_categories": SPONSOR_CATEGORIES,
         "down_on_like": DOWN_ON_LIKE,
+        "notify": NOTIFY,
         "format": FORMAT,
         "max_search": MAX_SEARCH_RESULTS,
         "max_radio": MAX_RESULTS_RADIO,
@@ -679,11 +853,12 @@ PLUGIN_SAFE_KEYS = {
     "max_radio",
     "ad_skip",
     "down_on_like",
+    "notify",
 }
 
 
 def apply_config(key, value):
-    global AD_SKIP, DOWN_ON_LIKE
+    global AD_SKIP, DOWN_ON_LIKE, NOTIFY
     target = _TARGET_ALIASES.get(key.lower(), key.lower())
     if target not in PLUGIN_SAFE_KEYS:
         return f"Unknown config key '{key}'"
@@ -731,8 +906,16 @@ def apply_config(key, value):
             _save_config()
             return f"{Tertiary}Auto-download on like set to {DOWN_ON_LIKE}{Reset}"
         return "down_on_like must be true/false"
+    if target == "notify":
+        if value in ("true", "false"):
+            NOTIFY = value == "true"
+            _save_config()
+            return f"{Tertiary}Desktop notifications set to {NOTIFY}{Reset}"
+        return "notify must be true/false"
     if target in ("max_search", "maxresults"):
-        return _apply_int("MAX_SEARCH_RESULTS", value, 1, 20, "Max search results changed")
+        return _apply_int(
+            "MAX_SEARCH_RESULTS", value, 1, 20, "Max search results changed"
+        )
     if target in ("max_radio", "maxradio"):
         return _apply_int("MAX_RESULTS_RADIO", value, 1, 50, "Max radio tracks changed")
     return f"Unknown config key '{key}'"
@@ -768,6 +951,7 @@ def config_get(key):
         "dev": lambda: DEV_MODE,
         "ad_skip": lambda: AD_SKIP,
         "down_on_like": lambda: DOWN_ON_LIKE,
+        "notify": lambda: NOTIFY,
         "max_search": lambda: MAX_SEARCH_RESULTS,
         "max_radio": lambda: MAX_RESULTS_RADIO,
     }
@@ -806,7 +990,8 @@ def cmd_config(extra: list[str], args=None):
         AD_SKIP, \
         DOWN_ON_LIKE, \
         MAX_SEARCH_RESULTS, \
-        MAX_RESULTS_RADIO
+        MAX_RESULTS_RADIO, \
+        NOTIFY
     if extra and (extra[0] in ("help", "-h")):
         print(f"{Tertiary}Available targets:{Reset}")
         print(f"  {Primary}primary{Reset}   (aliases: pri)")
@@ -820,7 +1005,9 @@ def cmd_config(extra: list[str], args=None):
             f"  {GREY}barchar{Reset}    (dot, block, circle, or any single char — current: {BarChar})"
         )
         print(f"  {GREY}sensitivity{Reset} (0.5-5.0, current: {Sensitivity})")
-        print(f"  {GREY}theme{Reset}      (ocean, sunset, forest, fire, mono, royal — or 'list')")
+        print(
+            f"  {GREY}theme{Reset}      (ocean, sunset, forest, fire, mono, royal — or 'list')"
+        )
         print(f"  {GREY}spinner{Reset}     (2-16 chars, current: {SPINNER})")
         print(f"  {GREY}format{Reset}     (opus, m4a, mp3, webm — current: {FORMAT})")
         print(
@@ -828,6 +1015,9 @@ def cmd_config(extra: list[str], args=None):
         )
         print(
             f"  {GREY}down_on_like{Reset} (true/false — auto-download when liking online, current: {DOWN_ON_LIKE})"
+        )
+        print(
+            f"  {GREY}notify{Reset}      (true/false — desktop notifications, current: {NOTIFY})"
         )
         print(
             f"  {GREY}sponsor_categories{Reset} (in config file: sponsor, selfpromo, intro, outro, ...)"
@@ -903,6 +1093,13 @@ def cmd_config(extra: list[str], args=None):
         DOWN_ON_LIKE = value == "true"
         _save_config()
         print(f"{Tertiary}Auto-download on like set to {DOWN_ON_LIKE}{Reset}")
+    elif target == "notify":
+        if value not in ("true", "false"):
+            print("Usage: config notify true/false")
+            return
+        NOTIFY = value == "true"
+        _save_config()
+        print(f"{Tertiary}Desktop notifications set to {NOTIFY}{Reset}")
     elif target in ("max_search", "maxresults"):
         print(
             _apply_int("MAX_SEARCH_RESULTS", value, 1, 20, "Max search results changed")
@@ -920,17 +1117,20 @@ def cmd_config(extra: list[str], args=None):
         )
 
 
-def down_notify(song_name, error=False):
-    if error:
-        title = "Download Failed"
-        body = f"Error occurred during download: {song_name}"
-    else:
-        title = "Downloaded Song"
-        body = f"song: {song_name}"
+def notify(title, body=""):
+    if not NOTIFY:
+        return
     try:
         subprocess.run(["notify-send", title, body], check=False)
     except OSError:
         pass
+
+
+def down_notify(song_name, error=False):
+    if error:
+        notify("Download Failed", f"Error occurred during download: {song_name}")
+    else:
+        notify("Downloaded Song", f"song: {song_name}")
 
 
 def _interactive_config():
@@ -1047,6 +1247,12 @@ def _interactive_config():
             "default": DOWN_ON_LIKE,
         },
         {
+            "type": "confirm",
+            "name": "notify",
+            "message": "Desktop notifications",
+            "default": NOTIFY,
+        },
+        {
             "type": "text",
             "name": "max_search",
             "message": "Max search results (1-20)",
@@ -1139,6 +1345,9 @@ def _interactive_config():
         if "down_on_like" in answers:
             DOWN_ON_LIKE = answers["down_on_like"]
             print(f"{Tertiary}Auto-download on like set to {DOWN_ON_LIKE}{Reset}")
+        if "notify" in answers:
+            NOTIFY = answers["notify"]
+            print(f"{Tertiary}Desktop notifications set to {NOTIFY}{Reset}")
 
     try:
         for question in questions:
@@ -1150,7 +1359,7 @@ def _interactive_config():
             kwargs["style"] = py_style
             try:
                 answer = AVAILABLE_PROMPTS[cfg["type"]](**kwargs).unsafe_ask()
-            except (KeyboardInterrupt, EOFError):
+            except KeyboardInterrupt, EOFError:
                 interrupted = True
                 break
             answers[cfg["name"]] = answer
@@ -1166,7 +1375,9 @@ def _interactive_config():
     _apply_collected()
     _save_config()
     if interrupted:
-        print(f"\n{GREY}Config saved (partial — {len(answers)} setting(s) applied).{Reset}")
+        print(
+            f"\n{GREY}Config saved (partial — {len(answers)} setting(s) applied).{Reset}"
+        )
     else:
         print(f"\n{GREY}Config saved.{Reset}")
 

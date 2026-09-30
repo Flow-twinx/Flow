@@ -174,8 +174,11 @@ def _online_help():
             f"  {G}Alias:{R} {M}plist{R}",
         ],
         "export": [
-            f"{T}> export{R}",
-            f"{G}  Backup ~/.flow config and data to ~/Downloads/flow_backup.zip{R}",
+            f"{T}> export{R} {M}[-p <path>]{R}",
+            f"{G}  Copy every downloaded song to ~/Downloads.{R}",
+            f"  {M}-p{R} {G}<path>{R}  {G}Export to another directory instead{R}",
+            f"{G}  Songs are named after the title and tagged with{R}",
+            f"{G}  title/artist/album from the library.{R}",
         ],
         "stop": [
             f"{T}> flow --pause{R}",
@@ -344,8 +347,11 @@ def _offline_help():
             f"{G}  Also available as: {B}flow --check{R}",
         ],
         "export": [
-            f"{T}> export{R}",
-            f"{G}  Backup ~/.flow config and data to ~/Downloads/flow_backup.zip{R}",
+            f"{T}> export{R} {B}[-p <path>]{R}",
+            f"{G}  Copy every downloaded song to ~/Downloads.{R}",
+            f"  {B}-p{R} {G}<path>{R}  {G}Export to another directory instead{R}",
+            f"{G}  Songs are named after the title and tagged with{R}",
+            f"{G}  title/artist/album from the library.{R}",
         ],
         "stop": [
             f"{T}> flow --pause{R}",

@@ -231,7 +231,7 @@ flow_api.raw_cli("--status")            # gated: only when the daemon granted ra
 Writable config keys (host-enforced `PLUGIN_SAFE_KEYS`): `primary`,
 `secondary`, `tertiary`, `theme`, `spinner`, `display`, `barwidth`,
 `barheight`, `barspacing`, `barchar`, `sensitivity`, `format`,
-`max_search`, `max_radio`, `ad_skip`, `down_on_like`. Everything else is
+`max_search`, `max_radio`, `ad_skip`, `down_on_like`, `notify`. Everything else is
 readable but not writable from plugins (`dev`, `ffmpeg`,
 `sponsor_categories`).
 

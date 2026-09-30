@@ -21,6 +21,7 @@ from backend import (
 from backend.config import merge_flags
 from backend.Offline import player as off_player
 from backend.Online import player, savan, youtube
+from backend.ui import make_choice, parse_index_list, pick_many
 
 P = config.Primary
 S = config.Secondary
@@ -75,12 +76,6 @@ class _StopPlayback(Exception):
 
 
 def _clear_all_nav():
-    """Drop every nav flag on both player modules.
-
-    Called before a playback queue starts so an idle signal press (e.g. Stop
-    or Prev while nothing was playing) can't poison the next queue via a stale
-    flag left in the *other* module.
-    """
     for mod in (player, off_player):
         mod._stop_req = False
         mod._prev_req = False
@@ -88,9 +83,6 @@ def _clear_all_nav():
 
 
 def _nav_delta():
-    # Snapshot both modules' flags, then clear all of them. The entry-reset in
-    # play_entry/play_file/play_url only touches their own module's flags, so a
-    # stale flag in the other module would otherwise be misread here.
     stop = player._stop_req or off_player._stop_req
     prev = player._prev_req or off_player._prev_req
     player._stop_req = off_player._stop_req = False
@@ -120,7 +112,7 @@ COMMANDS = {
     "config": "Change primary/secondary/tertiary colors, format, display",
     "check": "Check all dependencies (ffmpeg, vlc, yt-dlp, psutil)",
     "summary": "Play summary | -l per-song table | -s <sort> | --top N",
-    "export": "Backup ~/.flow config to ~/Downloads",
+    "export": "Copy downloaded songs to ~/Downloads | -p <path> for elsewhere",
     "exit": "Exit Flow",
 }
 
@@ -130,7 +122,7 @@ def run(cmd: str, extra: list[str], args):
     inf = "-i" in extra
     extra = [x for x in extra if x != "-i"]
     playlist_name = None
-    if "-p" in extra:
+    if "-p" in extra and cmd != "export":
         pi = extra.index("-p")
         extra = extra[:pi] + extra[pi + 1 :]
         if extra and not extra[0].startswith("-"):
@@ -138,7 +130,7 @@ def run(cmd: str, extra: list[str], args):
         setattr(args, "save_playlist", playlist_name or True)
     extra, args = (
         merge_flags(extra, args)
-        if cmd not in ("config", "check", "short", "summary")
+        if cmd not in ("config", "check", "short", "summary", "export")
         else (extra, args)
     )
     if cmd == "play":
@@ -155,7 +147,7 @@ def run(cmd: str, extra: list[str], args):
         unlike_track()
     elif cmd == "download":
         download(extra, args)
-    elif cmd in ("delete", "dl-d"):
+    elif cmd in ("delete", "del"):
         delete_download(extra)
     elif cmd == "switch":
         switch_mode()
@@ -174,7 +166,7 @@ def run(cmd: str, extra: list[str], args):
     elif cmd == "summary":
         summary.cmd_summary(extra, args)
     elif cmd == "export":
-        config.export_flow()
+        config.export_flow(config.export_dest(extra))
     else:
         print(f"Unknown command: {cmd}")
 
@@ -337,6 +329,84 @@ def _pick_result(query, allow_skip, args=None):
     return _select_result(query, allow_skip, args)
 
 
+def _select_many(query, args=None, action="Play"):
+    global _last_results
+    limit = len(_last_results)
+    selected = set()
+    while True:
+        choices = []
+        for idx, (entry, title, dur) in enumerate(_last_results, 1):
+            choices.append(
+                make_choice(
+                    _fmt_choice(idx, entry, title, dur), idx - 1, idx - 1 in selected
+                )
+            )
+        choices.append(make_choice("↻ Load more results", "more"))
+        picked, used = pick_many(
+            f"{action} which tracks?",
+            choices,
+            instruction="(Space toggle, a all, Enter confirm)",
+        )
+        if used:
+            if picked is None:
+                return None
+            if "more" in picked:
+                if limit >= MAX_PAGE_RESULTS:
+                    e("    No more results")
+                    continue
+                limit = min(limit + PAGE_STEP, MAX_PAGE_RESULTS)
+                more = _fetch_more(query, limit)
+                if len(more) <= len(_last_results):
+                    e("    No more results")
+                    continue
+                _last_results = more
+                selected.update(p for p in picked if p != "more")
+                continue
+            selected = set(picked)
+            if selected:
+                return sorted(selected)
+            e("    Nothing selected")
+            continue
+
+        if not sys.stdin.isatty():
+            return [0] if _last_results else None
+        while True:
+            _print_results(_last_results)
+            prompt = (
+                f"{action} which tracks? [1-{len(_last_results)}, e.g. 1,3,5-7 or all] "
+            )
+            try:
+                choice = input(f"{P}{prompt}{R}").strip()
+            except EOFError, KeyboardInterrupt:
+                return None
+            if choice in ("m", "more"):
+                if limit >= MAX_PAGE_RESULTS:
+                    e("    No more results")
+                    continue
+                limit = min(limit + PAGE_STEP, MAX_PAGE_RESULTS)
+                more = _fetch_more(query, limit)
+                if len(more) <= len(_last_results):
+                    e("    No more results")
+                    continue
+                _last_results = more
+                continue
+            if not choice:
+                return None
+            if choice.lower() in ("a", "all"):
+                return list(range(len(_last_results)))
+            picked = parse_index_list(choice, len(_last_results))
+            if picked:
+                return picked
+            e("    Invalid choice")
+
+
+def _pick_indices(query, args, action="Play"):
+    if args is not None and getattr(args, "multi", False):
+        return _select_many(query, args, action=action) or []
+    idx = _pick_result(query, allow_skip=True, args=args)
+    return [] if idx is None else [idx]
+
+
 def _choose_result(query, results, args=None):
     if len(results) == 1:
         return 0
@@ -397,47 +467,59 @@ def play(extra: list[str], args):
         print("No results found")
         return
 
-    if repeat or shuffle:
-        results = list(_last_results)
+    if repeat or shuffle or getattr(args, "multi", False):
+        if getattr(args, "multi", False):
+            picks = _pick_indices(arg, args)
+            if not picks:
+                return
+            results = [_last_results[p] for p in picks]
+        else:
+            results = list(_last_results)
         if shuffle:
             random.shuffle(results)
-        if getattr(args, "bg", False):
-            if not _fork_bg("Now playing"):
-                return
-        repeat_count = getattr(args, "repeat_count", 0)
-        iteration = 0
-        try:
-            while True:
-                idx = 0
-                while 0 <= idx < len(results):
-                    entry, title, _ = results[idx]
-                    entry = _resolve_entry(entry)
-                    _last_played = (entry, title)
-                    player.play_entry(
-                        entry,
-                        title,
-                        args,
-                        nav=(idx + 1 < len(results), idx > 0),
-                    )
-                    idx += _nav_delta()
-                if not repeat:
-                    break
-                iteration += 1
-                if repeat_count > 0 and iteration >= repeat_count:
-                    break
-        except KeyboardInterrupt, _StopPlayback:
-            pass
+        _play_queue(results, args)
     else:
-        idx = _choose_result(arg, _last_results, args)
-        if idx is None:
+        picks = _pick_indices(arg, args)
+        if not picks:
             return
-        entry, title, _ = _last_results[idx]
+        entry, title, _ = _last_results[picks[0]]
         entry = _resolve_entry(entry)
         _last_played = (entry, title)
         if getattr(args, "bg", False):
             if not _fork_bg("Now playing"):
                 return
         player.play_entry(entry, title, args)
+
+
+def _play_queue(results, args):
+    global _last_played
+    if getattr(args, "bg", False):
+        if not _fork_bg("Now playing"):
+            return
+    repeat = getattr(args, "repeat", False)
+    repeat_count = getattr(args, "repeat_count", 0)
+    iteration = 0
+    try:
+        while True:
+            idx = 0
+            while 0 <= idx < len(results):
+                entry, title, _ = results[idx]
+                entry = _resolve_entry(entry)
+                _last_played = (entry, title)
+                player.play_entry(
+                    entry,
+                    title,
+                    args,
+                    nav=(idx + 1 < len(results), idx > 0),
+                )
+                idx += _nav_delta()
+            if not repeat:
+                break
+            iteration += 1
+            if repeat_count > 0 and iteration >= repeat_count:
+                break
+    except KeyboardInterrupt, _StopPlayback:
+        pass
 
 
 def resume(title, args):
@@ -844,15 +926,28 @@ def search(query: str, args=None):
     if not _last_results:
         print("No results found")
         return
-    idx = _pick_result(query, allow_skip=True, args=args)
-    if idx is None:
+    if args is not None and getattr(args, "download", False):
+        action = "Download"
+    else:
+        action = "Play"
+    picks = _pick_indices(query, args, action=action)
+    if not picks:
         return
-    entry, title, _ = _last_results[idx]
+    entries = [_last_results[p] for p in picks]
 
     if args is not None and getattr(args, "download", False):
-        download([str(idx + 1)], args)
+        fmt = _resolve_fmt(args)
+        if fmt is None:
+            return
+        for entry, _, _ in entries:
+            _download_one(entry, fmt)
         return
 
+    if len(entries) > 1:
+        _play_queue(entries, args)
+        return
+
+    entry, title, _ = entries[0]
     entry = _resolve_entry(entry)
     _last_played = (entry, title)
     if args is not None and getattr(args, "bg", False):
@@ -1149,26 +1244,34 @@ def radio(extra, args):
         signal.signal(signal.SIGUSR1, old_sigusr1)
 
 
-def download(extra: list[str], args=None):
-    global _last_results
+def _resolve_fmt(args, extra=None):
     fmt = None
     if args is not None and getattr(args, "format", None):
         fmt = str(args.format).lower()
-    elif "-f" in extra:
+    elif extra and "-f" in extra:
         fi = extra.index("-f")
         if fi + 1 < len(extra):
             fmt = extra[fi + 1].lower()
-            extra = extra[:fi] + extra[fi + 2 :]
+            if extra is not None:
+                extra[:] = extra[:fi] + extra[fi + 2 :]
         else:
             e("Usage: download <query> -f <format>")
-            return
+            return None
     if fmt and fmt not in ("opus", "m4a", "mp3", "webm"):
         e("Unknown format. Options: opus, m4a, mp3, webm")
-        return
+        return None
     if not fmt:
         fmt = config.FORMAT
     if fmt != "webm" and not config.FFMPEG:
         e(f"ffmpeg not found. Cannot convert to {fmt}. Install ffmpeg or use webm.")
+        return None
+    return fmt
+
+
+def download(extra: list[str], args=None):
+    global _last_results
+    fmt = _resolve_fmt(args, extra)
+    if fmt is None:
         return
 
     arg = " ".join(extra) if extra else None
@@ -1176,34 +1279,35 @@ def download(extra: list[str], args=None):
         e("No song specified")
         return
 
-    url = None
-    title = "Unknown"
+    entries = []
     if arg.isdigit():
         idx = int(arg) - 1
         if idx < 0 or idx >= len(_last_results):
             e("     Index out of range")
             return
-        entry, _, _ = _last_results[idx]
-        url = entry.get("webpage_url") or entry.get("original_url") or entry.get("url")
-        if not url and entry.get("id"):
-            url = f"https://www.youtube.com/watch?v={entry['id']}"
-        title = entry.get("title", "Unknown")
+        entries = [_last_results[idx]]
     else:
         _do_search(arg)
         if not _last_results:
             e("     No results found")
             return
-        idx = _choose_result(arg, _last_results, args)
-        if idx is None:
+        picks = _pick_indices(arg, args, action="Download")
+        if not picks:
             return
-        entry, _, _ = _last_results[idx]
-        url = entry.get("webpage_url") or entry.get("original_url") or entry.get("url")
-        if not url and entry.get("id"):
-            url = f"https://www.youtube.com/watch?v={entry['id']}"
-        title = entry.get("title", "Unknown")
+        entries = [_last_results[p] for p in picks]
+
+    for entry, _, _ in entries:
+        _download_one(entry, fmt)
+
+
+def _download_one(entry, fmt):
+    url = entry.get("webpage_url") or entry.get("original_url") or entry.get("url")
+    if not url and entry.get("id"):
+        url = f"https://www.youtube.com/watch?v={entry['id']}"
+    title = entry.get("title", "Unknown")
 
     if not url:
-        e("     No URL found for this entry")
+        e(f"     No URL found for: {_truncate_title(title)}")
         return
 
     vid = entry.get("id") or ""
@@ -1223,6 +1327,9 @@ def download(extra: list[str], args=None):
     t.start()
     try:
         youtube.download_url(url, config.DOWNLOAD_DIR, fmt=fmt)
+    except Exception as exc:
+        e(f"    Failed: {_truncate_title(title)} ({exc})")
+        return
     finally:
         stop = True
         t.join()
@@ -1331,7 +1438,9 @@ def backfill_metadata():
                 continue
             title = info.get("title") or ""
             meta = library.meta_from_info(info)
-            library.track_download(video_id, str(f), title, meta)  # saves library.db right here
+            library.track_download(
+                video_id, str(f), title, meta
+            )  # saves library.db right here
             try:
                 library.download_thumbnail(video_id)
             except Exception:
@@ -1342,10 +1451,7 @@ def backfill_metadata():
             album = f" [{meta['album']}]" if meta.get("album") else ""
             dur = meta.get("duration")
             dur_s = f" ({dur // 60}:{dur % 60:02d})" if dur else ""
-            i(
-                f"    {tag}: {label}{dur_s}{album}"
-                + (f" — {artist}" if artist else "")
-            )
+            i(f"    {tag}: {label}{dur_s}{album}" + (f" — {artist}" if artist else ""))
     tail = f" ({skipped} already done, {failed} failed)" if skipped or failed else ""
     print(f"\n{P}Rebuilt metadata for {updated}/{len(files)} songs{R}{tail}")
     return 0

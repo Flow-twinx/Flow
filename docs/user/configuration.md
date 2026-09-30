@@ -22,6 +22,7 @@ color names, or `config <target> <value>` for one-off changes.
 | `format`          | Default download format                    | `opus`, `m4a`, `mp3`, `webm` (non-webm needs ffmpeg) |
 | `ad_skip`         | Skip SponsorBlock segments during playback | `true` / `false`                                     |
 | `down_on_like`    | Auto-download when liking an online track  | `true` / `false`                                     |
+| `notify`          | Desktop notifications                      | `true` / `false`                                     |
 | `max_search`      | Max YouTube search results                 | 1–20 (default 5)                                     |
 | `max_radio`       | Max radio mix tracks                       | 1–50 (default 35)                                    |
 
@@ -47,6 +48,7 @@ Settings persist to `~/.flow/config.json`:
   "ad_skip": true,
   "sponsor_categories": ["sponsor", "selfpromo", "intro", "outro"],
   "down_on_like": true,
+  "notify": true,
   "format": "webm",
   "max_search": 5,
   "max_radio": 35
@@ -114,8 +116,13 @@ words like "official", "lyrics", "video" are stripped using the word list in
 
 ## Backups
 
-`flow export` zips `~/.flow` into `~/Downloads/flow_backup.zip`, skipping the
-bulk directories (`downloads/`, `playlist/`, `playlists/`, `LOGS/`) and
-`vlc.pid`. It includes `library.db` and `history.db` along with their WAL
-sidecars, so close Flow before exporting to get a consistent copy. Use
+`flow export` copies every downloaded song to `~/Downloads` (or to the
+directory given with `-p <path>`), named after the song and tagged with the
+title, artist and album from `library.db` — see
+[command-line.md](command-line.md#export). It needs `ffmpeg` to write those
+tags; without it the songs are still copied, just untagged.
+
+For config and database backups, copy `~/.flow` itself — `config.json`,
+`library.db` and `history.db` (with their WAL sidecars, so close Flow first for
+a consistent copy) hold everything Flow remembers. Use
 `playlist export <name>` to get a single playlist as `.m3u`.

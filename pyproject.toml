@@ -1,6 +1,6 @@
 [project]
 name = "flow-twinx"
-version = "0.8.0"
+version = "0.8.1"
 description = "A terminal music player with online and offline modes sourced from youtube."
 readme = "README.md"
 requires-python = ">=3.14"

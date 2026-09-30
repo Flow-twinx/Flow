@@ -360,6 +360,17 @@ def main():
     parser.add_argument(
         "--spinner", metavar="CHARS", help="set the loading spinner characters"
     )
+    parser.add_argument(
+        "-m",
+        "--multi",
+        action="store_true",
+        help=(
+            "multi-select in the result picker. Online: 'download q -m' downloads "
+            "several, 'search q -dm' and 'play q -dm' download several, 'search q -m' "
+            "and 'play q -m' play the ticked tracks as a queue. Offline: 'play q -m' "
+            "plays the ticked songs. Short flags combine, e.g. -dm"
+        ),
+    )
 
     args, unknown = parser.parse_known_args()
 
@@ -525,6 +536,7 @@ def main():
         "playlist",
         "plist",
         "summary",
+        "export",
         "exit",
     ):
         unknown = [args.command] + unknown

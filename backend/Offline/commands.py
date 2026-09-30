@@ -108,7 +108,7 @@ COMMANDS = {
     "config": "Change primary/secondary/tertiary colors, format, display",
     "check": "Check all dependencies (ffmpeg, vlc, yt-dlp, psutil)",
     "summary": "Play summary | -l per-song table | -s <sort> | --top N",
-    "export": "Backup ~/.flow config to ~/Downloads",
+    "export": "Copy downloaded songs to ~/Downloads | -p <path> for elsewhere",
     "exit": "Exit Flow",
 }
 
@@ -157,7 +157,7 @@ def run(cmd: str, extra: list[str], args):
     extra = [x for x in extra if x != "-i"]
     extra, args = (
         merge_flags(extra, args)
-        if cmd not in ("config", "check", "short", "summary")
+        if cmd not in ("config", "check", "short", "summary", "export")
         else (extra, args)
     )
     if cmd == "play":
@@ -189,7 +189,7 @@ def run(cmd: str, extra: list[str], args):
     elif cmd == "summary":
         summary.cmd_summary(extra, args)
     elif cmd == "export":
-        config.export_flow()
+        config.export_flow(config.export_dest(extra))
     else:
         e(f"Unknown command: {cmd}")
 
@@ -306,6 +306,42 @@ def _pick_song_numbered(songs):
     return None
 
 
+def _pick_many(results):
+    from ..ui import make_choice, parse_index_list, pick_many
+
+    choices = [
+        make_choice(f"{i}. {lib.display_name(p)}", i) for i, p in enumerate(results)
+    ]
+    picked, used = pick_many(
+        "Play which tracks?",
+        choices,
+        instruction="(Space toggle, a all, Enter play)",
+        mode="offline",
+    )
+    if used:
+        return None if picked is None else sorted(picked)
+    if not sys.stdin.isatty():
+        return [0]
+    m("  Multiple matches:")
+    for i, p in enumerate(results, 1):
+        m(f"  {i}. {lib.display_name(p)}")
+    while True:
+        try:
+            raw = input(
+                f"{P}Play which tracks? [1-{len(results)}, e.g. 1,3 or all] {R}"
+            ).strip()
+        except EOFError, KeyboardInterrupt:
+            return None
+        if not raw:
+            return None
+        if raw.lower() in ("a", "all"):
+            return list(range(len(results)))
+        picked = parse_index_list(raw, len(results))
+        if picked:
+            return picked
+        e("    Invalid choice")
+
+
 def play(extra: list[str], args):
     global _last_results, _last_played
     arg = " ".join(extra) if extra else None
@@ -317,6 +353,7 @@ def play(extra: list[str], args):
         _play_all(args)
         return
 
+    multi = getattr(args, "multi", False)
     if not arg:
         song_path = _select_song()
         if song_path is None:
@@ -334,6 +371,13 @@ def play(extra: list[str], args):
             return
         if len(results) == 1:
             song_path = results[0]
+        elif multi:
+            _last_results = results
+            picks = _pick_many(results)
+            if not picks:
+                return
+            _play_queue([results[p] for p in picks], args)
+            return
         else:
             _last_results = results
             idx = _pick_result()
@@ -362,6 +406,35 @@ def play(extra: list[str], args):
             pass
     else:
         player.play_file(song_path, lib.display_name(song_path), args)
+
+
+def _play_queue(paths, args):
+    global _last_played
+    if getattr(args, "bg", False):
+        if not _fork_bg("Now playing"):
+            return
+    repeat = getattr(args, "repeat", False)
+    repeat_count = getattr(args, "repeat_count", 0)
+    iteration = 0
+    try:
+        while True:
+            idx = 0
+            while 0 <= idx < len(paths):
+                _last_played = paths[idx]
+                player.play_file(
+                    paths[idx],
+                    lib.display_name(paths[idx]),
+                    args,
+                    nav=(idx + 1 < len(paths), idx > 0),
+                )
+                idx += _nav_delta()
+            if not repeat:
+                break
+            iteration += 1
+            if repeat_count > 0 and iteration >= repeat_count:
+                break
+    except KeyboardInterrupt, _StopPlayback:
+        pass
 
 
 def resume(title, args, thumb=None):

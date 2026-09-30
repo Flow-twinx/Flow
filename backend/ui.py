@@ -81,6 +81,79 @@ def pick(
     return choice, True
 
 
+def parse_index_list(text, count):
+    picks = []
+    for chunk in str(text).replace(" ", "").split(","):
+        if not chunk:
+            continue
+        if "-" in chunk:
+            lo_s, _, hi_s = chunk.partition("-")
+            if not lo_s and not hi_s:
+                continue
+            try:
+                lo = int(lo_s) if lo_s else 1
+                hi = int(hi_s) if hi_s else count
+            except ValueError:
+                continue
+            if lo > hi:
+                lo, hi = hi, lo
+            picks.extend(range(lo, hi + 1))
+        else:
+            try:
+                picks.append(int(chunk))
+            except ValueError:
+                continue
+    out = []
+    for n in picks:
+        idx = n - 1
+        if 0 <= idx < count and idx not in out:
+            out.append(idx)
+    return out
+
+
+def make_choice(title, value, checked=False):
+    try:
+        import questionary
+    except ImportError:
+        return (title, value)
+    return questionary.Choice(title=title, value=value, checked=checked)
+
+
+def pick_many(
+    question,
+    choices,
+    instruction="(Space toggle, a all, Enter confirm)",
+    mode="online",
+):
+    try:
+        import questionary
+    except ImportError:
+        return None, False
+
+    if not _is_tty():
+        return None, False
+
+    q_choices = [
+        c
+        if isinstance(c, questionary.Choice)
+        else questionary.Choice(title=c[0], value=c[1])
+        for c in choices
+    ]
+
+    try:
+        picked = questionary.checkbox(
+            question,
+            choices=q_choices,
+            instruction=instruction,
+            style=questionary_style()
+            if mode == "online"
+            else questionary_style("offline"),
+        ).ask()
+    except KeyboardInterrupt, EOFError:
+        return None, True
+    return picked, True
+
+
 def _is_tty():
     try:
         import sys

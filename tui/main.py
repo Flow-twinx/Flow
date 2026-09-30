@@ -838,7 +838,7 @@ class Flow(App):
             track.duration or 0,
             artist=artist,
             album=album,
-            art_path=art,
+            art=art,
             has_next=True,
             has_prev=True,
         )
