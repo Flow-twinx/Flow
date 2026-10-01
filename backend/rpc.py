@@ -5,7 +5,9 @@ real validated backend function — there is no plugin-facing passthrough that
 lets a plugin run arbitrary `flow` flags. The method surface is small and
 typed (`docs/dev/plugins.md`):
 
-- state    current_track / is_playing / status / library_stats   (file reads)
+- state    current_track / is_playing / status   (file reads)
+- data     library_stats / history               (SQLite reads via backend.library
+-                                                  and backend.history)
 - player   pause / resume / next / previous / seek / seek_back / like /
            unlike / download                (host-routed player control)
 - players  players — live player registry (kind, pid, port)
@@ -37,7 +39,7 @@ R = Reset
 Y = YELLOW
 
 #: Typed-only, gated-raw version of the plugin API.
-API_VERSION = 3
+API_VERSION = 4
 
 
 # ---------------------------------------------------------------------------
@@ -93,11 +95,46 @@ def rpc_is_playing():
 
 
 def rpc_library_stats():
+    """Counts from `library.db` (SQLite — read through `backend.library`)."""
     try:
         from backend import library
-        return library.library_stats()
+
+        liked = library.get_liked_ids()
+        downloaded = library.get_downloaded_ids()
+        plays = library.play_rows()
+        return {
+            "songs": len(plays) + len(liked) + len(downloaded),
+            "liked": len(liked),
+            "downloaded": len(downloaded),
+            "duration": sum(row["duration"] for row in plays),
+            "plays": sum(row["song_count"] for row in plays),
+            "played": len(plays),
+        }
     except Exception:
         return {}
+
+
+def rpc_history(params: dict | None = None) -> list:
+    """Online play log from `history.db` (SQLite — read through `backend.history`)."""
+    from backend import history
+
+    params = params or {}
+    sort = str(params.get("sort", "recent"))
+    if sort not in history.SORTS:
+        sort = "recent"
+    range_key = str(params.get("range", "all"))
+    days = history.RANGES.get(range_key)
+    since = time.time() - days * 86400 if days else None
+    try:
+        limit = int(params.get("limit", 25))
+    except (TypeError, ValueError):
+        limit = 25
+    return history.timeline(
+        sort=sort,
+        limit=limit,
+        since=since,
+        unique=bool(params.get("unique")) or sort in ("most", "least"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -160,11 +197,38 @@ def rpc_seek_back(sec: float) -> str:
 
 
 def _act_current(action: str) -> str:
-    """Like/unlike/download the current track, host-routed like the CLI."""
-    from backend import status as _status_mod
-    from backend.plugin_api import act as _act
+    """Like/unlike/download the current track, host-routed like the CLI.
 
-    return _act.act_on_current(action)
+    Mirrors `cli/main.py::_act_current`: the thumbnail path is what tells us
+    whether the live track is an online stream or a local file, so the same
+    decision routes to the Online or the Offline command module. Returns a
+    message for the plugin (the command modules print to the daemon's stdout).
+    """
+    data = _status._read()
+    title = (data.get("title") or "").strip()
+    thumb = data.get("thumbnail") or ""
+    if not title:
+        return "No last-played track in ~/.flow/status.json"
+
+    from backend import registry
+
+    if registry.resolve("vlc") is None and registry.resolve("web") is None:
+        return "No player is currently running (no pid file)"
+    if not (data.get("playing") and _status._fresh(data)):
+        return "No track is currently playing"
+
+    flow_dir = str(pathlib.Path.home() / ".flow")
+    if thumb.startswith(("http://", "https://")):
+        config.Mode = "Online"
+        from backend.Online import commands as module
+    elif (".cache/" in thumb) or thumb.startswith(flow_dir):
+        config.Mode = "Offline"
+        from backend.Offline import commands as module
+    else:
+        return f"Could not tell if the current track is online or offline (thumbnail: {thumb})"
+
+    module.act_on_current(action, title, thumb)
+    return f"{action}: {title}"
 
 
 def rpc_like() -> str:
@@ -200,8 +264,23 @@ def rpc_get_config(key: str):
     return {"value": value}
 
 
-def rpc_get_configs():
-    return config.get_configs()
+def rpc_get_configs(params: dict | None = None):
+    """Fetch a set of configs by key; returns {key: value}.
+
+    `params["keys"]` is the requested list (what `flow_api.get_configs(keys)`
+    sends). With no list, every readable key is returned, matching the
+    client's "give me what I asked for" contract.
+    """
+    params = params or {}
+    keys = params.get("keys")
+    if not isinstance(keys, list) or not keys:
+        keys = sorted(config.PLUGIN_SAFE_KEYS)
+    out = {}
+    for key in keys:
+        value, ok = config.config_get(str(key))
+        if ok:
+            out[str(key).lower()] = value
+    return out
 
 
 def rpc_set_config(key: str, value):
@@ -256,6 +335,7 @@ METHODS = (
     "current_track",
     "is_playing",
     "library_stats",
+    "history",
     "pause",
     "resume",
     "next",
@@ -315,6 +395,8 @@ def handle(frame: dict, conn: socket.socket | None = None) -> dict | None:
             return {"result": rpc_is_playing()}
         if method == "library_stats":
             return {"result": rpc_library_stats()}
+        if method == "history":
+            return {"result": rpc_history(params)}
         if method == "pause":
             return {"result": rpc_pause()}
         if method == "resume":
@@ -338,7 +420,7 @@ def handle(frame: dict, conn: socket.socket | None = None) -> dict | None:
         if method == "get_config":
             return {"result": rpc_get_config(str(params.get("key", "")))}
         if method == "get_configs":
-            return {"result": rpc_get_configs()}
+            return {"result": rpc_get_configs(params)}
         if method == "set_config":
             return {"result": rpc_set_config(str(params.get("key", "")), params.get("value"))}
         if method == "set_theme":

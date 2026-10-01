@@ -13,7 +13,7 @@ module is `backend/Offline/commands.py`, selected when
   .webm`).
 - `get_songs()` excludes the `liked songs/` subfolder; `get_liked_songs()`
   scans just that folder.
-- Songs are sorted by their display title from `library.json`
+- Songs are sorted by their display title from `library.db`
   (`display_name()` → `library.title_for_stem(stem)`); files whose video-id
   stem has no library entry fall back to the filename.
 - `like_song()` / `unlike_song()` copy/move a file into
@@ -21,7 +21,7 @@ module is `backend/Offline/commands.py`, selected when
 - `delete_file()` removes a song and every same-stem sibling plus any copy
   in the liked folder.
 
-Track titles for display are taken from `library.json` and cleaned with
+Track titles for display are taken from `library.db` and cleaned with
 `config._truncate_title` (filler words per `~/.flow/ignore.txt`), so the
 offline library reads like a tagged music collection even though the files
 are named by video id.
@@ -59,6 +59,11 @@ around local files:
   `bars`/`lyrics`/`none` renderers as online mode).
 - The same signal set from online mode is installed
   (`setup_nav_signals()`): play/pause, next/previous, seek, stop.
+- `play_file` records the play with `history.record_play(stem, ..., mode="offline")`.
+  Offline playback moves `song_count` in `library.db` but does **not** add a
+  row to `history.db` — the online play log stays online-only. The filename
+  stem *is* the video id, so a downloaded song shares one counter with its
+  online plays. See [Play counting](storage.md#play-counting).
 
 ## `--resume` from offline
 

@@ -1,17 +1,37 @@
-import fcntl
+"""Per-song library storage, backed by SQLite (`~/.flow/library.db`).
+
+This replaces the old `~/.flow/library.json` flat dict. The public API is
+unchanged — `load()` still returns `{video_id: {...}}` and every write still
+goes through `_mutate(fn)` — so the callers that read the library
+(`web/app.py`, `tui/main.py`, `Offline/file.py`, the mode command modules) are
+unaffected by the storage change.
+
+Concurrency: one connection per call (the Flask server and the daemon are both
+threaded, so a shared connection is not safe), WAL journaling so readers never
+block the writer, and `BEGIN IMMEDIATE` around every read-modify-write cycle.
+This is what replaced the `flock` on `~/.flow/library.lock`.
+
+Schema notes live in `docs/dev/storage.md`.
+"""
+
 import hashlib
 import json
-import os
 import pathlib
+import sqlite3
+import time
 import urllib.request
+from contextlib import contextmanager
 
 from backend.config import _truncate_title
 
-LIBRARY_FILE = pathlib.Path.home() / ".flow/library.json"
+DB_FILE = pathlib.Path.home() / ".flow/library.db"
 THUMB_CACHE = pathlib.Path.home() / ".flow/downloads/.cache"
-_LOCK_FILE = pathlib.Path.home() / ".flow/library.lock"
 
-# Metadata fields once stored but no longer wanted; purged on every save.
+#: Pre-v0.9 store, imported once into `DB_FILE` and then left as a `.bak`.
+LEGACY_FILE = pathlib.Path.home() / ".flow/library.json"
+
+#: Metadata fields that used to be stored and are deliberately not carried
+#: into the schema. Kept only for the one-time JSON import.
 _REMOVED_META_KEYS = {
     "track",
     "uploader",
@@ -23,72 +43,406 @@ _REMOVED_META_KEYS = {
     "url",
 }
 
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS songs (
+    video_id     TEXT PRIMARY KEY,
+    liked        INTEGER NOT NULL DEFAULT 0,
+    downloaded   INTEGER NOT NULL DEFAULT 0,
+    speed_dial   INTEGER NOT NULL DEFAULT 0,
+    title        TEXT    NOT NULL DEFAULT '',
+    artist       TEXT,
+    album        TEXT,
+    duration     INTEGER,
+    song         TEXT,
+    thumbnail    TEXT    NOT NULL DEFAULT '',
+    song_count   INTEGER NOT NULL DEFAULT 0,
+    first_played REAL,
+    last_played  REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_songs_count  ON songs(song_count DESC);
+CREATE INDEX IF NOT EXISTS idx_songs_played ON songs(last_played DESC);
+
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
+"""
+
+_COLUMNS = (
+    "liked",
+    "downloaded",
+    "speed_dial",
+    "title",
+    "artist",
+    "album",
+    "duration",
+    "song",
+    "thumbnail",
+    "song_count",
+    "first_played",
+    "last_played",
+)
+
+_PLACEHOLDERS = ", ".join(["?"] * (len(_COLUMNS) + 1))
+_ASSIGNMENTS = ", ".join(f"{c} = excluded.{c}" for c in _COLUMNS)
+
+_UPSERT = (
+    f"INSERT INTO songs (video_id, {', '.join(_COLUMNS)}) "
+    f"VALUES ({_PLACEHOLDERS}) "
+    f"ON CONFLICT(video_id) DO UPDATE SET {_ASSIGNMENTS}"
+)
+
+
+# ---------------------------------------------------------------------------
+# Connection + schema
+# ---------------------------------------------------------------------------
+
+def _connect():
+    DB_FILE.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_FILE, timeout=10.0, isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 10000")
+    return conn
+
+
+def _ensure_schema(conn):
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = NORMAL")
+    conn.executescript(_SCHEMA)
+    _migrate_from_json(conn)
+
+
+@contextmanager
+def _session():
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        yield conn
+    finally:
+        conn.close()
+
+
+@contextmanager
+def _write():
+    """Serialized read-modify-write cycle. Rolls back on any exception."""
+    with _session() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield conn
+        except BaseException:
+            conn.rollback()
+            raise
+        conn.commit()
+
+
+def _meta_get(conn, key):
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def _meta_set(conn, key, value):
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, str(value)),
+    )
+
+
+def _migrate_from_json(conn):
+    """One-time import of the pre-v0.9 `~/.flow/library.json` into `library.db`.
+
+    TODO(remove after v0.9): drop this function, `_legacy_to_row` and the
+    `.bak` rename once v0.9 ships — no pre-v0.9 install will be left to
+    upgrade from. Guarded by a `meta` flag so it can never run twice.
+    """
+    if _meta_get(conn, "json_migrated") == "1":
+        return
+    if not LEGACY_FILE.exists():
+        return
+    try:
+        data = json.loads(LEGACY_FILE.read_text())
+    except (json.JSONDecodeError, OSError):
+        data = {}
+    if isinstance(data, dict):
+        for video_id, entry in data.items():
+            if isinstance(entry, dict):
+                row = _legacy_to_row(video_id, entry)
+                if row:
+                    conn.execute(_UPSERT, row)
+    _meta_set(conn, "json_migrated", "1")
+    try:
+        LEGACY_FILE.rename(LEGACY_FILE.with_name(LEGACY_FILE.name + ".bak"))
+    except OSError:
+        pass
+
+
+def _legacy_to_row(video_id, entry):
+    """Map a legacy JSON entry onto the column tuple `_UPSERT` expects."""
+    song = entry.get("song")
+    duration = entry.get("duration")
+    try:
+        duration = int(duration) if duration else None
+    except (TypeError, ValueError):
+        duration = None
+    count = entry.get("song_count") or 0
+    try:
+        count = int(count)
+    except (TypeError, ValueError):
+        count = 0
+    return (
+        video_id,
+        1 if entry.get("liked") else 0,
+        1 if entry.get("downloaded") else 0,
+        1 if entry.get("speed_dial") else 0,
+        _truncate_title(entry.get("title") or ""),
+        entry.get("artist") or None,
+        entry.get("album") or None,
+        duration,
+        song or None,
+        entry.get("thumbnail") or "",
+        count,
+        entry.get("first_played") or None,
+        entry.get("last_played") or None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Row <-> entry mapping
+# ---------------------------------------------------------------------------
+
+def _row_to_entry(row) -> dict:
+    return {
+        "liked": bool(row["liked"]),
+        "downloaded": bool(row["downloaded"]),
+        "speed_dial": bool(row["speed_dial"]),
+        "title": row["title"] or "",
+        "artist": row["artist"],
+        "album": row["album"],
+        "duration": row["duration"],
+        "song": row["song"],
+        "thumbnail": row["thumbnail"] or "",
+        "song_count": int(row["song_count"] or 0),
+        "first_played": row["first_played"],
+        "last_played": row["last_played"],
+    }
+
+
+def _to_values(entry: dict) -> tuple:
+    duration = entry.get("duration")
+    try:
+        duration = int(duration) if duration else None
+    except (TypeError, ValueError):
+        duration = None
+    return (
+        1 if entry.get("liked") else 0,
+        1 if entry.get("downloaded") else 0,
+        1 if entry.get("speed_dial") else 0,
+        entry.get("title") or "",
+        entry.get("artist") or None,
+        entry.get("album") or None,
+        duration,
+        entry.get("song") or None,
+        entry.get("thumbnail") or "",
+        int(entry.get("song_count") or 0),
+        entry.get("first_played") or None,
+        entry.get("last_played") or None,
+    )
+
+
+def _sanitize(entry: dict) -> dict:
+    """Normalize one entry before it is written: truncated title, typed values."""
+    out = dict(entry)
+    out["title"] = _truncate_title(entry.get("title") or "")
+    out["song_count"] = int(entry.get("song_count") or 0)
+    return out
+
+
+def _all_entries(conn) -> dict:
+    rows = conn.execute("SELECT * FROM songs").fetchall()
+    return {row["video_id"]: _row_to_entry(row) for row in rows}
+
+
+def _get_entry(conn, video_id):
+    row = conn.execute(
+        "SELECT * FROM songs WHERE video_id = ?", (video_id,)
+    ).fetchone()
+    return _row_to_entry(row) if row else None
+
+
+def _apply_diff(conn, before: dict, after: dict):
+    """Write only the rows a mutator actually changed."""
+    for video_id, entry in after.items():
+        old = before.get(video_id)
+        if old == entry:
+            continue
+        conn.execute(_UPSERT, (video_id, *_to_values(entry)))
+    for video_id in before:
+        if video_id not in after:
+            conn.execute("DELETE FROM songs WHERE video_id = ?", (video_id,))
+
+
+# ---------------------------------------------------------------------------
+# Public read API
+# ---------------------------------------------------------------------------
 
 def load() -> dict:
-    if not LIBRARY_FILE.exists():
-        return {}
-    try:
-        data = json.loads(LIBRARY_FILE.read_text())
-        if isinstance(data, dict):
-            return data
-    except json.JSONDecodeError, OSError:
-        pass
-    return {}
+    with _session() as conn:
+        return _all_entries(conn)
 
 
-def _atomic_write(path: pathlib.Path, data: dict):
-    """Write JSON atomically so a crash mid-write can never truncate the file."""
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2))
-    os.replace(tmp, path)
+def get(video_id: str) -> dict | None:
+    if not video_id:
+        return None
+    with _session() as conn:
+        return _get_entry(conn, video_id)
 
 
-class _library_lock:
-    """Exclusive cross-process lock guarding library read-modify-write cycles."""
+def get_title(video_id: str) -> str:
+    entry = get(video_id)
+    if entry and entry.get("title"):
+        return entry["title"]
+    return video_id
 
-    def __init__(self):
-        self._fh = None
 
-    def __enter__(self):
-        LIBRARY_FILE.parent.mkdir(parents=True, exist_ok=True)
-        self._fh = open(_LOCK_FILE, "a+")
-        fcntl.flock(self._fh, fcntl.LOCK_EX)
-        return self
+def title_for_stem(stem: str) -> str:
+    return get_title(stem)
 
-    def __exit__(self, *exc):
-        fcntl.flock(self._fh, fcntl.LOCK_UN)
-        self._fh.close()
-        self._fh = None
+
+def is_liked(video_id: str) -> bool:
+    entry = get(video_id)
+    return bool(entry and entry.get("liked"))
+
+
+def is_downloaded(video_id: str) -> bool:
+    return get_download_path(video_id) is not None
+
+
+def get_download_path(video_id: str) -> str | None:
+    entry = get(video_id)
+    if not entry or not entry.get("downloaded"):
+        return None
+    return entry.get("song")
+
+
+def get_downloaded_ids() -> list:
+    with _session() as conn:
+        rows = conn.execute(
+            "SELECT video_id FROM songs "
+            "WHERE downloaded = 1 AND song IS NOT NULL AND song != '' "
+            "ORDER BY video_id"
+        ).fetchall()
+    return [row["video_id"] for row in rows]
+
+
+def get_liked_ids() -> list:
+    with _session() as conn:
+        rows = conn.execute(
+            "SELECT video_id FROM songs WHERE liked = 1 ORDER BY video_id"
+        ).fetchall()
+    return [row["video_id"] for row in rows]
+
+
+def get_liked_entries() -> list:
+    with _session() as conn:
+        rows = conn.execute(
+            "SELECT video_id, title FROM songs WHERE liked = 1 ORDER BY video_id"
+        ).fetchall()
+    return [{"video_id": r["video_id"], "title": r["title"] or ""} for r in rows]
+
+
+def get_speed_dial_ids() -> list:
+    with _session() as conn:
+        rows = conn.execute(
+            "SELECT video_id FROM songs WHERE speed_dial = 1 ORDER BY video_id"
+        ).fetchall()
+    return [row["video_id"] for row in rows]
+
+
+def get_speed_dial_entries() -> list:
+    with _session() as conn:
+        rows = conn.execute(
+            "SELECT video_id, title FROM songs WHERE speed_dial = 1 ORDER BY video_id"
+        ).fetchall()
+    return [{"video_id": r["video_id"], "title": r["title"] or ""} for r in rows]
+
+
+def get_song_count(video_id: str) -> int:
+    entry = get(video_id)
+    return int(entry.get("song_count") or 0) if entry else 0
+
+
+def play_rows() -> list:
+    """Per-song play counts across every mode (see `summary.py` / the web API)."""
+    with _session() as conn:
+        rows = conn.execute(
+            "SELECT video_id, title, artist, album, song, thumbnail, duration,"
+            "       song_count, first_played, last_played "
+            "FROM songs WHERE song_count > 0"
+        ).fetchall()
+    return [
+        {
+            "video_id": r["video_id"],
+            "title": r["title"] or r["video_id"],
+            "artist": r["artist"] or "",
+            "album": r["album"] or "",
+            "song": r["song"],
+            "thumbnail": r["thumbnail"] or "",
+            "duration": int(r["duration"] or 0),
+            "song_count": int(r["song_count"] or 0),
+            "first_played": r["first_played"] or 0.0,
+            "last_played": r["last_played"] or 0.0,
+        }
+        for r in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Write API
+# ---------------------------------------------------------------------------
+
+def _default_entry(video_id: str, title: str = "") -> dict:
+    return {
+        "liked": False,
+        "downloaded": False,
+        "speed_dial": False,
+        "title": title,
+        "artist": None,
+        "album": None,
+        "duration": None,
+        "song": None,
+        "thumbnail": thumbnail_path(video_id),
+        "song_count": 0,
+        "first_played": None,
+        "last_played": None,
+    }
 
 
 def _mutate(fn):
-    """Serialize a load → mutate → save cycle. ``fn(library)`` may mutate
-    ``library`` in place and must return True when a save is needed."""
-    with _library_lock():
-        library = load()
+    """Serialize a load → mutate → write cycle.
+
+    ``fn(library)`` may mutate ``library`` in place and must return True when a
+    write is needed. Only the rows that actually changed are written.
+    """
+    with _write() as conn:
+        before = _all_entries(conn)
+        library = {k: dict(v) for k, v in before.items()}
         changed = fn(library)
-        if changed:
-            save(library)
+        if not changed:
+            return library
+        after = {k: _sanitize(v) for k, v in library.items() if isinstance(v, dict)}
+        _apply_diff(conn, before, after)
         return library
 
 
 def save(library: dict):
-    for entry in library.values():
-        if isinstance(entry, dict):
-            if entry.get("title"):
-                entry["title"] = _truncate_title(entry["title"])
-            for key in _REMOVED_META_KEYS:
-                entry.pop(key, None)
-    LIBRARY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _atomic_write(LIBRARY_FILE, library)
-
-
-def thumbnail_path(video_id: str) -> str:
-    return str(THUMB_CACHE / f"{video_id}.jpg")
-
-
-def thumbnail_url_for(video_id: str) -> str:
-    return f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+    """Replace the whole library with ``library`` in a single transaction."""
+    with _write() as conn:
+        before = _all_entries(conn)
+        after = {
+            k: _sanitize(v) for k, v in library.items() if isinstance(v, dict)
+        }
+        _apply_diff(conn, before, after)
 
 
 def _set_thumbnail(video_id: str, path: str):
@@ -135,89 +489,20 @@ def download_thumbnail(video_id: str, thumb_url: str = "") -> str | None:
     return None
 
 
+def thumbnail_path(video_id: str) -> str:
+    return str(THUMB_CACHE / f"{video_id}.jpg")
+
+
+def thumbnail_url_for(video_id: str) -> str:
+    return f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+
+
 def key_for(url: str, video_id: str = "") -> str:
     if video_id:
         return video_id
     if url:
         return f"s:{hashlib.sha1(url.encode()).hexdigest()}"
     return ""
-
-
-def _default_entry(video_id: str, title: str = "") -> dict:
-    return {
-        "liked": False,
-        "downloaded": False,
-        "title": title,
-        "song": None,
-        "thumbnail": thumbnail_path(video_id),
-    }
-
-
-def get(video_id: str) -> dict | None:
-    return load().get(video_id)
-
-
-def get_title(video_id: str) -> str:
-    entry = get(video_id)
-    if entry and entry.get("title"):
-        return entry["title"]
-    return video_id
-
-
-def title_for_stem(stem: str) -> str:
-    return get_title(stem)
-
-
-def is_liked(video_id: str) -> bool:
-    entry = get(video_id)
-    return bool(entry and entry.get("liked"))
-
-
-def is_downloaded(video_id: str) -> bool:
-    return get_download_path(video_id) is not None
-
-
-def get_download_path(video_id: str) -> str | None:
-    entry = get(video_id)
-    if not entry or not entry.get("downloaded"):
-        return None
-    return entry.get("song")
-
-
-def get_downloaded_ids() -> list:
-    return sorted(
-        k for k, v in load().items()
-        if isinstance(v, dict) and v.get("downloaded") and v.get("song")
-    )
-
-
-def get_liked_ids() -> list:
-    return sorted(
-        k for k, v in load().items() if isinstance(v, dict) and v.get("liked")
-    )
-
-
-def get_liked_entries() -> list:
-    return [
-        {"video_id": k, "title": v.get("title", "")}
-        for k, v in load().items()
-        if isinstance(v, dict) and v.get("liked")
-    ]
-
-
-def get_speed_dial_ids() -> list:
-    return sorted(
-        k for k, v in load().items()
-        if isinstance(v, dict) and v.get("speed_dial")
-    )
-
-
-def get_speed_dial_entries() -> list:
-    return [
-        {"video_id": k, "title": v.get("title", "")}
-        for k, v in load().items()
-        if isinstance(v, dict) and v.get("speed_dial")
-    ]
 
 
 def mark_speed_dial(video_id: str, title: str = "", path: str = ""):
@@ -248,8 +533,8 @@ def unmark_speed_dial(video_id: str):
         entry = library.get(video_id)
         if entry is None:
             return False
-        entry.pop("speed_dial", None)
-        if not entry.get("liked") and not entry.get("downloaded") and not entry.get("song"):
+        entry["speed_dial"] = False
+        if _forgettable(entry):
             library.pop(video_id, None)
         else:
             library[video_id] = entry
@@ -285,7 +570,7 @@ def mark_unliked(video_id: str):
         if entry is None:
             return False
         entry["liked"] = False
-        if not entry.get("downloaded"):
+        if _forgettable(entry):
             library.pop(video_id, None)
         else:
             library[video_id] = entry
@@ -376,13 +661,73 @@ def clear_download(video_id: str):
             return False
         entry["downloaded"] = False
         entry["song"] = None
-        if not entry.get("liked"):
+        if _forgettable(entry):
             library.pop(video_id, None)
         else:
             library[video_id] = entry
         return True
 
     _mutate(mutate)
+
+
+def _forgettable(entry: dict) -> bool:
+    """A row is dropped only when nothing at all is left to remember.
+
+    Played songs keep their row so `song_count` survives an unlike/delete.
+    """
+    return (
+        not entry.get("liked")
+        and not entry.get("downloaded")
+        and not entry.get("speed_dial")
+        and not entry.get("song")
+        and not int(entry.get("song_count") or 0)
+    )
+
+
+def bump_play(video_id: str, title: str = "", artist: str = "", duration=0) -> int:
+    """`song_count` + 1 for ``video_id`` and stamp the play timestamps.
+
+    Creates the row on first play, filling in title/artist/duration when they
+    are not already known. Returns the new play count.
+    """
+    if not video_id:
+        return 0
+    try:
+        duration = int(duration) if duration else 0
+    except (TypeError, ValueError):
+        duration = 0
+    now = time.time()
+    with _write() as conn:
+        entry = _get_entry(conn, video_id)
+        if entry is None:
+            entry = _default_entry(video_id, title)
+        # Fill gaps only — a later play must not clobber metadata we have.
+        if title and not entry.get("title"):
+            entry["title"] = title
+        if artist and not entry.get("artist"):
+            entry["artist"] = artist
+        if duration and not entry.get("duration"):
+            entry["duration"] = duration
+        entry["song_count"] = int(entry.get("song_count") or 0) + 1
+        entry["first_played"] = entry.get("first_played") or now
+        entry["last_played"] = now
+        conn.execute(_UPSERT, (video_id, *_to_values(_sanitize(entry))))
+        return entry["song_count"]
+
+
+def stats() -> dict:
+    """Library-wide play totals, used by the CLI summary and the RPC surface."""
+    rows = play_rows()
+    total = sum(r["song_count"] for r in rows)
+    day_start = time.time() - 86400
+    today = sum(1 for r in rows if r["last_played"] >= day_start)
+    return {
+        "total_plays": total,
+        "unique_songs": len(rows),
+        "played_today": today,
+        "downloaded": len(get_downloaded_ids()),
+        "liked": len(get_liked_ids()),
+    }
 
 
 def delete(video_id: str) -> bool:

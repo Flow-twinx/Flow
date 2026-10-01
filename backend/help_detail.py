@@ -1,4 +1,5 @@
 from backend import config
+from backend.summary import SORTS as _SUMMARY_SORTS
 
 
 def _t():
@@ -47,7 +48,7 @@ def _online_help():
         "like": [
             f"{T}> like{R}",
             f"{G}  Like/unlike the currently playing song.{R}",
-            f"{G}  Liked songs are saved to {M}~/.flow/library.json{R}",
+            f"{G}  Liked songs are saved to {M}~/.flow/library.db{R}",
             f"{G}  Use {M}'play liked'{G} to play all liked songs.{R}",
             f"  {G}Shell:{R} {M}flow --like{R}",
         ],
@@ -173,8 +174,11 @@ def _online_help():
             f"  {G}Alias:{R} {M}plist{R}",
         ],
         "export": [
-            f"{T}> export{R}",
-            f"{G}  Backup ~/.flow config and data to ~/Downloads/flow_backup.zip{R}",
+            f"{T}> export{R} {M}[-p <path>]{R}",
+            f"{G}  Copy every downloaded song to ~/Downloads.{R}",
+            f"  {M}-p{R} {G}<path>{R}  {G}Export to another directory instead{R}",
+            f"{G}  Songs are named after the title and tagged with{R}",
+            f"{G}  title/artist/album from the library.{R}",
         ],
         "stop": [
             f"{T}> flow --pause{R}",
@@ -200,6 +204,21 @@ def _online_help():
             f"  {M}--force{R}    {G}reinstall an already-installed plugin{R}",
             f"  {M}dev.mode{R}   {G}when true in config, 'flow run' stays foreground{R}",
             f"{G}  Installed plugins live in {M}~/.flow/plugins/<name>/{R}",
+        ],
+        "summary": [
+            f"{T}> summary{R} {M}[-l]{R} {M}[-s sort]{R} {M}[--top N]{R} {M}[-c]{R}",
+            f"{G}  Play statistics for everything you have played.{R}",
+            f"  {M}-l{R}        {G}Show the ranked per-song table instead of the stats card{R}",
+            f"  {M}-s{R} {M}<sort>{R}  {G}Table sort: {', '.join(_SUMMARY_SORTS)} (default: plays){R}",
+            f"  {M}--top{R} {M}<N>{R}   {G}How many rows the table shows (default: 20){R}",
+            f"  {M}-c{R}        {G}Clear the logged online plays (history.db){R}",
+            f"{G}  Counts come from {M}library.db{R} (online and offline).{R}",
+            f"{G}  The web History panel shows the online-only timeline{R}",
+            f"{G}  from {M}history.db{R}.{R}",
+            f"  {G}Examples:{R}",
+            f"    {G}summary{R}",
+            f"    {G}summary -l{R}",
+            f"    {G}summary -l -s artist --top 50{R}",
         ],
     }
 
@@ -240,7 +259,7 @@ def _offline_help():
             f"{G}  Delete a downloaded song and its library entry.{R}",
             f"  {B}<name>{R}   {G}Delete by name (pick if multiple match){R}",
             f"  {B}<index>{R}  {G}Delete by index from last search results{R}",
-            f"  {G}  Removes the file, any liked copy, and the entry in ~/.flow/library.json.{R}",
+            f"  {G}  Removes the file, any liked copy, and the entry in ~/.flow/library.db.{R}",
             f"  {G}Alias:{R} {B}dl-d{R}",
         ],
         "like": [
@@ -328,8 +347,11 @@ def _offline_help():
             f"{G}  Also available as: {B}flow --check{R}",
         ],
         "export": [
-            f"{T}> export{R}",
-            f"{G}  Backup ~/.flow config and data to ~/Downloads/flow_backup.zip{R}",
+            f"{T}> export{R} {B}[-p <path>]{R}",
+            f"{G}  Copy every downloaded song to ~/Downloads.{R}",
+            f"  {B}-p{R} {G}<path>{R}  {G}Export to another directory instead{R}",
+            f"{G}  Songs are named after the title and tagged with{R}",
+            f"{G}  title/artist/album from the library.{R}",
         ],
         "stop": [
             f"{T}> flow --pause{R}",
@@ -355,6 +377,21 @@ def _offline_help():
             f"  {B}--force{R}    {G}reinstall an already-installed plugin{R}",
             f"  {B}dev.mode{R}   {G}when true in config, 'flow run' stays foreground{R}",
             f"{G}  Installed plugins live in {B}~/.flow/plugins/<name>/{R}",
+        ],
+        "summary": [
+            f"{T}> summary{R} {B}[-l]{R} {B}[-s sort]{R} {B}[--top N]{R} {B}[-c]{R}",
+            f"{G}  Play statistics for everything you have played.{R}",
+            f"  {B}-l{R}        {G}Show the ranked per-song table instead of the stats card{R}",
+            f"  {B}-s{R} {B}<sort>{R}  {G}Table sort: {', '.join(_SUMMARY_SORTS)} (default: plays){R}",
+            f"  {B}--top{R} {B}<N>{R}   {G}How many rows the table shows (default: 20){R}",
+            f"  {B}-c{R}        {G}Clear the logged online plays (history.db){R}",
+            f"{G}  Counts come from {B}library.db{R} (online and offline).{R}",
+            f"{G}  The web History panel shows the online-only timeline{R}",
+            f"{G}  from {B}history.db{R}.{R}",
+            f"  {G}Examples:{R}",
+            f"    {G}summary{R}",
+            f"    {G}summary -l{R}",
+            f"    {G}summary -l -s artist --top 50{R}",
         ],
     }
 

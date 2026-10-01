@@ -35,13 +35,13 @@ def test_handle_unknown_method():
 
 def test_hello_returns_version_and_no_raw():
     resp = rpc.handle({"method": "hello", "params": {"name": "x"}})
-    assert resp["api_version"] == 3
+    assert resp["api_version"] == 4
     assert resp["capabilities"] == {"raw": False}
 
 
 def test_introspect_lists_players():
     resp = rpc.handle({"method": "introspect"})
-    assert resp["result"]["api_version"] == 3
+    assert resp["result"]["api_version"] == 4
     assert "players" in resp["result"]["methods"]
     assert "show_volume" not in resp["result"]["safe_keys"]
 

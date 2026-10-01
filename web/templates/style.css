@@ -366,6 +366,90 @@ body {
     accent-color: var(--text);
 }
 
+/* A control the server decides for you (the most/least sorts) reads as set,
+   not as something you can change. */
+.check-label:has(input:disabled) {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.tool-label {
+    color: var(--text3);
+    font-size: 11px;
+    margin-left: 4px;
+}
+
+.tool-select {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text2);
+    font-family: var(--font);
+    font-size: 11px;
+    padding: 4px 8px;
+    cursor: pointer;
+    outline: none;
+    transition:
+        color 0.1s,
+        border-color 0.1s;
+}
+
+.tool-select:hover,
+.tool-select:focus {
+    color: var(--text);
+    border-color: var(--border-strong);
+}
+
+.tool-select option {
+    background: var(--bg-solid);
+    color: var(--text);
+}
+
+/* History panel */
+.history-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 18px;
+    padding: 10px 14px;
+    color: var(--text2);
+    font-size: 11px;
+    border-bottom: 1px solid var(--border);
+}
+
+.history-summary strong {
+    color: var(--text);
+}
+
+.history-hint {
+    margin-left: auto;
+    color: var(--text3);
+}
+
+.history-hint code {
+    color: var(--text2);
+}
+
+.history-time {
+    color: var(--text3);
+    font-size: 11px;
+    white-space: nowrap;
+    min-width: 74px;
+    text-align: right;
+}
+
+.history-plays {
+    color: var(--text2);
+    font-size: 11px;
+    white-space: nowrap;
+    padding: 1px 7px;
+    border: 1px solid var(--border);
+}
+
+.song-card.unplayable {
+    cursor: default;
+    opacity: 0.6;
+}
+
 .song-list {
     display: flex;
     flex-direction: column;

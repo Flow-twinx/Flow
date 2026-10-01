@@ -4,17 +4,7 @@ import shutil
 from backend import config
 from backend import library
 
-AUDIO_EXTENSIONS = {
-    ".mp3",
-    ".flac",
-    ".wav",
-    ".m4a",
-    ".ogg",
-    ".opus",
-    ".wma",
-    ".aac",
-    ".webm",
-}
+AUDIO_EXTENSIONS = config.AUDIO_EXTENSIONS
 LIKED_DIR_NAME = "liked songs"
 
 

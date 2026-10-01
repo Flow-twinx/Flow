@@ -36,7 +36,7 @@ SOCKET_FILE = FLOW_DIR / "flow.sock"
 PID_FILE = FLOW_DIR / "flowd.pid"
 
 #: Bumped whenever the RPC protocol / method surface changes.
-PROTOCOL_VERSION = 3
+PROTOCOL_VERSION = 4
 #: 1 MiB cap on any single frame.
 MAX_FRAME = 1 << 20
 

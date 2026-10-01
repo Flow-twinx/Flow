@@ -12,7 +12,7 @@ import time
 
 import vlc
 
-from backend import config, library, mpris, status, visualizer
+from backend import config, history, library, mpris, status, visualizer
 
 _truncate_title = config._truncate_title
 
@@ -313,6 +313,30 @@ def _display_loop(player, title=None, args=None, next_title=None, stop_check=Non
             sys.stdout.flush()
 
 
+def _teardown():
+    """Stop and release the current media player and its libvlc instance.
+
+    python-vlc defines no ``__del__``, so dropping the Python references is not
+    enough: the native player and its libvlc core stay alive, each holding its
+    own audio output. A playlist or radio loop calls play_file() once per track,
+    so without this the previous tracks keep playing on top of the new one and
+    the audio turns into overlapping glitch. Stopping and releasing the old
+    player first is what makes "one track at a time" true.
+    """
+    global _player
+    p, _player = _player, None
+    if p is None:
+        return
+    try:
+        p.stop()
+    except Exception:
+        pass
+    try:
+        p.release()
+    except Exception:
+        pass
+
+
 def play_file(filepath, title, args=None, flags=None, next_title=None, nav=None):
     global _player, _paused, _next_req, _prev_req, _stop_req, _nav
     _paused = False
@@ -326,6 +350,7 @@ def play_file(filepath, title, args=None, flags=None, next_title=None, nav=None)
     old_stderr = os.dup(2)
     os.dup2(devnull, 2)
     try:
+        _teardown()
         instance = vlc.Instance("--no-video --quiet")
         _player = instance.media_player_new()
         media = instance.media_new(str(filepath))
@@ -362,6 +387,12 @@ def play_file(filepath, title, args=None, flags=None, next_title=None, nav=None)
         if lib_entry:
             artist = lib_entry.get("artist") or ""
             album = lib_entry.get("album") or ""
+        # Local playback is counted but never logged to the play timeline —
+        # and a downloaded track's stem is its video id, so this bumps the
+        # same counter as its online play.
+        history.record_play(
+            video_id, title, artist, mode="offline", duration=int(duration)
+        )
         art_path = ""
         if thumb:
             art_path = str(thumb)
@@ -371,7 +402,7 @@ def play_file(filepath, title, args=None, flags=None, next_title=None, nav=None)
             duration,
             artist=artist,
             album=album,
-            art_path=art_path,
+            art=art_path,
             has_next=_nav[0],
             has_prev=True,
         )
@@ -410,6 +441,7 @@ def play_file(filepath, title, args=None, flags=None, next_title=None, nav=None)
             _restore_pause_input()
     finally:
         _restore_pause_input()  # idempotent; covers errors between setup and the loop
+        _teardown()
         os.dup2(old_stderr, 2)
         os.close(old_stderr)
         os.close(devnull)

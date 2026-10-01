@@ -25,7 +25,9 @@ cli/                   # `flow` entry point
 backend/               # all logic
   config.py            #   settings, colors, signal constants, pid/seek helpers
   status.py            #   ~/.flow/status.json + status card printer
-  library.py           #   ~/.flow/library.json (likes, downloads, metadata)
+  library.py           #   ~/.flow/library.db (likes, downloads, metadata, plays)
+  history.py           #   ~/.flow/history.db (online-only play log)
+  summary.py           #   `summary` command — stats card + ranked per-song table
   playlist.py          #   per-playlist JSON store + ops
   plist_cli.py         #   playlist command-line parsing
   control.py           #   ~/.flow/web_command.json (web player control)
@@ -40,7 +42,7 @@ backend/               # all logic
   daemon.py            #   resident RPC host (socket owner, plugin lifecycle)
   rpc.py               #   typed plugin method surface + capability gating
   cli_raw.py           #   gated raw-CLI bridge for the daemon
-  plugin_api/          #   flow_api.py — self-contained v3 plugin client
+  plugin_api/          #   flow_api.py — self-contained v4 plugin client
   help_detail.py       #   `help -i` text
   Hyprland/island.qml  #   optional quickshell widget (--setup-island)
   Online/              # online mode
@@ -119,9 +121,11 @@ uv run pytest        # or: .venv/bin/python -m pytest
 Multiple players may exist at once (background VLC, a TUI, a web player), so
 shared state is coordinated through files under `~/.flow/`:
 
-- `library.json` and playlists are written atomically (tmp file + `rename`)
-  and guarded by `flock` locks (`~/.flow/library.lock`, `.lock` in
-  `playlists/`).
+- `library.db` and `history.db` are SQLite in WAL mode, with a connection per
+  call and `BEGIN IMMEDIATE` around every read-modify-write, so the TUI, the
+  web server and the CLI can all write at once without corrupting a row.
+  Playlists are still JSON, written atomically (tmp file + `rename`) and
+  guarded by a `flock` on `playlists/.lock`.
 - `status.json` is a plain "latest writer wins" file; each interface updates
   it opportunistically.
 - `players.json` (`backend/registry.py`) is the live-player registry — every

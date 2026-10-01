@@ -31,6 +31,9 @@
                 <button class="nav-item" data-panel="queue">
                     <i class="bi bi-list-ul"></i><span>Queue</span>
                 </button>
+                <button class="nav-item" data-panel="history">
+                    <i class="bi bi-clock-history"></i><span>History</span>
+                </button>
             </nav>
             <hr class="sidebar-divider" />
             <div class="sidebar-section-header">
@@ -128,6 +131,37 @@
                     </button>
                 </div>
                 <div id="queueContainer" class="song-list"></div>
+            </div>
+
+            <div class="panel" id="panelHistory">
+                <div class="panel-toolbar">
+                    <span class="tool-label">Sort</span>
+                    <select id="historySort" class="tool-select">
+                        <option value="recent">Newest first</option>
+                        <option value="oldest">Oldest first</option>
+                        <option value="most">Most played</option>
+                        <option value="least">Least played</option>
+                    </select>
+                    <span class="tool-label">Range</span>
+                    <select id="historyRange" class="tool-select">
+                        <option value="all">All time</option>
+                        <option value="30d">Last 30 days</option>
+                        <option value="7d">Last 7 days</option>
+                        <option value="today">Today</option>
+                    </select>
+                    <label class="check-label"
+                        ><input type="checkbox" id="historyUnique" />
+                        Unique songs</label
+                    >
+                    <button id="refreshHistoryBtn" class="tool-btn">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh
+                    </button>
+                    <button id="clearHistoryBtn" class="tool-btn">
+                        <i class="bi bi-trash"></i> Clear
+                    </button>
+                </div>
+                <div id="historySummary" class="history-summary"></div>
+                <div id="historyContainer" class="song-list"></div>
             </div>
 
             <div class="panel" id="panelPlaylistDetail">

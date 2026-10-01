@@ -21,8 +21,10 @@ the documented surface. A deprecated subprocess fallback is kept only for
 plugins that haven't been re-API'd yet — it warns and calls the real
 `flow` CLI, and it is *always* less capable than the socket.
 
-Reads stay file-based (status.json / library.json / config.json) — cheap,
-no IPC round trip. Only writes/controls go over the socket.
+Reads stay file-based (status.json / config.json) — cheap, no IPC round trip.
+Only writes/controls and the SQLite-backed library/history reads go over the
+socket, because those databases must be opened through `backend.library` /
+`backend.history` rather than read as raw files.
 """
 
 import json
@@ -38,10 +40,9 @@ HOME = pathlib.Path.home()
 
 STATUS_FILE = HOME / ".flow/status.json"
 CONFIG_FILE = HOME / ".flow/config.json"
-LIBRARY_FILE = HOME / ".flow/library.json"
 STATS_FILE = HOME / ".flow/status.json"
 
-API_VERSION = 3
+API_VERSION = 4
 
 _CONNECT_TIMEOUT = 5.0
 _FRAME_TIMEOUT = 30.0
@@ -238,16 +239,30 @@ def status_card():
 
 
 def library_stats():
-    """Counts from ~/.flow/library.json: {songs, liked, duration}."""
-    try:
-        songs = json.loads(LIBRARY_FILE.read_text())
-    except Exception:
-        songs = []
-    if isinstance(songs, dict):
-        songs = list(songs.values())
-    liked = [s for s in songs if s.get("liked", False)]
-    total = sum(int(s.get("duration", 0) or 0) for s in songs)
-    return {"songs": len(songs), "liked": len(liked), "duration": total}
+    """Counts from ~/.flow/library.db: {songs, liked, duration, plays, played}."""
+    r = _call("library_stats")
+    if isinstance(r, dict) and isinstance(r.get("result"), dict):
+        return r["result"]
+    return {"songs": 0, "liked": 0, "duration": 0, "plays": 0, "played": 0}
+
+
+def play_history(limit=25, sort="recent", range="all", unique=False):
+    """Online play log from ~/.flow/history.db.
+
+    `range` is one of `today`, `7d`, `30d`, `all`; `sort` is one of `recent`,
+    `oldest`, `most`, `least`. `most`/`least` rank by play count and always
+    return one row per song.
+    """
+    payload = {
+        "limit": int(limit),
+        "sort": str(sort),
+        "range": str(range),
+        "unique": bool(unique),
+    }
+    r = _call("history", payload)
+    if isinstance(r, dict) and isinstance(r.get("result"), list):
+        return r["result"]
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -396,6 +411,7 @@ __all__ = [
     "is_playing",
     "status_card",
     "library_stats",
+    "play_history",
     "pause",
     "resume",
     "next",

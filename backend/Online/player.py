@@ -11,7 +11,7 @@ import time
 
 import vlc
 
-from backend import config, library, lyrics, mpris, sponsor, status, visualizer
+from backend import config, history, library, lyrics, mpris, sponsor, status, visualizer
 
 _truncate_title = config._truncate_title
 
@@ -39,6 +39,29 @@ _next_req = False
 _prev_req = False
 _stop_req = False
 _nav = (False, False)
+
+
+def _teardown():
+    """Stop and release the current media player before the next track starts.
+
+    python-vlc defines no ``__del__``, so dropping the Python references leaves
+    the native player and its libvlc core alive, each still holding an audio
+    output. Radio and playlist queues call play_url()/play_entry() once per
+    track, so without this every previous track keeps playing over the new one
+    and the audio turns into overlapping glitch.
+    """
+    global _player
+    p, _player = _player, None
+    if p is None:
+        return
+    try:
+        p.stop()
+    except Exception:
+        pass
+    try:
+        p.release()
+    except Exception:
+        pass
 
 
 def _clear_stale_pid():
@@ -353,6 +376,7 @@ def play_url(
     old_stderr = os.dup(2)
     os.dup2(devnull, 2)
     try:
+        _teardown()
         instance = vlc.Instance("--no-video --quiet")
         _player = instance.media_player_new()
         media = instance.media_new(url)
@@ -387,12 +411,23 @@ def play_url(
             if primary:
                 artist = primary[0].get("name", "") or ""
             album = (entry.get("album") or {}).get("name") or ""
+        # JioSaavn tracks have no YouTube id; namespace the song id so it can
+        # never collide with a real video id in the library.
+        savan_id = (entry or {}).get("id") or ""
+        history.record_play(
+            f"j:{savan_id}" if savan_id else "",
+            title,
+            artist,
+            mode="online",
+            duration=duration,
+        )
         mpris.load_track(
             None,
             title,
             duration,
             artist=artist,
             album=album,
+            art=thumbnail,
             has_next=_nav[0],
             has_prev=True,
         )
@@ -414,6 +449,7 @@ def play_url(
             _restore_pause_input()
     finally:
         _restore_pause_input()
+        _teardown()
         os.dup2(old_stderr, 2)
         os.close(old_stderr)
         os.close(devnull)
@@ -430,12 +466,14 @@ def play_entry(entry, title, args=None, flags=None, next_title=None, nav=None):
     config.clear_seek()
     title = title.split("|")[0]
 
+    _teardown()
     instance = vlc.Instance("--no-video --quiet")
     _player = instance.media_player_new()
 
     stream_url = sponsor.stream_url(entry)
     if not stream_url:
         e("     No playable stream found")
+        _teardown()
         return
     media = instance.media_new(stream_url)
 
@@ -484,18 +522,23 @@ def play_entry(entry, title, args=None, flags=None, next_title=None, nav=None):
             artist = entry.get("artist") or ""
         if not album:
             album = entry.get("album") or ""
+        history.record_play(
+            video_id or "", title, artist, mode="online", duration=duration
+        )
         art_path = ""
         if video_id:
             cached = library.thumbnail_path(video_id)
             if os.path.exists(cached):
                 art_path = cached
+        if not art_path:
+            art_path = thumb
         mpris.load_track(
             video_id,
             title,
             duration,
             artist=artist,
             album=album,
-            art_path=art_path,
+            art=art_path,
             has_next=_nav[0],
             has_prev=True,
         )
@@ -544,3 +587,4 @@ def play_entry(entry, title, args=None, flags=None, next_title=None, nav=None):
         if skip_thread:
             skip_thread.stop()
         _restore_pause_input()
+        _teardown()

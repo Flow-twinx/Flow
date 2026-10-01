@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import pathlib
 import threading
 import time
 
@@ -116,6 +117,18 @@ class _Control:
         self._kill(config.SIG_PREV)
 
 
+def _art_uri(value):
+    if not value:
+        return ""
+    value = str(value)
+    if value.startswith(("http://", "https://")):
+        return value
+    try:
+        return pathlib.Path(value).as_uri()
+    except ValueError:
+        return ""
+
+
 # --------------------------------------------------------------------------- #
 # dbus-python + PyGObject backend                                             #
 # --------------------------------------------------------------------------- #
@@ -171,7 +184,7 @@ if _DBUS_OK:
             duration,
             artist="",
             album="",
-            art_path="",
+            art="",
             has_next=False,
             has_prev=False,
         ):
@@ -184,7 +197,7 @@ if _DBUS_OK:
                 duration,
                 artist,
                 album,
-                art_path,
+                art,
                 has_next,
                 has_prev,
             )
@@ -241,18 +254,17 @@ if _DBUS_OK:
             duration,
             artist="",
             album="",
-            art_path="",
+            art="",
             has_next=False,
             has_prev=False,
         ):
             title = str(title or "")
             artist = str(artist or "")
             album = str(album or "")
-            art = str(art_path or "")
             self._metadata = {
                 "mpris:trackid": dbus.ObjectPath(_next_trackid()),
                 "mpris:length": dbus.Int64(int(duration or 0) * 1_000_000),
-                "mpris:artUrl": dbus.String(f"file://{art}" if art else ""),
+                "mpris:artUrl": dbus.String(_art_uri(art)),
                 "xesam:title": dbus.String(title),
                 "xesam:artist": dbus.Array([artist] if artist else [], signature="s"),
                 "xesam:album": dbus.String(album),
@@ -447,18 +459,17 @@ if _FAST_OK:
             duration,
             artist="",
             album="",
-            art_path="",
+            art="",
             has_next=False,
             has_prev=False,
         ):
             title = str(title or "")
             artist = str(artist or "")
             album = str(album or "")
-            art = str(art_path or "")
             self._metadata = {
                 "mpris:trackid": dbus_fast.Variant("o", _next_trackid()),
                 "mpris:length": dbus_fast.Variant("x", int(duration or 0) * 1_000_000),
-                "mpris:artUrl": dbus_fast.Variant("s", f"file://{art}" if art else ""),
+                "mpris:artUrl": dbus_fast.Variant("s", _art_uri(art)),
                 "xesam:title": dbus_fast.Variant("s", title),
                 "xesam:artist": dbus_fast.Variant("as", [artist] if artist else []),
                 "xesam:album": dbus_fast.Variant("s", album),
@@ -656,7 +667,7 @@ if _FAST_OK:
             duration,
             artist="",
             album="",
-            art_path="",
+            art="",
             has_next=False,
             has_prev=False,
         ):
@@ -669,7 +680,7 @@ if _FAST_OK:
                 duration,
                 artist,
                 album,
-                art_path,
+                art,
                 has_next,
                 has_prev,
             )
@@ -779,7 +790,7 @@ def load_track(
     duration,
     artist="",
     album="",
-    art_path="",
+    art="",
     has_next=False,
     has_prev=False,
 ):
@@ -790,7 +801,7 @@ def load_track(
         duration,
         artist=artist,
         album=album,
-        art_path=art_path,
+        art=art,
         has_next=has_next,
         has_prev=has_prev,
     )

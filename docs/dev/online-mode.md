@@ -17,7 +17,7 @@ and dispatches to handler functions.
 | `search` | Search YouTube, number the results for later `play <index>` |
 | `savan` / `savan-s` | JioSaavn play / search (aliases `svn`, `svn-s`) |
 | `radio` | Build a mix from a seed track (`-p` saves it as a playlist, `-d` downloads) |
-| `like` / `unlike` | Toggle the flag in `~/.flow/library.json`; liking downloads the thumbnail and, when `down_on_like` is on, auto-downloads the audio |
+| `like` / `unlike` | Toggle the flag in `~/.flow/library.db`; liking downloads the thumbnail and, when `down_on_like` is on, auto-downloads the audio |
 | `download` | Download audio to `~/.flow/downloads/` (skip if already downloaded) |
 | `delete` | Remove a downloaded song (alias `dl-d`) |
 | `playlist` / `switch` / `help` / `short` / `config` / `check` / `export` / `exit` | Shared command surface |
@@ -46,6 +46,10 @@ sane timeouts/retries (`socket_timeout`, `retries`, `extractor_retries`).
   `~/.flow/vlc.pid`, updates `status.json`, publishes MPRIS metadata, then
   runs `_display_loop`.
 - `play_url(...)` is the stream-URL variant (used by radio/savan).
+- Both record the play once metadata is resolved, via
+  `history.record_play(video_id, title, artist, mode="online")` — see
+  [Play counting](storage.md#play-counting). JioSaavn has no video id, so
+  `play_url` namespaces its song id as `j:<song_id>`.
 - `setup_nav_signals()` installs the signal handlers; `_attach_vlc_events()`
   forwards VLC state changes (playing/paused/stopped) to MPRIS.
 - A `SponsorBlockPoller` runs during playback and seeks past sponsor
@@ -88,7 +92,7 @@ See [Playback control](control.md) for the full picture.
 Downloaded files land in `~/.flow/downloads/<video_id>.<ext>` (default
 `webm`; `opus`/`m4a`/`mp3` when ffmpeg is present and
 `config.FORMAT`/`-f <fmt>` says so). Every download is recorded in
-`library.json` via `library.track_download()`, which also stores
+`library.db` via `library.track_download()`, which also stores
 artist/album/duration metadata extracted from the yt-dlp info dict
 (`library.meta_from_info`). Thumbnails are cached to
 `~/.flow/downloads/.cache/<video_id>.jpg` on like/download so the TUI, web

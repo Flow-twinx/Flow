@@ -12,8 +12,9 @@ through it rather than spawning the `flow` CLI.
   their own thread so one slow plugin can't stall others; frames are capped
   at 1 MiB.
 - **Handshake** — the first frame is `hello` with the plugin name (`FLOW_PLUGIN_NAME`); the daemon stamps it on the connection and uses it for capability gating (raw).
-- **Typed surface** — `status` / `current_track` / `is_playing` /
-  `library_stats` read `status.json`/`library.json` file state;
+- **Typed surface** — `status` / `current_track` / `is_playing` read
+  `status.json` file state; `library_stats` / `history` read the two SQLite
+  stores through `backend.library` / `backend.history` (never as raw files);
   `pause`/`resume`/`next`/`previous`/`seek`/`seek_back`/`like`/`unlike`/
   `download` use `_send_player` (host routing mirroring `_send_control`);
   `players` lists the live player registry (kind/pid/port);
@@ -37,7 +38,7 @@ Tracks are `Track` dataclasses (`title`, `ref`, `kind`,
 `duration`, `video_id`), where `kind` is `"local"` or `"stream"`.
 
 - Offline lists come from `offline_file.get_songs()` with display titles
-  resolved through `library.json`.
+  resolved through `library.db`.
 - Online lists come from `stream_tracks(query)` → `youtube.search(query,
   limit=10)`. Search responses are tagged with a monotonic `_search_seq`;
   stale responses (a newer query landed first) are dropped.
@@ -107,6 +108,10 @@ directory. In `DEV_MODE` it injects Flask/Werkzeug logging into the rotating
 | `GET/POST /api/speed-dial` | Get/set home-screen favorites |
 | `GET /api/home` | Last played + speed dials |
 | `POST /api/delete-download` | Delete via library entry or file path (path-validated) |
+| `GET /api/history?sort=&range=&unique=&limit=&offset=` | Online play timeline from `history.db` (sorts `recent`/`oldest`/`most`/`least`; `most`/`least` imply `unique`) |
+| `GET /api/history/top?limit=` | Most-played online songs, ranked |
+| `POST /api/history/play` | Count one play (browser player); online plays also append a `history.db` row |
+| `POST /api/history/clear` | Empty `history.db` (leaves `song_count` alone) |
 | `POST /api/now-playing` | Browser → `status.update()` |
 | `POST /api/control` + `GET /api/control/poll` | Web control bridge (see control.md) |
 | `GET/POST /api/playlists`, `/api/playlist`, `/api/playlist/*` | Playlist CRUD, reorder, dedupe, export `.m3u`, save |
@@ -120,6 +125,16 @@ directory. In `DEV_MODE` it injects Flask/Werkzeug logging into the rotating
 Downloads go through `_download_audio()`: yt-dlp with sponsor
 post-processors, optional `FFmpegExtractAudio` for non-webm formats,
 retries, then `library.track_download()` + `download_thumbnail()`.
+
+### History panel
+
+The sidebar's **History** panel is the web half of the play-history feature
+and deliberately answers a different question from the CLI's
+`flow summary -l`: it sorts the play *event* stream (online only), not a
+per-song table. The panel is a lazy panel — `setPanel()` fires the loader in
+`lazyPanels` rather than at boot — and its Sort / Range dropdowns are
+excluded from the global `keydown` handler so arrow keys and space keep
+working on them.
 
 ### Server process (`web/main.py`)
 

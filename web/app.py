@@ -10,6 +10,7 @@ import yt_dlp
 from flask import Flask, jsonify, render_template, request, send_file
 
 from backend import control
+from backend import history
 from backend import library
 from backend import playlist
 from backend import sponsor
@@ -597,6 +598,97 @@ def api_now_playing():
         _resolve_thumbnail(data.get("thumbnail", "")),
     )
     return jsonify({"success": True})
+
+
+@app.route("/api/history")
+def api_history():
+    """Play timeline for the web History panel.
+
+    Sorted on the event stream (`history.SORTS`) rather than the per-song
+    table `flow summary -l` prints — a scrollable column is good at showing
+    "what did I just play, in order", a terminal is good at showing "which
+    songs do I play most".
+
+    `?unique=1` collapses repeat plays down to the most recent event per song
+    and pairs it with a play count; the `most` / `least` sorts imply it, since
+    ranking needs one row per song to rank.
+    """
+    sort = request.args.get("sort", "recent")
+    if sort not in history.SORTS:
+        sort = "recent"
+    if sort in ("most", "least"):
+        unique = True
+    else:
+        unique = request.args.get("unique") in ("1", "true", "yes")
+    since = None
+    range_key = request.args.get("range", "all")
+    days = history.RANGES.get(range_key)
+    if days:
+        since = time.time() - days * 86400
+    try:
+        limit = int(request.args.get("limit", 100))
+        offset = int(request.args.get("offset", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "limit and offset must be integers"}), 400
+    plays = history.timeline(
+        sort=sort,
+        limit=limit,
+        offset=offset,
+        since=since,
+        unique=unique,
+    )
+    for play in plays:
+        play["thumbnail"] = _thumb_url(play["video_id"]) if play["video_id"] else ""
+    return jsonify(
+        {
+            "plays": plays,
+            "sort": sort,
+            "range": range_key,
+            "unique": unique,
+            "total": history.count(),
+            "totals": history.totals(),
+        }
+    )
+
+
+@app.route("/api/history/top")
+def api_history_top():
+    """Most-played online songs, for the History panel's ranked view."""
+    try:
+        limit = int(request.args.get("limit", 20))
+    except (TypeError, ValueError):
+        return jsonify({"error": "limit must be an integer"}), 400
+    return jsonify({"top": history.top(limit=max(1, min(limit, 200)))})
+
+
+@app.route("/api/history/play", methods=["POST"])
+def api_history_play():
+    """Record one play from the browser player.
+
+    Deliberately separate from `/api/now-playing`: the player bar posts there
+    on play, pause and `loadedmetadata`, so counting those would inflate
+    `song_count` three or more times per track. This is called once, from
+    `loadAndPlay()`, when a track actually starts.
+    """
+    data = request.get_json(silent=True) or {}
+    title = (data.get("title") or "").strip()
+    if not title:
+        return jsonify({"error": "missing title"}), 400
+    count = history.record_play(
+        (data.get("video_id") or "").strip(),
+        title,
+        (data.get("artist") or "").strip(),
+        mode=data.get("mode", "online"),
+        duration=data.get("duration", 0),
+    )
+    return jsonify({"success": True, "song_count": count})
+
+
+@app.route("/api/history/clear", methods=["POST"])
+def api_history_clear():
+    removed = history.clear()
+    devlog.log_success("HIST", 200, "/api/history/clear", "flow", f"cleared {removed} plays")
+    return jsonify({"success": True, "removed": removed})
 
 
 @app.route("/api/control", methods=["POST"])

@@ -30,10 +30,14 @@ Plugins talk to Flow over **local typed IPC** — a line-delimited JSON-RPC
 socket owned by the resident daemon (`~/.flow/flow.sock`, mode 0600). A
 plugin never spawns the `flow` CLI for reads, controls, or config; all of
 those go over the socket to host-validated methods. The generated
-`flow_api.py` is the entire client surface (API v3, `API_VERSION = 3`):
+`flow_api.py` is the entire client surface (API v4, `API_VERSION = 4`):
 
-- state    `current_track()` / `is_playing()` / `status_card()` /
-           `library_stats()`      (cheap file reads of status/library JSON)
+- state    `current_track()` / `is_playing()` / `status_card()`
+           (cheap file reads of `status.json`)
+- data     `library_stats()` / `play_history(limit, sort, range, unique)`
+           (SQLite reads — the host opens `library.db` / `history.db`
+           through `backend.library` / `backend.history` rather than letting
+           a client touch the files)
 - player   `pause()` / `resume()` / `next()` / `previous()` / `seek(sec)` /
            `seek_back(sec)` / `like()` / `unlike()` / `download()`
            (host-routed player control, same routing the CLI uses)
@@ -196,7 +200,7 @@ dispatch continues).
 
 ## Plugin API (client contract)
 
-The bundled `flow_api.py` (API v3) is self-contained: no Flow internals are
+The bundled `flow_api.py` (API v4) is self-contained: no Flow internals are
 imported; everything goes over the daemon socket or cheap file reads. All
 writes go through host-validated methods, so invalid config values are
 rejected daemon-side before anything is saved.
@@ -206,6 +210,9 @@ import flow_api
 
 track = flow_api.current_track()        # {} if nothing is playing
 flow_api.is_playing()
+
+flow_api.library_stats()                # -> {"songs", "liked", "plays", ...}
+flow_api.play_history(limit=10, sort="most")   # -> [{title, artist, play_count, ...}]
 
 flow_api.get_config("spinner")          # -> "|-/\\"
 flow_api.get_configs(["primary", "theme"])  # -> dict of readable config keys
@@ -224,7 +231,7 @@ flow_api.raw_cli("--status")            # gated: only when the daemon granted ra
 Writable config keys (host-enforced `PLUGIN_SAFE_KEYS`): `primary`,
 `secondary`, `tertiary`, `theme`, `spinner`, `display`, `barwidth`,
 `barheight`, `barspacing`, `barchar`, `sensitivity`, `format`,
-`max_search`, `max_radio`, `ad_skip`, `down_on_like`. Everything else is
+`max_search`, `max_radio`, `ad_skip`, `down_on_like`, `notify`. Everything else is
 readable but not writable from plugins (`dev`, `ffmpeg`,
 `sponsor_categories`).
 
