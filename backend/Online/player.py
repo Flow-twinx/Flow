@@ -41,15 +41,25 @@ _stop_req = False
 _nav = (False, False)
 
 
-def _teardown():
-    """Stop and release the current media player before the next track starts.
+_now = {"title": "", "duration": 0, "thumbnail": None}
 
-    python-vlc defines no ``__del__``, so dropping the Python references leaves
-    the native player and its libvlc core alive, each still holding an audio
-    output. Radio and playlist queues call play_url()/play_entry() once per
-    track, so without this every previous track keeps playing over the new one
-    and the audio turns into overlapping glitch.
-    """
+
+def _publish_play_state():
+    if not _now.get("title"):
+        return
+    try:
+        status.update(
+            _now["title"],
+            duration=_now.get("duration", 0),
+            playing=not _paused,
+            thumbnail=_now.get("thumbnail"),
+        )
+    except Exception:
+        pass
+
+
+def _teardown():
+
     global _player
     p, _player = _player, None
     if p is None:
@@ -250,6 +260,7 @@ def _display_loop(
     if display == "bars" and not (sys.stdin.isatty() and sys.stdout.isatty()):
         display = "none"
     if display == "none":
+        paused_printed = False
         while player.get_state() not in (vlc.State.Ended, vlc.State.Error):
             if stop_check and stop_check():
                 break
@@ -259,6 +270,13 @@ def _display_loop(
                 if _restart_current(player):
                     continue
                 break
+            if _paused:
+                if not paused_printed:
+                    paused_printed = True
+                    _publish_play_state()
+            elif paused_printed:
+                paused_printed = False
+                _publish_play_state()
             time.sleep(0.1)
         return
 
@@ -317,6 +335,7 @@ def _display_loop(
                         sys.stdout.write(f"\r  {T}[Paused]{R}  ")
                         sys.stdout.flush()
                     paused_printed = True
+                    _publish_play_state()
                 try:
                     time.sleep(0.1)
                 except OSError:
@@ -325,6 +344,7 @@ def _display_loop(
             if paused_printed:
                 visualizer.set_paused(False)
                 paused_printed = False
+                _publish_play_state()
             elapsed = time.time() - start
             if display == "bars":
                 visualizer.draw()
@@ -394,6 +414,7 @@ def play_url(
             },
         )
 
+        _now.update(title=title, duration=duration, thumbnail=thumbnail)
         status.update(title, duration, thumbnail=thumbnail)
         dur_min, dur_sec = divmod(int(duration), 60)
         flags = _flags_str(args)
@@ -501,6 +522,7 @@ def play_entry(entry, title, args=None, flags=None, next_title=None, nav=None):
             },
         )
 
+        _now.update(title=title, duration=duration, thumbnail=thumb)
         status.update(title, duration, thumbnail=thumb)
         dur_min, dur_sec = divmod(int(duration), 60)
         fstr = _flags_str(args)

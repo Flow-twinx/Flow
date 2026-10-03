@@ -81,6 +81,7 @@ _last_played = None
 
 _radio_quit = False
 _radio_skip = False
+_radio_tracks = []
 
 
 def _radio_sigint(sig, frame):
@@ -97,7 +98,7 @@ COMMANDS = {
     "play": "Play song(s) from local library | all by play all | and liked",
     "search": "Search local music library",
     "list": "List local music library",
-    "radio": "Radio mode | shuffle & loop library | Ctrl+C next | Ctrl+Q quit",
+    "radio": "Radio mode | shuffle & loop library (seed: radio <song>) | Ctrl+C next | Ctrl+Q quit",
     "like": "Like the currently playing song",
     "unlike": "Unlike the currently playing song",
     "delete": "Delete a downloaded song (alias: dl-d)",
@@ -155,6 +156,12 @@ def run(cmd: str, extra: list[str], args):
     cmd = shortcuts.resolve(cmd)
     inf = "-i" in extra
     extra = [x for x in extra if x != "-i"]
+    # `-f <format>` is an online download flag; a local library never downloads,
+    # and letting it swallow the next token eats the song name (`play -f Song`).
+    # Drop it as the unknown flag it is here so the name survives.
+    if "-f" in extra:
+        extra = [x for x in extra if x != "-f"]
+        print(f"Unknown flag: -f")
     extra, args = (
         merge_flags(extra, args)
         if cmd not in ("config", "check", "short", "summary", "export")
@@ -194,12 +201,12 @@ def run(cmd: str, extra: list[str], args):
         e(f"Unknown command: {cmd}")
 
 
-def _pick_index(results):
+def _pick_index(results, question="Play which track?"):
     from ..ui import pick
 
     choices = [(lib.display_name(p), i) for i, p in enumerate(results)]
     choice, used = pick(
-        "Play which track?",
+        question,
         choices,
         instruction="(↑↓ navigate, Enter to play)",
         mode="offline",
@@ -213,7 +220,7 @@ def _pick_index(results):
         m(f"  {i}. {lib.display_name(p)}")
     while True:
         try:
-            raw = input(f"{P}Play which track? [1-{len(results)}] {R}").strip()
+            raw = input(f"{P}{question} [1-{len(results)}] {R}").strip()
         except EOFError, KeyboardInterrupt:
             return None
         if not raw:
@@ -817,14 +824,61 @@ def switch_mode():
         e("No internet connection")
 
 
+def _radio_seed(query):
+    global _last_results
+
+    head, _, tail = query.rpartition(" ")
+    if tail.isdigit():
+        idx = int(tail) - 1
+        if head:
+            matches = lib.find_songs(head)
+            label = f"'{head}'"
+        else:
+            matches = _last_results
+            label = "the last results"
+        if not matches:
+            e(f"No songs found matching {label}")
+            return None
+        if not 0 <= idx < len(matches):
+            e(f"Index out of range for {label} (1-{len(matches)})")
+            return None
+        return matches[idx]
+
+    matches = lib.find_songs(query)
+    if not matches:
+        e(f"No songs found matching '{query}'")
+        return None
+    if len(matches) == 1:
+        return matches[0]
+    _last_results = matches
+    idx = _pick_index(matches, "Seed radio with which track?")
+    return None if idx is None else matches[idx]
+
+
+def _radio_queue(query):
+
+    tracks = list(lib.get_all_songs())
+    if not query:
+        random.shuffle(tracks)
+        return tracks
+    seed = _radio_seed(query)
+    if seed is None:
+        return None
+    rest = [p for p in tracks if p != seed]
+    random.shuffle(rest)
+    return [seed, *rest]
+
+
 def radio(extra, args):
-    global _last_played, _radio_quit, _radio_skip
-    tracks = lib.get_all_songs()
-    if not tracks:
+    global _last_played, _radio_quit, _radio_skip, _radio_tracks
+    if not lib.get_all_songs():
         e("No songs in library")
         return
-    tracks = list(tracks)
-    random.shuffle(tracks)
+    query = " ".join(extra) if extra else None
+    tracks = _radio_queue(query)
+    if tracks is None:
+        return
+    _radio_tracks = tracks
 
     if getattr(args, "bg", False):
         if not _fork_bg(f"Radio playing {len(tracks)} tracks"):
@@ -889,7 +943,8 @@ def radio(extra, args):
 
     flags = {"quit": lambda: _radio_quit, "skip": lambda: _radio_skip}
 
-    i(f"\n[Radio] Playing {len(tracks)} songs (Ctrl+C next, Ctrl+Q quit)")
+    seed = f"seeded with '{lib.display_name(tracks[0])}' | " if query else ""
+    i(f"\n[Radio] {seed}playing {len(tracks)} songs (Ctrl+C next, Ctrl+Q quit)")
     try:
         while True:
             idx = 0
@@ -947,5 +1002,7 @@ def show_help(inf=False):
         print(f"{T}Offline Commands:{R}")
         for cmd, desc in COMMANDS.items():
             print(f"  {T}{cmd:12s}{R} {G}{desc}{R}")
-        print(f"  {T}plugins{R} {G}install/list/run/update Flow plugins | flow plugins list{R}")
+        print(
+            f"  {T}plugins{R} {G}install/list/run/update Flow plugins | flow plugins list{R}"
+        )
         print(f"{G}  Use 'help -i' for detailed usage{R}")

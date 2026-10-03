@@ -235,8 +235,6 @@ def check_deps():
         print(f"  | {name:10s} | {status:13s} | {test:6s} |")
 
 
-#: Containers treated as songs. The offline library scans for these and
-#: `export_flow` only copies/tags these.
 AUDIO_EXTENSIONS = {
     ".mp3",
     ".flac",
@@ -249,12 +247,8 @@ AUDIO_EXTENSIONS = {
     ".webm",
 }
 
-#: Text tags written into every exported song. Fields the library does not
-#: know are skipped rather than written empty.
 _EXPORT_TAGS = ("title", "artist", "album")
 
-#: Containers ffmpeg can carry cover art in. Its ogg/opus muxers have no
-#: attached-picture stream, so art is left out there instead of failing.
 _ART_EXTENSIONS = {".mp3", ".m4a", ".flac", ".wav"}
 
 
@@ -285,13 +279,6 @@ def _safe_filename(name: str) -> str:
 
 
 def _export_sources() -> list:
-    """``(path, tags)`` for every downloaded song, one entry per file stem.
-
-    Downloads are named after the video id, so the library is what supplies
-    the title; a file the library knows nothing about falls back to its own
-    name. ``liked songs/`` holds copies of top-level files, so a stem is only
-    exported once (the top-level copy wins).
-    """
     from backend import library
 
     if not DOWNLOAD_DIR.exists():
@@ -346,12 +333,7 @@ def _ffmpeg_tag(exe, src, dst, tags, cover=""):
 
 
 def _tag_song(path: pathlib.Path, tags: dict) -> bool:
-    """Write title/artist/album (and cover art) into ``path`` in place.
 
-    The audio is stream-copied, so only the container headers change. Cover
-    art is a best-effort extra: if the muxer refuses it, the text tags are
-    retried on their own rather than lost.
-    """
     exe = _ffmpeg_exe()
     if not exe:
         return False
@@ -447,9 +429,23 @@ _FILLER_WORDS = {
     "explicit",
     "clip",
     "old",
+    "lyrical",
 }
 
+MAX_WORDS = 6
 IGNORE_FILE = pathlib.Path.home() / ".flow/ignore.txt"
+_APOSTROPHES = re.compile(r"['’`]")
+_NON_WORD = re.compile(r"[^\w\s]|_")
+_SPACES = re.compile(r"\s+")
+_DASH = re.compile(r"\s+[-–—]\s+")
+_PIPE = re.compile(r"\s*[|｜ǀ•·]\s*")
+
+
+def _normalize(text):
+    """Drop apostrophes, turn symbols into spaces, collapse whitespace."""
+    text = _APOSTROPHES.sub("", text)
+    text = _NON_WORD.sub(" ", text)
+    return _SPACES.sub(" ", text).strip()
 
 
 def _load_filler_words():
@@ -463,18 +459,51 @@ def _load_filler_words():
         IGNORE_FILE.write_text(header + "\n".join(sorted(_FILLER_WORDS)) + "\n")
     words = set()
     for line in IGNORE_FILE.read_text().splitlines():
-        word = line.strip().lower()
-        if word and not word.startswith("#"):
-            words.add(word)
+        line = line.strip()
+        if line and not line.startswith("#"):
+            phrase = _normalize(line).lower()
+            if phrase:
+                words.add(phrase)
     return words
 
 
+def _build_filler_regex(phrases):
+    if not phrases:
+        return None
+    parts = [
+        r"\s+".join(re.escape(w) for w in p.split())
+        for p in sorted(phrases, key=len, reverse=True)
+    ]
+    return re.compile(r"(?<!\w)(?:" + "|".join(parts) + r")(?!\w)", re.IGNORECASE)
+
+
 FILLER_WORDS = _load_filler_words()
+_FILLER_RE = _build_filler_regex(FILLER_WORDS)
+
+
+_LEAD = re.compile(r"^[\s|｜ǀ•·:\-–—]+")
+_DASH_BEFORE_PIPE = re.compile(r"\s+[-–—]\s*(?=[|｜ǀ•·])")
+
+
+def _strip_filler(text):
+    text = _normalize(text)
+    if _FILLER_RE:
+        text = _SPACES.sub(" ", _FILLER_RE.sub(" ", text)).strip()
+    return text
+
+
+def extract_song(title):
+    for segment in _PIPE.split(title):
+        parts = [p for p in map(_strip_filler, _DASH.split(segment)) if p]
+        if parts:
+            return parts[1] if len(parts) > 1 else parts[0]
+    return ""
 
 
 def _truncate_title(title):
-    words = [word for word in title.split() if word.lower() not in FILLER_WORDS]
-    return " ".join(words[:6]) + "..." if len(words) > 6 else " ".join(words)
+    words = extract_song(title).split()
+    result = " ".join(words[:MAX_WORDS])
+    return result + "..." if len(words) > MAX_WORDS else result
 
 
 def _load_config():

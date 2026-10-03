@@ -1,19 +1,3 @@
-"""Per-song library storage, backed by SQLite (`~/.flow/library.db`).
-
-This replaces the old `~/.flow/library.json` flat dict. The public API is
-unchanged — `load()` still returns `{video_id: {...}}` and every write still
-goes through `_mutate(fn)` — so the callers that read the library
-(`web/app.py`, `tui/main.py`, `Offline/file.py`, the mode command modules) are
-unaffected by the storage change.
-
-Concurrency: one connection per call (the Flask server and the daemon are both
-threaded, so a shared connection is not safe), WAL journaling so readers never
-block the writer, and `BEGIN IMMEDIATE` around every read-modify-write cycle.
-This is what replaced the `flock` on `~/.flow/library.lock`.
-
-Schema notes live in `docs/dev/storage.md`.
-"""
-
 import hashlib
 import json
 import pathlib
@@ -27,11 +11,7 @@ from backend.config import _truncate_title
 DB_FILE = pathlib.Path.home() / ".flow/library.db"
 THUMB_CACHE = pathlib.Path.home() / ".flow/downloads/.cache"
 
-#: Pre-v0.9 store, imported once into `DB_FILE` and then left as a `.bak`.
 LEGACY_FILE = pathlib.Path.home() / ".flow/library.json"
-
-#: Metadata fields that used to be stored and are deliberately not carried
-#: into the schema. Kept only for the one-time JSON import.
 _REMOVED_META_KEYS = {
     "track",
     "uploader",
@@ -94,10 +74,6 @@ _UPSERT = (
 )
 
 
-# ---------------------------------------------------------------------------
-# Connection + schema
-# ---------------------------------------------------------------------------
-
 def _connect():
     DB_FILE.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_FILE, timeout=10.0, isolation_level=None)
@@ -150,19 +126,13 @@ def _meta_set(conn, key, value):
 
 
 def _migrate_from_json(conn):
-    """One-time import of the pre-v0.9 `~/.flow/library.json` into `library.db`.
-
-    TODO(remove after v0.9): drop this function, `_legacy_to_row` and the
-    `.bak` rename once v0.9 ships — no pre-v0.9 install will be left to
-    upgrade from. Guarded by a `meta` flag so it can never run twice.
-    """
     if _meta_get(conn, "json_migrated") == "1":
         return
     if not LEGACY_FILE.exists():
         return
     try:
         data = json.loads(LEGACY_FILE.read_text())
-    except (json.JSONDecodeError, OSError):
+    except json.JSONDecodeError, OSError:
         data = {}
     if isinstance(data, dict):
         for video_id, entry in data.items():
@@ -183,12 +153,12 @@ def _legacy_to_row(video_id, entry):
     duration = entry.get("duration")
     try:
         duration = int(duration) if duration else None
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         duration = None
     count = entry.get("song_count") or 0
     try:
         count = int(count)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         count = 0
     return (
         video_id,
@@ -206,10 +176,6 @@ def _legacy_to_row(video_id, entry):
         entry.get("last_played") or None,
     )
 
-
-# ---------------------------------------------------------------------------
-# Row <-> entry mapping
-# ---------------------------------------------------------------------------
 
 def _row_to_entry(row) -> dict:
     return {
@@ -232,7 +198,7 @@ def _to_values(entry: dict) -> tuple:
     duration = entry.get("duration")
     try:
         duration = int(duration) if duration else None
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         duration = None
     return (
         1 if entry.get("liked") else 0,
@@ -264,9 +230,7 @@ def _all_entries(conn) -> dict:
 
 
 def _get_entry(conn, video_id):
-    row = conn.execute(
-        "SELECT * FROM songs WHERE video_id = ?", (video_id,)
-    ).fetchone()
+    row = conn.execute("SELECT * FROM songs WHERE video_id = ?", (video_id,)).fetchone()
     return _row_to_entry(row) if row else None
 
 
@@ -281,10 +245,6 @@ def _apply_diff(conn, before: dict, after: dict):
         if video_id not in after:
             conn.execute("DELETE FROM songs WHERE video_id = ?", (video_id,))
 
-
-# ---------------------------------------------------------------------------
-# Public read API
-# ---------------------------------------------------------------------------
 
 def load() -> dict:
     with _session() as conn:
@@ -397,10 +357,6 @@ def play_rows() -> list:
     ]
 
 
-# ---------------------------------------------------------------------------
-# Write API
-# ---------------------------------------------------------------------------
-
 def _default_entry(video_id: str, title: str = "") -> dict:
     return {
         "liked": False,
@@ -419,11 +375,6 @@ def _default_entry(video_id: str, title: str = "") -> dict:
 
 
 def _mutate(fn):
-    """Serialize a load → mutate → write cycle.
-
-    ``fn(library)`` may mutate ``library`` in place and must return True when a
-    write is needed. Only the rows that actually changed are written.
-    """
     with _write() as conn:
         before = _all_entries(conn)
         library = {k: dict(v) for k, v in before.items()}
@@ -439,9 +390,7 @@ def save(library: dict):
     """Replace the whole library with ``library`` in a single transaction."""
     with _write() as conn:
         before = _all_entries(conn)
-        after = {
-            k: _sanitize(v) for k, v in library.items() if isinstance(v, dict)
-        }
+        after = {k: _sanitize(v) for k, v in library.items() if isinstance(v, dict)}
         _apply_diff(conn, before, after)
 
 
@@ -603,11 +552,6 @@ def track_download(video_id: str, path: str, title: str = "", meta=None):
 
 
 def meta_from_info(info: dict) -> dict:
-    """Best-effort metadata extraction from a yt-dlp info dict.
-
-    Only artist, album and duration are kept; anything else that was
-    previously stored is deliberately dropped (see _REMOVED_META_KEYS).
-    """
     meta = {}
     artist = info.get("artist")
     if not artist:
@@ -628,7 +572,7 @@ def meta_from_info(info: dict) -> dict:
     if duration:
         try:
             meta["duration"] = int(duration)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             pass
     return meta
 
@@ -671,10 +615,6 @@ def clear_download(video_id: str):
 
 
 def _forgettable(entry: dict) -> bool:
-    """A row is dropped only when nothing at all is left to remember.
-
-    Played songs keep their row so `song_count` survives an unlike/delete.
-    """
     return (
         not entry.get("liked")
         and not entry.get("downloaded")
@@ -685,16 +625,11 @@ def _forgettable(entry: dict) -> bool:
 
 
 def bump_play(video_id: str, title: str = "", artist: str = "", duration=0) -> int:
-    """`song_count` + 1 for ``video_id`` and stamp the play timestamps.
-
-    Creates the row on first play, filling in title/artist/duration when they
-    are not already known. Returns the new play count.
-    """
     if not video_id:
         return 0
     try:
         duration = int(duration) if duration else 0
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         duration = 0
     now = time.time()
     with _write() as conn:

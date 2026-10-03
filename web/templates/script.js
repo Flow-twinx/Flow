@@ -499,7 +499,7 @@ function prewarmNextTrack() {
   fetch(`/play?video_id=${next.video_id}`).catch(() => {});
 }
 
-const artFrame = "/static/Frame%201.jpg";
+const artFrame = "/static/Logo.png";
 
 function effectiveThumb(track) {
   const id = track && track.video_id;
@@ -534,7 +534,7 @@ function artImgTag(url, track) {
     return `<img src="${artFrame}" alt="" loading="lazy">`;
   }
   const onerr =
-    "this.onerror=null;if(this.src.includes('maxresdefault.jpg')){this.src=this.src.replace('maxresdefault.jpg','hqdefault.jpg')}else{this.src='/static/Frame%201.jpg'}";
+    "this.onerror=null;if(this.src.includes('maxresdefault.jpg')){this.src=this.src.replace('maxresdefault.jpg','hqdefault.jpg')}else{this.src='/static/Logo.png'}";
   return `<img src="${url}" onerror="${onerr}" alt="" loading="lazy">`;
 }
 

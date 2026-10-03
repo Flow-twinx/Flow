@@ -1,12 +1,24 @@
-# Flow
+<div align="center">
+  <img src="web/templates/Logo.png" alt="Flow Logo" width="120"/>
 
-A terminal music player with online streaming and offline library modes.
+  <h1>Flow</h1>
+
+  <p><b>A modern terminal based music player with TUI and web support also.</b></p>
+</div>
+
+---
+
+## Overview
+
+Flow is a terminal music player with online streaming and offline library modes.
 
 Flow detects your connection and picks automatically: **online mode**
 streams from YouTube (via `yt-dlp` and `python-vlc`) and JioSaavn, **offline
-mode** plays your local library under `~/.flow/downloads/`. All state —
+mode**. All state —
 downloads, likes, playlists, settings — lives in one folder and is shared
 between the CLI shell, the Textual TUI, and the web GUI.
+
+---
 
 ## Features
 

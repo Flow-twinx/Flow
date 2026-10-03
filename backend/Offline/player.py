@@ -42,6 +42,22 @@ _prev_req = False
 _stop_req = False
 _nav = (False, False)
 
+_now = {"title": "", "duration": 0, "thumbnail": None}
+
+
+def _publish_play_state():
+    if not _now["title"]:
+        return
+    try:
+        status.update(
+            _now["title"],
+            duration=_now["duration"],
+            playing=not _paused,
+            thumbnail=_now["thumbnail"],
+        )
+    except Exception:
+        pass
+
 
 def _clear_stale_pid():
     if config.read_pid() == os.getpid():
@@ -180,8 +196,6 @@ def _restart_current(player):
             player.play()
             player.set_time(0)
         except Exception:
-            # Failed to restart: don't claim success, or the display loop
-            # would spin forever waiting for a state that never changes.
             return False
         return True
     return False
@@ -229,6 +243,7 @@ def _display_loop(player, title=None, args=None, next_title=None, stop_check=Non
     if display == "bars" and not (sys.stdin.isatty() and sys.stdout.isatty()):
         display = "none"
     if display == "none":
+        paused_printed = False
         while player.get_state() not in (vlc.State.Ended, vlc.State.Error):
             if stop_check and stop_check():
                 break
@@ -238,6 +253,13 @@ def _display_loop(player, title=None, args=None, next_title=None, stop_check=Non
                 if _restart_current(player):
                     continue
                 break
+            if _paused:
+                if not paused_printed:
+                    paused_printed = True
+                    _publish_play_state()
+            elif paused_printed:
+                paused_printed = False
+                _publish_play_state()
             time.sleep(0.1)
         return
 
@@ -286,6 +308,7 @@ def _display_loop(player, title=None, args=None, next_title=None, stop_check=Non
                         sys.stdout.write(f"\r  {T}[Paused]{R}  ")
                         sys.stdout.flush()
                     paused_printed = True
+                    _publish_play_state()
                 try:
                     time.sleep(0.1)
                 except OSError:
@@ -294,6 +317,7 @@ def _display_loop(player, title=None, args=None, next_title=None, stop_check=Non
             if paused_printed:
                 visualizer.set_paused(False)
                 paused_printed = False
+                _publish_play_state()
             if display == "bars":
                 visualizer.draw()
             try:
@@ -314,15 +338,6 @@ def _display_loop(player, title=None, args=None, next_title=None, stop_check=Non
 
 
 def _teardown():
-    """Stop and release the current media player and its libvlc instance.
-
-    python-vlc defines no ``__del__``, so dropping the Python references is not
-    enough: the native player and its libvlc core stay alive, each holding its
-    own audio output. A playlist or radio loop calls play_file() once per track,
-    so without this the previous tracks keep playing on top of the new one and
-    the audio turns into overlapping glitch. Stopping and releasing the old
-    player first is what makes "one track at a time" true.
-    """
     global _player
     p, _player = _player, None
     if p is None:
@@ -369,6 +384,7 @@ def play_file(filepath, title, args=None, flags=None, next_title=None, nav=None)
         thumb = library.thumbnail_path(filepath.stem)
         if not pathlib.Path(thumb).exists():
             thumb = None
+        _now.update(title=title, duration=duration, thumbnail=thumb)
         status.update(title, duration, thumbnail=thumb)
         dur_min, dur_sec = divmod(int(duration), 60)
         flags_str = _flags_str(args)
@@ -387,9 +403,6 @@ def play_file(filepath, title, args=None, flags=None, next_title=None, nav=None)
         if lib_entry:
             artist = lib_entry.get("artist") or ""
             album = lib_entry.get("album") or ""
-        # Local playback is counted but never logged to the play timeline —
-        # and a downloaded track's stem is its video id, so this bumps the
-        # same counter as its online play.
         history.record_play(
             video_id, title, artist, mode="offline", duration=int(duration)
         )
@@ -440,7 +453,7 @@ def play_file(filepath, title, args=None, flags=None, next_title=None, nav=None)
                 status.update(title, duration, playing=False, thumbnail=thumb)
             _restore_pause_input()
     finally:
-        _restore_pause_input()  # idempotent; covers errors between setup and the loop
+        _restore_pause_input()
         _teardown()
         os.dup2(old_stderr, 2)
         os.close(old_stderr)

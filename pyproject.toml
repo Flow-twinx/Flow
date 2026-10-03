@@ -1,7 +1,7 @@
 [project]
 name = "flow-twinx"
-version = "0.8.1"
-description = "A terminal music player with online and offline modes sourced from youtube."
+version = "0.8.2"
+description = "A terminal music player with online and offline modes songs sourced from youtube."
 readme = "README.md"
 requires-python = ">=3.14"
 dynamic = []
@@ -18,6 +18,10 @@ dependencies = [
     "textual>=8.2.8",
     "yt-dlp>=2026.8.19",
     "ytmusicapi",
+]
+
+keywords = [
+    "youtube", "music", "cli", "tui", "web", "musicplayer", "youtube-client", "flow",
 ]
 
 [project.scripts]

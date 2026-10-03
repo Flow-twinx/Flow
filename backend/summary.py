@@ -1,17 +1,3 @@
-"""`summary` — play-count reporting for the CLI (shared by both modes).
-
-Reads the *whole* picture: `library.db` holds `song_count` for every song in
-every mode, while `history.db` holds the online-only play timeline. The ranked
-table below therefore counts local playback too, which is the point — the web
-History panel is the online-only view of the same data.
-
-Sort keys differ from the web History panel on purpose: the CLI ranks a
-per-song table (`plays`, `recent`, `name`, `artist`) because a terminal is bad
-at showing a long event log; the web panel sorts a timeline
-(`recent`, `oldest`, `most`, `least`) because a scrollable column is bad at
-showing aggregates.
-"""
-
 import shutil
 import time
 
@@ -24,7 +10,6 @@ E = config.RED
 G = config.GREY
 R = config.Reset
 
-#: `--sort` keys, in the order they are listed in the help text.
 SORTS = ("plays", "recent", "name", "artist")
 
 COMMANDS = {
@@ -72,12 +57,6 @@ def _truncate(text: str, width: int) -> str:
 
 
 def _parse_args(extra: list[str]) -> dict:
-    """Pull our own flags out of `extra`.
-
-    `merge_flags` never sees these (the command modules exclude `summary`), so
-    `-l` / `-s` / `--top` survive to get here instead of being eaten as
-    playback flags.
-    """
     opts = {
         "list": False,
         "sort": DEFAULT_SORT,
@@ -118,7 +97,7 @@ def _parse_args(extra: list[str]) -> dict:
         i += 1
     try:
         opts["top"] = max(1, min(int(opts["top"]), 500))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         opts["top"] = DEFAULT_TOP
     return opts
 
@@ -255,9 +234,15 @@ def cmd_summary(extra: list[str], args=None) -> None:
 def print_help() -> None:
     print(f"{T}summary{R} {M}[-l] [-s sort] [--top N] [-c]{R}")
     print(f"{G}  Play statistics, and the ranked per-song table.{R}")
-    print(f"  {M}-l{R}          {G}List the per-song table instead of the stats card{R}")
-    print(f"  {M}-s{R} {M}<sort>{R}   {G}Table sort: {', '.join(SORTS)} (default: {DEFAULT_SORT}){R}")
-    print(f"  {M}--top{R} {M}<N>{R}    {G}Rows to show in the table (default: {DEFAULT_TOP}){R}")
+    print(
+        f"  {M}-l{R}          {G}List the per-song table instead of the stats card{R}"
+    )
+    print(
+        f"  {M}-s{R} {M}<sort>{R}   {G}Table sort: {', '.join(SORTS)} (default: {DEFAULT_SORT}){R}"
+    )
+    print(
+        f"  {M}--top{R} {M}<N>{R}    {G}Rows to show in the table (default: {DEFAULT_TOP}){R}"
+    )
     print(f"  {M}-c{R}          {G}Clear the online play history (history.db){R}")
     print(f"{G}  Counts come from library.db (every mode); the web History panel{R}")
     print(f"{G}  shows the online-only timeline from history.db.{R}")

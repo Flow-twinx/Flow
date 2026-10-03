@@ -120,7 +120,7 @@ download the matching index can be used the same way.
 | `list` | List the local library (offline; alias `ls`) |
 | `savan <name>` | Play a song from JioSaavn (online) |
 | `savan-s <query>` | Search JioSaavn (online) |
-| `radio <name> [index]` | Radio mix (online) or shuffle-loop library (offline); `-p` saves as playlist |
+| `radio <name> [index]` | Radio mix (online) or shuffle-loop library (offline). Bare `radio` shuffles everything; a name seeds the loop with that song. `-p` saves as playlist |
 | `like` / `unlike` | Like/unlike the current song; liked songs are saved to the library and played with `play liked` |
 | `download <query or index>` | Save a streamed song (online; `-f <format>` picks opus/m4a/mp3/webm). Add `-m` to tick and download several |
 | `delete <name or index>` | Delete a downloaded song (alias: `dl-d`) |

@@ -21,6 +21,7 @@ from backend.Offline import commands as _offline_commands
 from backend.Online import commands as _online_commands
 from backend.ping import is_connected
 from backend.summary import SORTS as _SUMMARY_SORTS
+from cli import tui as tui_shell
 from cli.tui import input as tui_input
 from cli.tui import show_banner
 
@@ -586,37 +587,41 @@ def main():
         show_banner()
         if unknown:
             print(f"{M}Unknown command: {' '.join(unknown)}{R}")
-        while True:
-            try:
-                parts = tui_input().strip().split()
-                if not parts:
-                    continue
-                cmd = parts[0].lower()
-                extra = parts[1:]
-                cmd = shortcuts.resolve(cmd)
-                if cmd in ("exit", "quit", "q"):
-                    print(f"{M}Goodbye!{R}")
-                    break
-                cmd_args = argparse.Namespace(**vars(args))
-                for flag in ("bg", "download", "repeat", "shuffle"):
-                    setattr(cmd_args, flag, False)
-                cmd_args.repeat_count = 0
-                from backend import plugins
-
-                if plugins.dispatch(cmd, extra, cmd_args) is not None:
-                    continue
+        restore_quit_key = tui_shell.install_quit_key()
+        try:
+            while True:
                 try:
-                    commands.run(cmd, extra, cmd_args)
-                except KeyboardInterrupt:
-                    config.clear_pid_if(os.getpid())
-                if getattr(cmd_args, "bg", False):
+                    parts = tui_input().strip().split()
+                    if not parts:
+                        continue
+                    cmd = parts[0].lower()
+                    extra = parts[1:]
+                    cmd = shortcuts.resolve(cmd)
+                    if cmd in ("exit", "quit", "q"):
+                        print(f"{M}Goodbye!{R}")
+                        break
+                    cmd_args = argparse.Namespace(**vars(args))
+                    for flag in ("bg", "download", "repeat", "shuffle"):
+                        setattr(cmd_args, flag, False)
+                    cmd_args.repeat_count = 0
+                    from backend import plugins
+
+                    if plugins.dispatch(cmd, extra, cmd_args) is not None:
+                        continue
+                    try:
+                        commands.run(cmd, extra, cmd_args)
+                    except KeyboardInterrupt:
+                        config.clear_pid_if(os.getpid())
+                    if getattr(cmd_args, "bg", False):
+                        break
+                    if cmd == "switch":
+                        commands = _load_commands()
+                        show_banner()
+                except EOFError, KeyboardInterrupt:
+                    print(f"{M}\nGoodbye!{R}")
                     break
-                if cmd == "switch":
-                    commands = _load_commands()
-                    show_banner()
-            except EOFError, KeyboardInterrupt:
-                print(f"{M}\nGoodbye!{R}")
-                break
+        finally:
+            restore_quit_key()
 
 
 if __name__ == "__main__":

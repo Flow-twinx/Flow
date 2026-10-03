@@ -277,8 +277,10 @@ def _offline_help():
             f"  {G}Alias:{R} {B}ul{R}",
         ],
         "radio": [
-            f"{T}> radio{R}",
+            f"{T}> radio{R} {B}[song_name] [index]{R}",
             f"{G}  Radio mode: shuffles and loops the entire local library.{R}",
+            f"  {B}<song_name>{R} {G}Start with that song, then loop the rest{R}",
+            f"  {B}[index]{R}   {G}Seed with the nth match / last result{R}",
             f"  {B}Ctrl+C{R}  {G}Skip to the next song{R}",
             f"  {B}Ctrl+Q{R}  {G}Exit radio mode{R}",
             f"  {B}Ctrl+P{R}  {G}Toggle pause{R}",
