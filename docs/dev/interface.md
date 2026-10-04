@@ -38,7 +38,10 @@ Tracks are `Track` dataclasses (`title`, `ref`, `kind`,
 `duration`, `video_id`), where `kind` is `"local"` or `"stream"`.
 
 - Offline lists come from `offline_file.get_songs()` with display titles
-  resolved through `library.db`.
+  resolved through `library.db`, ascending by name. The web routes that list
+  songs (`/offline`, `/api/liked`, `/api/album/<name>`,
+  `/api/local-search`) sort on the displayed title via `_by_title` rather than
+  the filename, which is the YouTube id.
 - Online lists come from `stream_tracks(query)` → `youtube.search(query,
   limit=10)`. Search responses are tagged with a monotonic `_search_seq`;
   stale responses (a newer query landed first) are dropped.
@@ -101,10 +104,12 @@ directory. In `DEV_MODE` it injects Flask/Werkzeug logging into the rotating
 | `GET /recommend?video_id=&limit=` | Radio mix from a video (limit ≤ 50) |
 | `GET /play?video_id=&fresh=` | Playable entry (fresh=1 bypasses cache) |
 | `GET /api/segments` | SponsorBlock segments for a video |
-| `GET /offline` | Scan `~/.flow/downloads/` for local songs |
+| `GET /api/lyrics` | Lyrics for a track (`video_id`/`title`/`artist`/`duration`, `fresh=1` refetches) |
+| `GET /offline` | Scan `~/.flow/downloads/` for local songs, ascending by display name |
 | `POST /download` | Download audio (`save_dir`, `format`), 3 attempts, registers in library + thumbnail + notify |
 | `GET /api/is-downloaded`, `/api/downloaded-ids` | Library download state |
 | `GET /api/library` | Full library listing (liked/downloaded/speed_dial flags) |
+| `POST /api/library/rename` | Pin a display name (`video_id`, `title`) — 400 on either missing |
 | `GET/POST /api/speed-dial` | Get/set home-screen favorites |
 | `GET /api/home` | Last played + speed dials |
 | `POST /api/delete-download` | Delete via library entry or file path (path-validated) |
@@ -116,9 +121,9 @@ directory. In `DEV_MODE` it injects Flask/Werkzeug logging into the rotating
 | `POST /api/control` + `GET /api/control/poll` | Web control bridge (see control.md) |
 | `GET/POST /api/playlists`, `/api/playlist`, `/api/playlist/*` | Playlist CRUD, reorder, dedupe, export `.m3u`, save |
 | `GET /local/<path>` | Serve local media/thumbnails — resolves to a real path, rejects anything outside `$HOME` and non-media extensions |
-| `GET /api/albums`, `/api/album/<name>` | Albums from `~/.flow/music/` |
-| `GET /api/local-search` | Substring search over downloads + music dirs |
-| `GET /api/liked`, `POST /api/like`, `GET /api/is-liked` | Liked UI; like triggers a background auto-download thread when `down_on_like` |
+| `GET /api/albums`, `/api/album/<name>` | Albums from `~/.flow/music/`; songs ascending by display name |
+| `GET /api/local-search` | Substring search over downloads + music dirs, ascending by display name |
+| `GET /api/liked`, `POST /api/like`, `GET /api/is-liked` | Liked UI (ascending by display name); like triggers a background auto-download thread when `down_on_like` |
 | `GET /thumb/<video_id>` | Cached thumbnail |
 | `GET/POST /api/settings` | Web settings persisted to `web_ui.json`, format via `config.set_format` |
 
@@ -161,15 +166,42 @@ The `bars` display mode:
 
 ## Lyrics (`backend/lyrics.py`)
 
-The `lyrics` display mode fetches timed lines through `ytmusicapi`:
+Lyrics come from **LRCLIB** first and **YouTube Music** second, and every
+source is normalized to the same dict — `{lines: [{text, start, end}], plain,
+synced, source}` — so callers never branch on where they came from.
 
-- `fetch_lyrics(video_id, title)` → `get_watch_playlist(video_id)` to find
-  the lyrics browse id, then `get_lyrics(browse_id, timestamps=True)`; if
-  that fails, it searches for the title and tries the first 3 song results.
-- Lines are normalized to `{text, start, end}` in seconds; `♪` separators
-  are dropped.
-- `find_line(lyrics, elapsed)` returns the line whose `start <= elapsed <
-  end`, so `_display_loop` can scroll lyrics with the song.
+- `fetch_lyrics(video_id, title, artist, album, duration)` →
+  `clean_title()` strips the `Artist - Song (Official Video)` furniture off a
+  YouTube title, then LRCLIB `/api/get` (needs `track_name` + `artist_name`)
+  is asked for the record. A record without timings is kept aside and
+  `/api/search` (needs only `track_name`) is asked for a synced twin; only
+  then does YouTube Music run (`get_watch_playlist` → `get_lyrics(
+  timestamps=True)`, with the original title-search fallback). A synced answer
+  always beats an untimed one, and `None` means "nothing anywhere".
+- `parse_lrc()` reads `[mm:ss.xx]` (also `[hh:mm:ss.xx]` and repeated stamps),
+  drops metadata tags and enhanced-LRC `<word>` tags, and derives each line's
+  `end` from the next line's `start`.
+- `find_index()` / `find_line()` binary-search the sorted start times, so the
+  terminal ticker (12 calls/s) and the web player (one per `timeupdate`) stay
+  cheap on 300-line songs.
+- Results are cached in-process: 1 hour for a hit, 10 minutes for a miss
+  (a miss can become a hit on either source). `clear_cache()` forces a refetch.
+
+### Lyrics in the web GUI
+
+`lyricsBtn` in the player bar (and `l`) opens the lyrics modal; `GET
+/api/lyrics?video_id=&title=&artist=&duration=&fresh=` serves it, preferring
+`artist`/`album`/`duration` from the warm play cache over what the browser sent
+and returning `{lyrics, found}`. The browser highlights lines off
+`audio.currentTime` — never a wall clock — auto-scrolls the active line to
+center, seeks when a line is clicked, and yields auto-scroll for 4 seconds
+after a manual scroll. An unsynced record renders as static text tagged
+`unsynced`; the badge names the source.
+
+`lyricsQuery` is prefilled with the current title and editable: Enter or the
+search button re-requests with the typed text, so a misspelt title can be
+corrected for the lookup without renaming the track. Opening the modal for a
+new track resets the box.
 
 ## SponsorBlock (`backend/sponsor.py`)
 

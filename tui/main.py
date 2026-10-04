@@ -13,6 +13,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
+from textual.screen import ModalScreen
 from textual.timer import Timer
 from textual.widgets import (
     Button,
@@ -145,11 +146,15 @@ class NowPlaying(Static):
         self.track = track
         self.position = 0
         self.total = track.duration or 0
-        self.query_one("#np-title", Label).update(self._title_line())
+        self.set_title(track.title)
         bar = self.query_one("#np-progress", ProgressBar)
         bar.total = max(1, self.total or 1)
         bar.progress = 0
         self.query_one("#np-time", Label).update(self._time_line())
+
+    def set_title(self, title: str) -> None:
+        self.track.title = title
+        self.query_one("#np-title", Label).update(self._title_line())
 
     def set_total(self, seconds: int | None) -> None:
         if seconds and seconds > 0:
@@ -187,6 +192,64 @@ class NowPlaying(Static):
 
     def refresh_status(self) -> None:
         self.query_one("#np-status", Label).update(self._status_line())
+
+
+class RenamePrompt(ModalScreen[str | None]):
+    CSS = """
+    RenamePrompt {
+        align: center middle;
+    }
+
+    #rename-box {
+        width: 60;
+        height: auto;
+        background: $surface;
+        border: round $accent;
+        padding: 1 2;
+    }
+
+    #rename-buttons {
+        height: auto;
+        align: right middle;
+    }
+
+    #rename-buttons Button {
+        margin-left: 6;
+    }
+    """
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel", priority=True)]
+
+    def __init__(self, current: str) -> None:
+        super().__init__()
+        self._current = current
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="rename-box"):
+            yield Label("Rename track", classes="rename-heading")
+            yield Input(value=self._current, id="rename-input")
+            with Horizontal(id="rename-buttons"):
+                yield Button("Cancel", id="rename-cancel")
+                yield Button("Save", id="rename-save", variant="primary")
+
+    def on_mount(self) -> None:
+        self.query_one("#rename-input", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self.dismiss(self._value())
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "rename-save":
+            self.dismiss(self._value())
+        else:
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def _value(self) -> str | None:
+        return self.query_one("#rename-input", Input).value.strip() or None
 
 
 class Flow(App):
@@ -258,6 +321,12 @@ class Flow(App):
         padding-top: 1;
     }
 
+    .rename-heading {
+        width: 100%;
+        text-align: center;
+        color: $accent;
+    }
+
     #np-title {
         padding-bottom: 1;
     }
@@ -275,6 +344,7 @@ class Flow(App):
         ("S", "search", "Search"),
         ("r", "toggle_repeat", "Repeat"),
         ("d", "download", "Download"),
+        ("R", "rename_track", "Rename"),
         ("+", "volume_up", "Vol +"),
         ("-", "volume_down", "Vol -"),
         Binding("tab", "switch_mode", "Mode", priority=True),
@@ -306,6 +376,7 @@ class Flow(App):
         self._offline_full: list[Track] = []
         self._search_seq = 0  # bumps per query; discards stale search results
         self._probing = False  # one duration-probe pass at a time
+        self._rename_target: Track | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -645,6 +716,37 @@ class Flow(App):
             self._call(self._status, f"Download failed: {exc}")
             return
         self._call(self._status, f"Downloaded: {track.title}")
+
+    def action_rename_track(self) -> None:
+        """Rename the highlighted (or current) local track."""
+        if self.mode != "Offline":
+            self._status("Rename is only available in Offline mode (Tab to switch)")
+            return
+        track = None
+        item = self.query_one("#playlist", ListView).highlighted_child
+        if isinstance(item, TrackItem):
+            track = item.track
+        if track is None:
+            track = self._current
+        if track is None:
+            self._status("No track selected to rename")
+            return
+        self._rename_target = track
+        self.push_screen(RenamePrompt(track.title), self._apply_rename)
+
+    def _apply_rename(self, new_title: str | None) -> None:
+        track = self._rename_target
+        self._rename_target = None
+        if not new_title or track is None:
+            return
+        if not library.rename(pathlib.Path(track.ref).stem, new_title):
+            self._status("Rename failed")
+            return
+        track.title = new_title
+        if self._current is track:
+            self.now_playing.set_title(new_title)
+        self._populate()
+        self._status(f"Renamed to: {new_title}")
 
     def action_toggle_play(self) -> None:
         if self._current is None:

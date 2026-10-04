@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS songs (
     downloaded   INTEGER NOT NULL DEFAULT 0,
     speed_dial   INTEGER NOT NULL DEFAULT 0,
     title        TEXT    NOT NULL DEFAULT '',
+    custom_title TEXT,
     artist       TEXT,
     album        TEXT,
     duration     INTEGER,
@@ -62,6 +63,7 @@ _COLUMNS = (
     "song_count",
     "first_played",
     "last_played",
+    "custom_title",
 )
 
 _PLACEHOLDERS = ", ".join(["?"] * (len(_COLUMNS) + 1))
@@ -86,6 +88,9 @@ def _ensure_schema(conn):
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA synchronous = NORMAL")
     conn.executescript(_SCHEMA)
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(songs)")}
+    if "custom_title" not in cols:
+        conn.execute("ALTER TABLE songs ADD COLUMN custom_title TEXT")
     _migrate_from_json(conn)
 
 
@@ -174,15 +179,18 @@ def _legacy_to_row(video_id, entry):
         count,
         entry.get("first_played") or None,
         entry.get("last_played") or None,
+        _truncate_title(entry.get("custom_title") or "") or None,
     )
 
 
 def _row_to_entry(row) -> dict:
+    custom = (row["custom_title"] or "").strip()
     return {
         "liked": bool(row["liked"]),
         "downloaded": bool(row["downloaded"]),
         "speed_dial": bool(row["speed_dial"]),
-        "title": row["title"] or "",
+        "title": custom or row["title"] or "",
+        "custom_title": custom,
         "artist": row["artist"],
         "album": row["album"],
         "duration": row["duration"],
@@ -213,6 +221,7 @@ def _to_values(entry: dict) -> tuple:
         int(entry.get("song_count") or 0),
         entry.get("first_played") or None,
         entry.get("last_played") or None,
+        _truncate_title(entry.get("custom_title") or "") or None,
     )
 
 
@@ -220,6 +229,7 @@ def _sanitize(entry: dict) -> dict:
     """Normalize one entry before it is written: truncated title, typed values."""
     out = dict(entry)
     out["title"] = _truncate_title(entry.get("title") or "")
+    out["custom_title"] = _truncate_title(entry.get("custom_title") or "")
     out["song_count"] = int(entry.get("song_count") or 0)
     return out
 
@@ -306,9 +316,13 @@ def get_liked_ids() -> list:
 def get_liked_entries() -> list:
     with _session() as conn:
         rows = conn.execute(
-            "SELECT video_id, title FROM songs WHERE liked = 1 ORDER BY video_id"
+            "SELECT video_id, title, custom_title FROM songs "
+            "WHERE liked = 1 ORDER BY video_id"
         ).fetchall()
-    return [{"video_id": r["video_id"], "title": r["title"] or ""} for r in rows]
+    return [
+        {"video_id": r["video_id"], "title": r["custom_title"] or r["title"] or ""}
+        for r in rows
+    ]
 
 
 def get_speed_dial_ids() -> list:
@@ -322,9 +336,13 @@ def get_speed_dial_ids() -> list:
 def get_speed_dial_entries() -> list:
     with _session() as conn:
         rows = conn.execute(
-            "SELECT video_id, title FROM songs WHERE speed_dial = 1 ORDER BY video_id"
+            "SELECT video_id, title, custom_title FROM songs "
+            "WHERE speed_dial = 1 ORDER BY video_id"
         ).fetchall()
-    return [{"video_id": r["video_id"], "title": r["title"] or ""} for r in rows]
+    return [
+        {"video_id": r["video_id"], "title": r["custom_title"] or r["title"] or ""}
+        for r in rows
+    ]
 
 
 def get_song_count(video_id: str) -> int:
@@ -336,14 +354,14 @@ def play_rows() -> list:
     """Per-song play counts across every mode (see `summary.py` / the web API)."""
     with _session() as conn:
         rows = conn.execute(
-            "SELECT video_id, title, artist, album, song, thumbnail, duration,"
-            "       song_count, first_played, last_played "
+            "SELECT video_id, title, custom_title, artist, album, song, thumbnail,"
+            "       duration, song_count, first_played, last_played "
             "FROM songs WHERE song_count > 0"
         ).fetchall()
     return [
         {
             "video_id": r["video_id"],
-            "title": r["title"] or r["video_id"],
+            "title": r["custom_title"] or r["title"] or r["video_id"],
             "artist": r["artist"] or "",
             "album": r["album"] or "",
             "song": r["song"],
@@ -363,6 +381,7 @@ def _default_entry(video_id: str, title: str = "") -> dict:
         "downloaded": False,
         "speed_dial": False,
         "title": title,
+        "custom_title": "",
         "artist": None,
         "album": None,
         "duration": None,
@@ -593,6 +612,23 @@ def update_meta(video_id: str, meta: dict):
         return True
 
     _mutate(mutate)
+
+
+def rename(video_id: str, title: str) -> bool:
+    """Pin a display name for a track; re-downloads and metadata refreshes keep it."""
+    video_id = (video_id or "").strip()
+    title = _truncate_title((title or "").strip())
+    if not video_id or not title:
+        return False
+
+    def mutate(library):
+        entry = library.get(video_id) or _default_entry(video_id, title)
+        entry["custom_title"] = title
+        library[video_id] = entry
+        return True
+
+    _mutate(mutate)
+    return True
 
 
 def clear_download(video_id: str):

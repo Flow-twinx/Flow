@@ -32,6 +32,8 @@ between the CLI shell, the Textual TUI, and the web GUI.
 - **Play history** — per-song play counts in both modes, an online play log, `flow summary` on the CLI and a **History** panel in the web GUI
 - **Background play** — play in the background and go back to your shell
 - **Visualizer** — audio-reactive spectrum bars (or synced lyrics) while playing
+- **Lyrics** — synced lines from [LRCLIB](https://lrclib.net) (YouTube Music as fallback): the `lyrics` display mode prints them in the terminal, the web GUI's lyrics button (`l`) scrolls them with the track
+- **Rename** — correct a misspelt title once (`rename` in the CLI, `R` in the TUI, the ⋮ menu in the web GUI) and every surface, including lyrics search, shows the new name
 - **Three interfaces** — interactive CLI shell, full-screen [TUI](docs/user/interface.md), and a [web GUI](docs/user/interface.md) on port 5000
 - **Plugins** — community plugins run in isolated processes
 

@@ -47,6 +47,15 @@ const existsMsg = document.getElementById("existsMsg");
 const existsAppendBtn = document.getElementById("existsAppendBtn");
 const existsOverwriteBtn = document.getElementById("existsOverwriteBtn");
 const sidebarPlaylists = document.getElementById("sidebarPlaylists");
+const lyricsBtn = document.getElementById("lyricsBtn");
+const lyricsModal = document.getElementById("lyricsModal");
+const closeLyricsBtn = document.getElementById("closeLyrics");
+const reloadLyricsBtn = document.getElementById("reloadLyricsBtn");
+const lyricsBody = document.getElementById("lyricsBody");
+const lyricsQuery = document.getElementById("lyricsQuery");
+const lyricsSearchBtn = document.getElementById("lyricsSearchBtn");
+const lyricsSourceEl = document.getElementById("lyricsSource");
+const lyricsSourceModeEl = document.getElementById("lyricsSourceMode");
 const speedDialGrid = document.getElementById("speedDialGrid");
 const lastPlayedSection = document.getElementById("lastPlayedSection");
 const historyContainer = document.getElementById("historyContainer");
@@ -296,9 +305,6 @@ function panelFromPath() {
   }
 }
 
-// Panels that load their data the first time they are opened. The other
-// loaders are eager (they run once at boot) because their panels are the
-// common entry points; History is not, so it stays lazy.
 const lazyPanels = {
   history: () => loadHistory(),
 };
@@ -373,8 +379,7 @@ function reportNowPlaying(track, playing) {
 
 function historyVideoId(track) {
   if (track.video_id) return track.video_id;
-  // Local tracks are identified by filename stem, exactly like the CLI's
-  // Offline player, so a downloaded song keeps one counter across both modes.
+
   const src = track.path || track.url || "";
   if (src && !/^https?:/i.test(src)) {
     const base = src.split("/").pop().split("?")[0];
@@ -437,6 +442,10 @@ function loadAndPlay(track, isRetry) {
   // pause and on loadedmetadata, which would count a single track 3+ times.
   if (!isRetry) reportHistoryPlay(track);
   refreshLastPlayed();
+  if (lyricsModal.classList.contains("open")) {
+    lyricsQuery.value = track.title || "";
+    loadLyrics(false);
+  }
 
   if (currentTrackType === "local") {
     let filePath = track.path || track.url || "";
@@ -864,6 +873,14 @@ function showSongMenu(btn, track, type) {
     action: () => openPlaylistMenu(btn, track),
   });
 
+  if (track.video_id) {
+    items.push({
+      icon: "bi bi-pencil",
+      label: "Rename",
+      action: () => renameTrack(track),
+    });
+  }
+
   items.forEach((item) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -889,6 +906,56 @@ function showSongMenu(btn, track, type) {
 
 function closeSongMenu() {
   document.querySelectorAll(".song-menu").forEach((m) => m.remove());
+}
+
+function sortByTitle(list) {
+  return list.sort((a, b) => {
+    const x = (a.title || a.filename || "").toLowerCase();
+    const y = (b.title || b.filename || "").toLowerCase();
+    return x < y ? -1 : x > y ? 1 : 0;
+  });
+}
+
+function renameTrack(track) {
+  const current = track.title || "";
+  const name = window.prompt("New name:", current);
+  if (!name || !name.trim() || name.trim() === current) return;
+  fetch("/api/library/rename", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ video_id: track.video_id, title: name.trim() }),
+  })
+    .then((r) => r.json())
+    .then((data) => {
+      if (data.error) {
+        showToast("Rename failed: " + data.error);
+        return;
+      }
+      showToast(`Renamed to "${data.title}"`);
+      track.title = data.title;
+      if (librarySongs[track.video_id]) {
+        librarySongs[track.video_id].title = data.title;
+      }
+      const local = localTracks.find((t) => t.video_id === track.video_id);
+      if (local) local.title = data.title;
+      const queued = queue[queueIndex];
+      if (queued && queued.video_id === track.video_id) {
+        queued.title = data.title;
+        renderQueue();
+      }
+      if (nowPlayingTrack && nowPlayingTrack.video_id === track.video_id) {
+        nowPlayingTrack.title = data.title;
+        setDisplayInfo(nowPlayingTrack);
+        if (lyricsQuery.value.trim() === current.trim()) {
+          lyricsQuery.value = data.title;
+        }
+      }
+      if (lyricsModal.classList.contains("open")) loadLyrics(false);
+      sortByTitle(localTracks);
+      loadLocalTracks();
+      loadHome();
+    })
+    .catch(() => showToast("Rename failed"));
 }
 
 function playNextTrack(track, type) {
@@ -1942,11 +2009,158 @@ function loadLibrary() {
     .catch(() => {});
 }
 
-// --- History panel -------------------------------------------------------
-// Reads the online play log (history.db). `flow summary -l` is the other half
-// of this feature and deliberately answers a different question: it ranks a
-// per-song table across every mode, where this panel shows the play-event
-// timeline online only.
+let lyricsLines = [];
+let lyricsActive = -1;
+let lyricsRequestId = 0;
+let lyricsScrolledAt = 0;
+
+lyricsBtn.addEventListener("click", toggleLyrics);
+closeLyricsBtn.addEventListener("click", closeLyrics);
+reloadLyricsBtn.addEventListener("click", () => loadLyrics(true));
+lyricsSearchBtn.addEventListener("click", () => loadLyrics(false));
+lyricsQuery.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    loadLyrics(false);
+  }
+});
+audio.addEventListener("timeupdate", tickLyrics);
+lyricsModal.addEventListener("click", (e) => {
+  if (e.target === lyricsModal) closeLyrics();
+});
+["wheel", "touchmove"].forEach((evt) =>
+  lyricsBody.addEventListener(
+    evt,
+    () => {
+      lyricsScrolledAt = Date.now();
+    },
+    { passive: true },
+  ),
+);
+lyricsBody.addEventListener("click", (e) => {
+  const index = e.target.dataset ? e.target.dataset.index : undefined;
+  if (index === undefined) return;
+  const line = lyricsLines[Number(index)];
+  if (line && isFinite(audio.duration)) audio.currentTime = line.start;
+});
+
+function toggleLyrics() {
+  if (lyricsModal.classList.contains("open")) {
+    closeLyrics();
+  } else {
+    openLyrics();
+  }
+}
+
+function openLyrics() {
+  if (!nowPlayingTrack) {
+    showToast("Play something first");
+    return;
+  }
+  lyricsModal.classList.add("open");
+  lyricsBtn.classList.add("active");
+  lyricsQuery.value = nowPlayingTrack.title || "";
+  loadLyrics(false);
+}
+
+function closeLyrics() {
+  lyricsModal.classList.remove("open");
+  lyricsBtn.classList.remove("active");
+  lyricsActive = -1;
+}
+
+function loadLyrics(fresh) {
+  const track = nowPlayingTrack;
+  if (!track) return;
+  const requestId = ++lyricsRequestId;
+  lyricsLines = [];
+  lyricsActive = -1;
+  lyricsSourceEl.textContent = "";
+  lyricsSourceModeEl.textContent = "";
+  lyricsBody.innerHTML =
+    '<div class="loading-dots"><span></span><span></span><span></span></div>';
+
+  const params = new URLSearchParams();
+  if (track.video_id && currentTrackType !== "local") {
+    params.set("video_id", track.video_id);
+  }
+  const title = (lyricsQuery.value || track.title || "").trim();
+  params.set("title", title);
+  if (track.artist) params.set("artist", track.artist);
+  params.set("duration", track.duration || 0);
+  if (fresh) params.set("fresh", "1");
+
+  fetch("/api/lyrics?" + params.toString())
+    .then((r) => r.json())
+    .then((data) => {
+      if (requestId === lyricsRequestId) renderLyrics(data.lyrics);
+    })
+    .catch(() => {
+      if (requestId === lyricsRequestId) renderLyrics(null);
+    });
+}
+
+function renderLyrics(data) {
+  lyricsBody.innerHTML = "";
+  lyricsLines = (data && data.lines) || [];
+  lyricsActive = -1;
+
+  if (!data) {
+    lyricsBody.innerHTML =
+      '<div class="empty-state">No lyrics found for this track</div>';
+    return;
+  }
+
+  lyricsSourceEl.textContent =
+    data.source === "ytmusic" ? "YouTube Music" : "LRCLIB";
+  lyricsSourceModeEl.textContent = lyricsLines.length ? "synced" : "unsynced";
+
+  const rows = lyricsLines.length
+    ? lyricsLines.map((line, index) => {
+        const row = document.createElement("div");
+        row.className = "lyric-line";
+        row.textContent = line.text || "♪";
+        row.dataset.index = index;
+        return row;
+      })
+    : (data.plain || []).map((line) => {
+        const row = document.createElement("div");
+        row.className = line ? "lyric-line static" : "lyric-gap";
+        row.textContent = line;
+        return row;
+      });
+
+  lyricsBody.append(...rows);
+  tickLyrics();
+}
+
+function tickLyrics() {
+  if (!lyricsModal.classList.contains("open") || !lyricsLines.length) return;
+  let index = -1;
+  for (let i = 0; i < lyricsLines.length; i++) {
+    if (lyricsLines[i].start > audio.currentTime) break;
+    index = i;
+  }
+  if (index === lyricsActive) return;
+  const previous = lyricsBody.children[lyricsActive];
+  if (previous) previous.classList.remove("active");
+  const active = lyricsBody.children[index];
+  if (active) {
+    active.classList.add("active");
+    if (Date.now() - lyricsScrolledAt > 4000) {
+      lyricsBody.scrollTo({
+        top: Math.max(
+          0,
+          active.offsetTop -
+            lyricsBody.clientHeight / 2 +
+            active.offsetHeight / 2,
+        ),
+        behavior: "smooth",
+      });
+    }
+  }
+  lyricsActive = index;
+}
 
 function historyQuery() {
   const q = new URLSearchParams();
@@ -2000,7 +2214,10 @@ function renderHistory(data) {
     card.className = "song-card";
     card.dataset.title = play.title;
     card.dataset.videoId = play.video_id || "";
-    const when = historyWhen(play.played_at, historyRange ? historyRange.value : "all");
+    const when = historyWhen(
+      play.played_at,
+      historyRange ? historyRange.value : "all",
+    );
     card.innerHTML = `
             ${artImgTag(play.thumbnail, null)}
             <div class="song-info">
@@ -2316,6 +2533,10 @@ document.addEventListener("keydown", (e) => {
       break;
     case "p":
       prevTrack();
+      break;
+    case "l":
+      e.preventDefault();
+      toggleLyrics();
       break;
   }
 });

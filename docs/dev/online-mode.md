@@ -82,9 +82,9 @@ See [Playback control](control.md) for the full picture.
   `sounddevice` and renders a spectrum with `numpy`, colored per the current
   mode. It temporarily switches the default audio source to the monitor and
   restores it on exit.
-- `lyrics` — `backend/lyrics.py` fetches timed lyrics via `ytmusicapi`
-  (`get_watch_playlist` → `get_lyrics(timestamps=True)`, with a
-  title-search fallback) and prints the current line.
+- `lyrics` — `backend/lyrics.py` fetches timed lyrics (LRCLIB, then
+  YouTube Music) and prints the current line; untimed lyrics print once as a
+  static block.
 - `none` — minimal progress output.
 
 ## Downloads

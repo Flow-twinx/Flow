@@ -253,7 +253,15 @@ def _attach_vlc_events():
 
 
 def _display_loop(
-    player, title, video_id=None, stop_check=None, args=None, next_title=None
+    player,
+    title,
+    video_id=None,
+    stop_check=None,
+    args=None,
+    next_title=None,
+    artist="",
+    album="",
+    duration=0,
 ):
     global _paused
     display = config.Display
@@ -289,10 +297,16 @@ def _display_loop(
 
     fetched_lyrics = None
     if display == "lyrics":
-        if video_id:
-            fetched_lyrics = lyrics.fetch_lyrics(video_id, title=title)
-        if not fetched_lyrics:
-            m("    No synced lyrics found")
+        track_lyrics = lyrics.fetch_lyrics(
+            video_id, title=title, artist=artist, album=album, duration=duration
+        )
+        if track_lyrics:
+            fetched_lyrics = track_lyrics["lines"] or None
+            if not fetched_lyrics:
+                for line in track_lyrics["plain"]:
+                    print(f"  {P}{line}{R}" if line else "")
+        else:
+            m("    No lyrics found")
 
     if display == "bars":
         stdscr = curses.initscr()
@@ -456,7 +470,14 @@ def play_url(
         _attach_vlc_events()
 
         try:
-            _display_loop(_player, title, args=args)
+            _display_loop(
+                _player,
+                title,
+                args=args,
+                artist=artist,
+                album=album,
+                duration=duration,
+            )
         except KeyboardInterrupt:
             _player.stop()
             config.clear_pid()
@@ -594,6 +615,9 @@ def play_entry(entry, title, args=None, flags=None, next_title=None, nav=None):
                 stop_check=stop_check,
                 args=args,
                 next_title=next_title,
+                artist=artist,
+                album=album,
+                duration=duration,
             )
         except KeyboardInterrupt:
             _player.stop()

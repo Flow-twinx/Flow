@@ -102,6 +102,7 @@ COMMANDS = {
     "like": "Like the currently playing song",
     "unlike": "Unlike the currently playing song",
     "delete": "Delete a downloaded song (alias: dl-d)",
+    "rename": "Rename a downloaded song (alias: re)",
     "playlist": "Manage playlists | create add remove list play rename move dup merge sort clear dedupe info export import (alias: plist)",
     "switch": "Switch to Online mode (checks connection)",
     "help": "Show this help message",
@@ -129,7 +130,7 @@ class _Completer:
                 options = sorted(
                     set(n for n in songs if n.lower().startswith(text.lower()))
                 )
-            elif parts[0] in ("delete", "dl-d"):
+            elif parts[0] in ("delete", "dl-d", "rename", "re"):
                 songs = lib.get_song_names()
                 options = sorted(
                     set(n for n in songs if n.lower().startswith(text.lower()))
@@ -181,6 +182,8 @@ def run(cmd: str, extra: list[str], args):
         unlike_track()
     elif cmd in ("delete", "dl-d"):
         delete_song(extra)
+    elif cmd in ("rename", "re"):
+        rename_track(extra)
     elif cmd in ("playlist", "plist"):
         playlist_cmd(extra, args)
     elif cmd == "switch":
@@ -236,7 +239,7 @@ def _pick_result():
     return _pick_index(_last_results)
 
 
-def _pick_target(targets):
+def _pick_target(targets, action="delete"):
     from ..ui import pick
 
     choices = [(_truncate(t), t) for t in targets]
@@ -255,7 +258,7 @@ def _pick_target(targets):
         m(f"      {n}. {_truncate(t)}")
     try:
         raw = input(
-            f"{P}Pick a song to delete [1-{len(targets)}] (Enter to cancel): {R}"
+            f"{P}Pick a song to {action} [1-{len(targets)}] (Enter to cancel): {R}"
         ).strip()
     except EOFError, KeyboardInterrupt:
         return None
@@ -629,6 +632,81 @@ def _audio_files(index):
     ]
 
 
+def _match_songs(arg, prefer_library=False):
+    """Last-results index or a fuzzy name match; None means the index was bogus.
+
+    `prefer_library` resolves a number against the name-sorted listing `list`
+    prints instead, so `rename 17` means the same row whether or not a
+    `list`/`search` just ran.
+    """
+    global _last_results
+    if arg.isdigit():
+        idx = int(arg) - 1
+        if prefer_library:
+            listed = lib.get_songs()
+            if 0 <= idx < len(listed):
+                return [listed[idx]]
+        if 0 <= idx < len(_last_results):
+            return [_last_results[idx]]
+        return None
+
+    targets = []
+    index = library.load()
+    q = arg.lower()
+    for _vid, path, title in _audio_files(index):
+        if (
+            q in (title or "").lower()
+            or q in (_vid or "").lower()
+            or (path and q in pathlib.Path(path).stem.lower())
+        ):
+            targets.append(pathlib.Path(path))
+    for f in lib.find_songs(arg):
+        if f not in targets:
+            targets.append(f)
+    return targets
+
+
+def rename_track(extra):
+    arg = " ".join(extra) if extra else None
+    if not arg:
+        e("Usage: rename <name | index>")
+        return
+
+    targets = _match_songs(arg, prefer_library=True)
+    if targets is None:
+        e("     Index out of range")
+        return
+    if not targets:
+        e(f"     No song matching '{arg}'")
+        return
+    if len(targets) > 1:
+        song = _pick_target(targets, "rename")
+        if song is None:
+            m("    Cancelled")
+            return
+    else:
+        song = targets[0]
+
+    old_name = lib.display_name(song)
+    listed = lib.get_songs()
+    label = old_name
+    if song in listed:
+        label = f"{old_name} (#{listed.index(song) + 1})"
+    try:
+        new_name = input(f"{P}New name for '{label}': {R}").strip()
+    except EOFError, KeyboardInterrupt:
+        return
+    if not new_name:
+        m("     Rename cancelled")
+        return
+    if new_name == old_name:
+        m(f"     Already named '{old_name}'")
+        return
+
+    library.rename(song.stem, new_name)
+    i(f"Renamed: {old_name} → {new_name}")
+
+
 def delete_song(extra):
     global _last_results
     arg = " ".join(extra) if extra else None
@@ -636,26 +714,10 @@ def delete_song(extra):
         e("Usage: delete <name | index>")
         return
 
-    targets = []
-    if arg.isdigit():
-        idx = int(arg) - 1
-        if idx < 0 or idx >= len(_last_results):
-            e("     Index out of range")
-            return
-        targets.append(_last_results[idx])
-    else:
-        index = library.load()
-        for _vid, path, title in _audio_files(index):
-            q = arg.lower()
-            if (
-                q in (title or "").lower()
-                or q in (_vid or "").lower()
-                or (path and q in pathlib.Path(path).stem.lower())
-            ):
-                targets.append(pathlib.Path(path))
-        for f in lib.find_songs(arg):
-            if f not in targets:
-                targets.append(f)
+    targets = _match_songs(arg)
+    if targets is None:
+        e("     Index out of range")
+        return
 
     if not targets:
         e(f"     No downloaded song matching '{arg}'")

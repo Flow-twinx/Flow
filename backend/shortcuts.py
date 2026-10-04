@@ -11,6 +11,7 @@ DEFAULT_SHORTCUTS = {
     "ul": "unlike",
     "dl": "download",
     "dl-d": "delete",
+    "re": "rename",
     "rd": "radio",
     "sw": "switch",
     "hl": "help",

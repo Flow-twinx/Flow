@@ -95,8 +95,8 @@ flow -dl never gonna give you up    # dl -> download
 Built-in aliases (overridable/extendable via `~/.flow/shortcuts.json`):
 
 `pl` play · `sh` search · `ls` list · `lk` like · `ul` unlike · `dl` download
-· `dl-d` delete · `rd` radio · `sw` switch · `hl` help · `cf` config ·
-`ex` exit · `svn` savan · `svn-s` savan-s · `plist` playlist
+· `dl-d` delete · `re` rename · `rd` radio · `sw` switch · `hl` help ·
+`cf` config · `ex` exit · `svn` savan · `svn-s` savan-s · `plist` playlist
 
 Manage them inside Flow with the `short` command:
 
@@ -124,6 +124,7 @@ download the matching index can be used the same way.
 | `like` / `unlike` | Like/unlike the current song; liked songs are saved to the library and played with `play liked` |
 | `download <query or index>` | Save a streamed song (online; `-f <format>` picks opus/m4a/mp3/webm). Add `-m` to tick and download several |
 | `delete <name or index>` | Delete a downloaded song (alias: `dl-d`) |
+| `rename <name or index>` | Rename a downloaded song (offline; alias: `re`). You are then asked for the new name. An index is the number in the `list` output (ascending by name) and the prompt repeats it |
 | `playlist <sub>` | Manage playlists — see below |
 | `switch` | Toggle between online and offline mode |
 | `config [target [value]]` | Change settings; run bare for an interactive wizard |

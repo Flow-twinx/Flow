@@ -31,6 +31,7 @@ The screen has two panels:
 | `s` / `r` | Toggle shuffle / repeat |
 | `S` | Focus the search box (both modes) |
 | `d` | Download the highlighted or current track (online mode only) |
+| `R` | Rename the highlighted or current track (offline mode only) |
 | `+` / `-` | Volume up / down |
 | `Tab` | Switch online/offline mode |
 | `q` / `Ctrl+Q` | Quit |
@@ -84,7 +85,9 @@ The web UI can:
 - **Manage the library and playlists** — browse downloaded tracks and albums
   (including `~/.flow/music/<album>/` folders), like/unlike, delete
   downloads, and create/add/remove/rename/duplicate/merge/reorder/export
-  playlists.
+  playlists. Every song list (Local Files, Liked, albums, local search) is
+  ascending by name, matching the CLI, so a rename moves the song to its new
+  alphabetical spot.
 - **Browse your play history** in the **History** panel — an online-only
   timeline you can sort by newest, oldest, most played or least played,
   filter to today / 7 days / 30 days / all time, and tick **Unique songs**
@@ -92,6 +95,14 @@ The web UI can:
   Local playback is counted but not listed here; use
   [`flow summary`](command-line.md#summary) for per-song counts across both
   modes.
+- **See synced lyrics** with the lyrics button in the player bar (or `l`) —
+  the current line highlights as the track plays, clicking a line seeks to it,
+  and the badge shows whether the lyrics are synced and which source they came
+  from ([LRCLIB](https://lrclib.net), falling back to YouTube Music). The box
+  above the lyrics is editable: correct a misspelt title there and press Enter
+  (or the search button) to look the lyrics up again without renaming the song.
+- **Rename a song** from the ⋮ menu on any row (pencil icon) — the new name
+  follows you into the CLI, TUI and lyrics search, and survives re-downloads.
 - **Download** tracks (also in opus/m4a/mp3/webm when ffmpeg is present).
 - **Auto-skip SponsorBlock segments** while playing (toggleable via
   `ad_skip`).

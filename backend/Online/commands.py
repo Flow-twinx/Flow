@@ -1387,16 +1387,66 @@ def _download_one(entry, fmt):
 #     return 0
 
 
-def backfill_metadata():
-    """Rebuild library.db entries for the downloaded songs on disk.
+# def backfill_metadata():
+#     files = sorted(
+#         f
+#         for f in config.DOWNLOAD_DIR.rglob("*")
+#         if f.is_file() and f.suffix.lower() in _AUDIO_EXTS
+#     )
+#     if not files:
+#         m("     No downloaded songs found in ~/.flow/downloads")
+#         return 1
 
-    If ~/.flow gets wiped, library.db is gone but the audio files under
-    ~/.flow/downloads/ usually survive — they are named <video_id>.<ext>,
-    so the video id is recoverable straight from the filename. This scans
-    the download dir, fetches metadata + thumbnail for each id and
-    (re)creates the library entries. Idempotent: ids that already carry
-    metadata in the library are skipped.
-    """
+#     import yt_dlp
+
+#     i(f"    Rebuilding library entries for {len(files)} downloaded file(s)...")
+#     updated = 0
+#     skipped = 0
+#     failed = 0
+#     with yt_dlp.YoutubeDL(youtube.ydl_opts_play) as ydl:
+#         for pos, f in enumerate(files, 1):
+#             video_id = f.stem
+#             tag = f"[{pos}/{len(files)}] {video_id}"
+#             existing = library.get(video_id) or {}
+#             if (
+#                 existing.get("title")
+#                 or existing.get("artist")
+#                 or existing.get("duration")
+#             ):
+#                 skipped += 1
+#                 continue
+#             try:
+#                 info = ydl.extract_info(
+#                     f"https://www.youtube.com/watch?v={video_id}", download=False
+#                 )
+#             except Exception as exc:
+#                 failed += 1
+#                 m(f"    {tag}: failed ({exc})")
+#                 continue
+#             if not info:
+#                 failed += 1
+#                 m(f"    {tag}: no metadata returned")
+#                 continue
+#             title = info.get("title") or ""
+#             meta = library.meta_from_info(info)
+#             library.track_download(video_id, str(f), title, meta)
+#             try:
+#                 library.download_thumbnail(video_id)
+#             except Exception:
+#                 pass
+#             updated += 1
+#             label = _truncate_title(title) if title else video_id
+#             artist = meta.get("artist") or ""
+#             album = f" [{meta['album']}]" if meta.get("album") else ""
+#             dur = meta.get("duration")
+#             dur_s = f" ({dur // 60}:{dur % 60:02d})" if dur else ""
+#             i(f"    {tag}: {label}{dur_s}{album}" + (f" — {artist}" if artist else ""))
+#     tail = f" ({skipped} already done, {failed} failed)" if skipped or failed else ""
+#     print(f"\n{P}Rebuilt metadata for {updated}/{len(files)} songs{R}{tail}")
+#     return 0
+
+
+def backfill_metadata():
     files = sorted(
         f
         for f in config.DOWNLOAD_DIR.rglob("*")
@@ -1407,6 +1457,7 @@ def backfill_metadata():
         return 1
 
     import yt_dlp
+    from Tile import parse_title
 
     i(f"    Rebuilding library entries for {len(files)} downloaded file(s)...")
     updated = 0
@@ -1417,11 +1468,7 @@ def backfill_metadata():
             video_id = f.stem
             tag = f"[{pos}/{len(files)}] {video_id}"
             existing = library.get(video_id) or {}
-            if (
-                existing.get("title")
-                or existing.get("artist")
-                or existing.get("duration")
-            ):
+            if existing.get("title") and existing.get("artist"):
                 skipped += 1
                 continue
             try:
@@ -1436,22 +1483,34 @@ def backfill_metadata():
                 failed += 1
                 m(f"    {tag}: no metadata returned")
                 continue
-            title = info.get("title") or ""
+
+            raw_title = info.get("title") or ""
             meta = library.meta_from_info(info)
-            library.track_download(
-                video_id, str(f), title, meta
-            )  # saves library.db right here
+            parsed = parse_title(raw_title) if raw_title else {}
+            title = parsed.get("title") or raw_title
+            artist = parsed.get("artist") or meta.get("artist") or ""
+            if title:
+                meta["title"] = title
+            if artist:
+                meta["artist"] = artist
+            library.track_download(video_id, str(f), title, meta)
+            if meta.get("title"):
+                library.update_meta(video_id, meta)
             try:
                 library.download_thumbnail(video_id)
             except Exception:
                 pass
             updated += 1
             label = _truncate_title(title) if title else video_id
-            artist = meta.get("artist") or ""
             album = f" [{meta['album']}]" if meta.get("album") else ""
             dur = meta.get("duration")
             dur_s = f" ({dur // 60}:{dur % 60:02d})" if dur else ""
-            i(f"    {tag}: {label}{dur_s}{album}" + (f" — {artist}" if artist else ""))
+            extras = parsed.get("extras") or []
+            extra_s = f" {{{', '.join(str(x) for x in extras)}}}" if extras else ""
+            i(
+                f"    {tag}: {label}{dur_s}{album}{extra_s}"
+                + (f" — {artist}" if artist else "")
+            )
     tail = f" ({skipped} already done, {failed} failed)" if skipped or failed else ""
     print(f"\n{P}Rebuilt metadata for {updated}/{len(files)} songs{R}{tail}")
     return 0

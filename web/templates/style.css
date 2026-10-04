@@ -1133,6 +1133,100 @@ body {
     pointer-events: auto;
 }
 
+.lyrics-modal {
+    width: 620px;
+    display: flex;
+    flex-direction: column;
+    max-height: 80vh;
+    overflow: hidden;
+}
+
+.lyrics-head-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.lyrics-source {
+    font-size: 10px;
+    color: var(--text3);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.lyrics-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+}
+
+.lyrics-input {
+    flex: 1;
+    min-width: 0;
+    background: var(--bg-solid);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 12px;
+    padding: 4px 8px;
+    outline: none;
+}
+
+.lyrics-input:focus {
+    border-color: var(--border-strong);
+}
+
+.lyrics-tag {
+    font-size: 10px;
+    color: var(--text3);
+    border: 1px solid var(--border);
+    padding: 1px 6px;
+    flex-shrink: 0;
+}
+
+.lyrics-body {
+    flex: 1;
+    min-height: 0;
+    padding: 16px 20px 24px;
+    overflow-y: auto;
+    text-align: center;
+}
+
+.lyric-line {
+    padding: 7px 10px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text3);
+    transition:
+        color 0.2s,
+        transform 0.2s;
+    cursor: pointer;
+}
+
+.lyric-line:hover {
+    color: var(--text2);
+}
+
+.lyric-line.active {
+    color: var(--text);
+    transform: scale(1.05);
+}
+
+.lyric-line.static {
+    cursor: default;
+}
+
+.lyric-line.static:hover {
+    color: var(--text2);
+}
+
+.lyric-gap {
+    height: 12px;
+}
+
 .pl-menu {
     position: fixed;
     z-index: 300;

@@ -9,13 +9,7 @@ import time
 import yt_dlp
 from flask import Flask, jsonify, render_template, request, send_file
 
-from backend import control
-from backend import history
-from backend import library
-from backend import playlist
-from backend import sponsor
-from backend import status
-from backend import config
+from backend import config, control, history, library, lyrics, playlist, sponsor, status
 from web import devlog
 
 logger = logging.getLogger(__name__)
@@ -234,6 +228,13 @@ def _cached_segments(video_id):
     return []
 
 
+def _peek_entry(video_id):
+    cached = _play_cache.get(video_id)
+    if cached and time.time() - cached[0] < PLAY_CACHE_TTL:
+        return cached[1]
+    return None
+
+
 def _get_full_entry(video_id, fresh=False):
     now = time.time()
     cached = _play_cache.get(video_id)
@@ -275,6 +276,13 @@ def _resolve_thumbnail(thumb: str) -> str:
     return thumb
 
 
+def _by_title(entries):
+    """Ascending by displayed name, the order the CLI lists songs in."""
+    return sorted(
+        entries, key=lambda e: (e.get("title") or e.get("filename") or "").lower()
+    )
+
+
 def _scan_dir(base, depth=0, max_depth=2):
     if not base.exists() or not base.is_dir():
         return []
@@ -298,7 +306,7 @@ def _scan_dir(base, depth=0, max_depth=2):
                 results.extend(_scan_dir(item, depth + 1, max_depth))
     except PermissionError:
         pass
-    return results
+    return _by_title(results)
 
 
 @app.route("/search")
@@ -348,6 +356,48 @@ def play():
     return jsonify(_entry_to_dict(entry))
 
 
+@app.route("/api/lyrics")
+def api_lyrics():
+    vid = request.args.get("video_id", "").strip()
+    title = request.args.get("title", "").strip()
+    if not vid and not title:
+        return jsonify({"error": "missing 'video_id' or 'title'"}), 400
+    fresh = request.args.get("fresh", "0") == "1"
+    if fresh:
+        lyrics.clear_cache()
+
+    entry = _peek_entry(vid)
+    duration = request.args.get("duration", "")
+    try:
+        duration = float(duration) if duration else 0.0
+    except ValueError:
+        duration = 0.0
+    if entry:
+        duration = entry.get("duration") or duration
+
+    try:
+        found = lyrics.fetch_lyrics(
+            vid or None,
+            title=(entry or {}).get("title") or title,
+            artist=(entry or {}).get("artist") or request.args.get("artist", ""),
+            album=(entry or {}).get("album", ""),
+            duration=duration,
+        )
+    except Exception as exc:
+        logger.warning("Lyrics lookup failed for %s: %s", vid or title, exc)
+        devlog.log_error("FETCH", 500, "/api/lyrics", "lyrics", f"err={exc}")
+        return jsonify({"error": str(exc)}), 500
+
+    devlog.log_info(
+        "FETCH",
+        200,
+        "/api/lyrics",
+        found["source"] if found else "none",
+        f"vid={vid} synced={bool(found and found['synced'])}",
+    )
+    return jsonify({"lyrics": found, "found": bool(found)})
+
+
 @app.route("/api/segments")
 def api_segments():
     vid = request.args.get("video_id", "").strip()
@@ -390,9 +440,7 @@ def _download_audio(video_id: str, save_dir: str, fmt: str):
             }
             pps = sponsor.download_postprocessors()
             if fmt != "webm":
-                pps = pps + [
-                    {"key": "FFmpegExtractAudio", "preferredcodec": fmt}
-                ]
+                pps = pps + [{"key": "FFmpegExtractAudio", "preferredcodec": fmt}]
             if pps:
                 opts["postprocessors"] = pps
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -409,10 +457,16 @@ def _download_audio(video_id: str, save_dir: str, fmt: str):
             last_exc = exc
             logger.warning(
                 "Download attempt %s/%s failed for %s: %s",
-                attempt + 1, DOWNLOAD_ATTEMPTS, video_id, exc,
+                attempt + 1,
+                DOWNLOAD_ATTEMPTS,
+                video_id,
+                exc,
             )
             devlog.log_warn(
-                "FETCH", 500, "/download", "yt_dlp",
+                "FETCH",
+                500,
+                "/download",
+                "yt_dlp",
                 f"vid={video_id} attempt={attempt + 1} err={exc}",
             )
             if attempt < DOWNLOAD_ATTEMPTS - 1:
@@ -523,11 +577,28 @@ def api_speed_dial_set():
         return jsonify({"error": "missing video_id"}), 400
     if enabled:
         library.mark_speed_dial(video_id, title, data.get("path", ""))
-        devlog.log_success("LIB", 200, "/api/speed-dial", "flow", f"speed-dial +{video_id}")
+        devlog.log_success(
+            "LIB", 200, "/api/speed-dial", "flow", f"speed-dial +{video_id}"
+        )
     else:
         library.unmark_speed_dial(video_id)
-        devlog.log_success("LIB", 200, "/api/speed-dial", "flow", f"speed-dial -{video_id}")
+        devlog.log_success(
+            "LIB", 200, "/api/speed-dial", "flow", f"speed-dial -{video_id}"
+        )
     return jsonify({"success": True, "speed_dial": enabled})
+
+
+@app.route("/api/library/rename", methods=["POST"])
+def api_library_rename():
+    data = request.get_json(force=True)
+    video_id = data.get("video_id", "").strip()
+    title = data.get("title", "")
+    if not video_id:
+        return jsonify({"error": "missing video_id"}), 400
+    if not library.rename(video_id, title):
+        return jsonify({"error": "missing title"}), 400
+    devlog.log_success("LIB", 200, "/api/library/rename", "flow", f"{video_id}")
+    return jsonify({"success": True, "title": library.get_title(video_id)})
 
 
 @app.route("/api/home")
@@ -563,7 +634,9 @@ def api_delete_download():
     if not video_id and not path:
         return jsonify({"error": "missing video_id"}), 400
     if library.delete(video_id):
-        devlog.log_success("FETCH", 200, "/api/delete-download", "flow", f"deleted {video_id}")
+        devlog.log_success(
+            "FETCH", 200, "/api/delete-download", "flow", f"deleted {video_id}"
+        )
         return jsonify({"success": True})
     if path:
         p = pathlib.Path(path).expanduser()
@@ -583,7 +656,13 @@ def api_delete_download():
                         pass
             if video_id:
                 library.clear_download(video_id)
-            devlog.log_success("FETCH", 200, "/api/delete-download", "flow", f"deleted file {resolved.name}")
+            devlog.log_success(
+                "FETCH",
+                200,
+                "/api/delete-download",
+                "flow",
+                f"deleted file {resolved.name}",
+            )
             return jsonify({"success": True})
     return jsonify({"error": "not downloaded"}), 404
 
@@ -602,17 +681,7 @@ def api_now_playing():
 
 @app.route("/api/history")
 def api_history():
-    """Play timeline for the web History panel.
 
-    Sorted on the event stream (`history.SORTS`) rather than the per-song
-    table `flow summary -l` prints — a scrollable column is good at showing
-    "what did I just play, in order", a terminal is good at showing "which
-    songs do I play most".
-
-    `?unique=1` collapses repeat plays down to the most recent event per song
-    and pairs it with a play count; the `most` / `least` sorts imply it, since
-    ranking needs one row per song to rank.
-    """
     sort = request.args.get("sort", "recent")
     if sort not in history.SORTS:
         sort = "recent"
@@ -628,7 +697,7 @@ def api_history():
     try:
         limit = int(request.args.get("limit", 100))
         offset = int(request.args.get("offset", 0))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return jsonify({"error": "limit and offset must be integers"}), 400
     plays = history.timeline(
         sort=sort,
@@ -656,20 +725,14 @@ def api_history_top():
     """Most-played online songs, for the History panel's ranked view."""
     try:
         limit = int(request.args.get("limit", 20))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return jsonify({"error": "limit must be an integer"}), 400
     return jsonify({"top": history.top(limit=max(1, min(limit, 200)))})
 
 
 @app.route("/api/history/play", methods=["POST"])
 def api_history_play():
-    """Record one play from the browser player.
 
-    Deliberately separate from `/api/now-playing`: the player bar posts there
-    on play, pause and `loadedmetadata`, so counting those would inflate
-    `song_count` three or more times per track. This is called once, from
-    `loadAndPlay()`, when a track actually starts.
-    """
     data = request.get_json(silent=True) or {}
     title = (data.get("title") or "").strip()
     if not title:
@@ -687,7 +750,9 @@ def api_history_play():
 @app.route("/api/history/clear", methods=["POST"])
 def api_history_clear():
     removed = history.clear()
-    devlog.log_success("HIST", 200, "/api/history/clear", "flow", f"cleared {removed} plays")
+    devlog.log_success(
+        "HIST", 200, "/api/history/clear", "flow", f"cleared {removed} plays"
+    )
     return jsonify({"success": True, "removed": removed})
 
 
@@ -696,7 +761,9 @@ def api_control():
     data = request.get_json(force=True)
     command = data.get("command", "").strip()
     if command not in control.COMMANDS:
-        return jsonify({"error": f"invalid command, expected one of {sorted(control.COMMANDS)}"}), 400
+        return jsonify(
+            {"error": f"invalid command, expected one of {sorted(control.COMMANDS)}"}
+        ), 400
     control.send(command, delta=data.get("delta"))
     devlog.log_success("CTRL", 200, "/api/control", "flow", f"command={command}")
     return jsonify({"success": True, "command": command})
@@ -708,7 +775,6 @@ def api_control_poll():
     if isinstance(cmd, dict):
         return jsonify(cmd)
     return jsonify({"command": cmd})
-
 
 
 @app.route("/api/playlists")
@@ -766,7 +832,11 @@ def api_playlist():
         )
     inf = playlist.info(actual) or {}
     return jsonify(
-        {"name": inf.get("name", actual), "description": inf.get("description", ""), "songs": songs}
+        {
+            "name": inf.get("name", actual),
+            "description": inf.get("description", ""),
+            "songs": songs,
+        }
     )
 
 
@@ -941,8 +1011,9 @@ def api_playlist_add():
     )
     state, _ = playlist.add_track(
         actual or name,
-        playlist.make_track(title=title, ref=url, video_id=vid,
-                            duration=int(song.get("duration") or 0)),
+        playlist.make_track(
+            title=title, ref=url, video_id=vid, duration=int(song.get("duration") or 0)
+        ),
     )
     added = state == "added"
     return jsonify({"success": True, "added": added, "name": name})
@@ -955,7 +1026,7 @@ def api_playlist_remove():
     index = data.get("index")
     try:
         index = int(index)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return jsonify({"error": "missing valid index"}), 400
     ok, msg = playlist.remove_song(name, index=index)
     if ok:
@@ -993,8 +1064,9 @@ def api_playlists_save():
         )
         state, _ = playlist.add_track(
             target,
-            playlist.make_track(title=title, ref=url, video_id=vid,
-                                duration=int(s.get("duration") or 0)),
+            playlist.make_track(
+                title=title, ref=url, video_id=vid, duration=int(s.get("duration") or 0)
+            ),
         )
         if state == "added":
             count += 1
@@ -1054,7 +1126,7 @@ def api_album_songs(album_name):
                     "album": album_name,
                 }
             )
-    return jsonify({"results": songs})
+    return jsonify({"results": _by_title(songs)})
 
 
 @app.route("/api/local-search")
@@ -1063,10 +1135,7 @@ def api_local_search():
     results = []
 
     def _match(f):
-        return (
-            q in f.stem.lower()
-            or q in library.title_for_stem(f.stem).lower()
-        )
+        return q in f.stem.lower() or q in library.title_for_stem(f.stem).lower()
 
     for f in sorted(FLOW_DIR.rglob("*")):
         if f.suffix.lower() in AUDIO_EXTENSIONS and _match(f):
@@ -1091,7 +1160,7 @@ def api_local_search():
                         "filename": f.name,
                     }
                 )
-    return jsonify({"results": results})
+    return jsonify({"results": _by_title(results)})
 
 
 @app.route("/api/liked")
@@ -1113,7 +1182,11 @@ def api_liked():
                     }
                 )
     return jsonify(
-        {"results": songs, "liked_ids": liked_ids, "liked_entries": liked_entries}
+        {
+            "results": _by_title(songs),
+            "liked_ids": liked_ids,
+            "liked_entries": liked_entries,
+        }
     )
 
 
@@ -1124,10 +1197,14 @@ def _like_download(video_id: str, save_dir: str, fmt: str):
         fmt = "webm"
     try:
         _download_audio(video_id, save_dir, fmt)
-        devlog.log_success("FETCH", 200, "/api/like", "yt_dlp", f"auto-downloaded {video_id}")
+        devlog.log_success(
+            "FETCH", 200, "/api/like", "yt_dlp", f"auto-downloaded {video_id}"
+        )
     except Exception as exc:
         logger.warning("Auto-download for liked %s failed: %s", video_id, exc)
-        devlog.log_error("FETCH", 500, "/api/like", "yt_dlp", f"vid={video_id} err={exc}")
+        devlog.log_error(
+            "FETCH", 500, "/api/like", "yt_dlp", f"vid={video_id} err={exc}"
+        )
 
 
 @app.route("/api/like", methods=["POST"])

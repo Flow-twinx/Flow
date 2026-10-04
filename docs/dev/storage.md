@@ -60,6 +60,7 @@ CREATE TABLE songs (
     downloaded   INTEGER NOT NULL DEFAULT 0,
     speed_dial   INTEGER NOT NULL DEFAULT 0,
     title        TEXT    NOT NULL DEFAULT '',
+    custom_title TEXT,
     artist       TEXT,
     album        TEXT,
     duration     INTEGER,
@@ -95,6 +96,11 @@ Notes:
 - Titles are cleaned on write (`config._truncate_title`: drops filler words
   from `ignore.txt`, caps at six words). Only artist/album/duration are kept
   as metadata.
+- `custom_title` holds a user rename (`library.rename(video_id, title)`), and
+  `_row_to_entry` resolves `title = custom_title or title`, so every read path
+  (CLI, TUI, web, lyrics search) shows it without knowing the column exists.
+  Fresh downloads and metadata rebuilds only write `title`, so a rename is
+  never overwritten. The column is added by `_ensure_schema` on first open.
 - **A row is only deleted when nothing is left to remember** — not liked, not
   downloaded, not on speed dial, no `song` path, *and* `song_count == 0` —
   so a play count survives an unlike or a delete.

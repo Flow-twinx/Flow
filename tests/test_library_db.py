@@ -7,7 +7,9 @@ the three things that are easy to get wrong:
 * a play count outlives an unlike / delete (the row is only dropped when
   nothing at all is left to remember), and
 * online and offline playback are counted in `library.db` but only online
-  playback is logged as an event in `history.db`.
+  playback is logged as an event in `history.db`,
+* a user rename (`library.rename`) outranks whatever metadata a later
+  download or refresh writes, and the web route that exposes it.
 
 Tests share the scratch `HOME` from `conftest.py`, and both modules resolve
 their paths at import time, so every test uses video ids unique to itself.
@@ -124,6 +126,69 @@ def test_titles_are_cleaned_on_write(song):
     assert library.get(song)["title"] == "One Two Three Four Five Six..."
     library.mark_liked("filler-" + song, "Around the World Official Music Video")
     assert library.get("filler-" + song)["title"] == "Around the World"
+
+
+def test_rename_replaces_the_shown_title(song):
+    library.mark_liked(song, "52 bars karan")
+    assert library.rename(song, "52 Bars") is True
+    assert library.get_title(song) == "52 Bars"
+    assert library.get(song)["custom_title"] == "52 Bars"
+
+
+def test_rename_survives_a_redownload_and_metadata_refresh(song):
+    library.rename(song, "52 Bars")
+    library.track_download(song, "/tmp/nope.webm", "52 bars karan", {"artist": ARTIST})
+    assert library.get_title(song) == "52 Bars"
+    library.update_meta(song, {"title": "52 bars karan", "album": "Somewhere"})
+    assert library.get_title(song) == "52 Bars"
+    assert library.get(song)["artist"] == ARTIST
+
+
+def test_rename_reaches_every_listing(song):
+    library.rename(song, "52 Bars")
+    library.mark_liked(song, "52 bars karan")
+    library.mark_speed_dial(song, "52 bars karan")
+    library.bump_play(song, "52 bars karan", ARTIST, 180)
+    assert library.get_liked_entries()[0]["title"] == "52 Bars"
+    assert library.get_speed_dial_entries()[0]["title"] == "52 Bars"
+    assert [row["title"] for row in library.play_rows()] == ["52 Bars"]
+
+
+def test_rename_creates_a_row_for_an_unknown_track():
+    assert library.rename("never-seen-before", "Fresh Name") is True
+    assert library.get_title("never-seen-before") == "Fresh Name"
+
+
+def test_rename_rejects_a_blank_name(song):
+    library.mark_liked(song, SONG_TITLE)
+    assert library.rename(song, "   ") is False
+    assert library.rename("", SONG_TITLE) is False
+    assert library.get_title(song) == SONG_TITLE
+
+
+def test_web_rename_route_stores_the_name(song):
+    from web import app as web_app
+
+    web_app.app.config["TESTING"] = True
+    library.mark_liked(song, "52 bars karan")
+    with web_app.app.test_client() as client:
+        ok = client.post(
+            "/api/library/rename",
+            json={"video_id": song, "title": "52 Bars"},
+        )
+        assert ok.status_code == 200
+        assert ok.get_json()["title"] == "52 Bars"
+        assert library.get_title(song) == "52 Bars"
+        listed = client.get("/api/library").get_json()["songs"]
+        assert [s["title"] for s in listed if s["video_id"] == song] == ["52 Bars"]
+
+        assert client.post("/api/library/rename", json={"title": "x"}).status_code == 400
+        assert (
+            client.post(
+                "/api/library/rename", json={"video_id": song, "title": "  "}
+            ).status_code
+            == 400
+        )
 
 
 # ---------------------------------------------------------------------------

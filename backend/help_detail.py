@@ -262,6 +262,16 @@ def _offline_help():
             f"  {G}  Removes the file, any liked copy, and the entry in ~/.flow/library.db.{R}",
             f"  {G}Alias:{R} {B}dl-d{R}",
         ],
+        "rename": [
+            f"{T}> rename{R} {B}<name | index>{R}",
+            f"{G}  Rename a downloaded song (asks for the new name).{R}",
+            f"  {B}<name>{R}   {G}Rename by name (pick if multiple match){R}",
+            f"  {B}<index>{R}  {G}Rename by number from the {B}list{R} output (ascending by name){R}",
+            f"{G}  The prompt repeats the song and its list number so you can confirm.{R}",
+            f"{G}  The name is what the CLI, TUI, web GUI and lyrics search show.{R}",
+            f"{G}  Stored in ~/.flow/library.db, so a re-download keeps it.{R}",
+            f"{G}  Alias:{R} {B}re{R}",
+        ],
         "like": [
             f"{T}> like{R}",
             f"{G}  Like/unlike the currently playing song from offline mode.{R}",

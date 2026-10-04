@@ -16,6 +16,7 @@ dependencies = [
     "questionary",
     "sounddevice",
     "textual>=8.2.8",
+    "tile-twinx>=1.0.1",
     "yt-dlp>=2026.8.19",
     "ytmusicapi",
 ]

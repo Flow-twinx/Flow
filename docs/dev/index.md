@@ -36,7 +36,7 @@ backend/               # all logic
   ping.py              #   is_connected() connectivity probe
   mpris.py             #   MPRIS D-Bus integration
   visualizer.py        #   audio-reactive spectrum bars (sounddevice/numpy)
-  lyrics.py            #   synced lyrics (ytmusicapi)
+  lyrics.py            #   synced lyrics (LRCLIB, YouTube Music fallback)
   sponsor.py           #   SponsorBlock segment skip / cut
   plugins.py           #   plugin install/run/update
   daemon.py            #   resident RPC host (socket owner, plugin lifecycle)

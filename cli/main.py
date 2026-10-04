@@ -527,6 +527,8 @@ def main():
         "download",
         "delete",
         "dl-d",
+        "rename",
+        "re",
         "switch",
         "help",
         "short",

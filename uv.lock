@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14"
 
 [[package]]
@@ -248,7 +248,7 @@ wheels = [
 
 [[package]]
 name = "flow-twinx"
-version = "0.8.1"
+version = "0.8.2"
 source = { editable = "." }
 dependencies = [
     { name = "dbus-fast" },
@@ -261,6 +261,7 @@ dependencies = [
     { name = "questionary" },
     { name = "sounddevice" },
     { name = "textual" },
+    { name = "tile-twinx" },
     { name = "yt-dlp" },
     { name = "ytmusicapi" },
 ]
@@ -283,6 +284,7 @@ requires-dist = [
     { name = "questionary" },
     { name = "sounddevice" },
     { name = "textual", specifier = ">=8.2.8" },
+    { name = "tile-twinx", specifier = ">=1.0.1" },
     { name = "yt-dlp", specifier = ">=2026.8.19" },
     { name = "ytmusicapi" },
 ]
@@ -740,6 +742,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/00/21/39a76b01bd5eea82a04baaca7580e105d8c59450df03998345bb2cfb307b/textual-8.2.8.tar.gz", hash = "sha256:3f106a9fbc73e39dd266c9712432087de78a6d644084c7c241d6a25c3169115b", size = 1860502, upload-time = "2026-06-30T06:51:24.495Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fb/be/35261223d9416a0751cdff1c7b4a6f881387218a12d439fe22fefebc8c04/textual-8.2.8-py3-none-any.whl", hash = "sha256:267375fd402dc8d981457212efa71f0e3365fd17bba144ba9bb3ed7563cb374a", size = 731418, upload-time = "2026-06-30T06:51:26.364Z" },
+]
+
+[[package]]
+name = "tile-twinx"
+version = "1.0.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a6/45/cd6b23a531abb2dbdfa5df32c142edf19c74fee07f4caf5c25c70ec75296/tile_twinx-1.0.1.tar.gz", hash = "sha256:2562aae4bd89d689cd8bdbd5a4a5f030e07884da841b2fcf2917053ba6357bc0", size = 36308, upload-time = "2026-10-03T17:42:46.262Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a0/fb/5a1f08675786ad819d14f10dcfd33716cb3583f1f3dc3d901498b556c3f7/tile_twinx-1.0.1-py3-none-any.whl", hash = "sha256:ea5cff703d2027c17f25a1fdf6b85cd83daf74e90d147eb1c6bf85cfc6e0c7d0", size = 34014, upload-time = "2026-10-03T17:42:44.518Z" },
 ]
 
 [[package]]
