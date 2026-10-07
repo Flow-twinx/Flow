@@ -28,6 +28,7 @@ scripts, ssh sessions and agents.
 | `--seek SEC`        | Seek SEC seconds forward in the running player                            |
 | `--seekb SEC`       | Seek SEC seconds backward in the running player                           |
 | `--status`          | Print the playback status card and exit                                   |
+| `--full`            | Full-screen now-playing view: clear the terminal, show the logo and a live progress card (refreshes every second; Ctrl-C to exit) |
 | `--summary`         | Play statistics; see [summary](#summary) below                            |
 | `--like`            | Like the currently playing song (requires an active player)               |
 | `--unlike`          | Unlike the currently playing song                                         |
@@ -140,29 +141,36 @@ download the matching index can be used the same way.
 | `export [-p <path>]`           | Copy downloaded songs (tagged) to `~/Downloads`, or to `<path>`                                                                                                                                                                   |
 | `help` / `help -i`             | Command list / detailed help                                                                                                                                                                                                      |
 | `exit`                         | Leave the interactive shell                                                                                                                                                                                                       |
+| `clear`                        | Clear the terminal and reprint the flow logo (alias: `cls`)                                                                                                                                                                       |
 
 ### summary
 
-`summary` reports what you've been playing. Play counts come from
-`~/.flow/library.db` and cover **both** online and offline playback; the
-online totals come from `~/.flow/history.db`.
+`summary` reports what you've been playing. The stats card splits the
+numbers — **combined** plays (both modes, from `~/.flow/library.db`),
+**online** plays (`~/.flow/history.db`) and **offline** (the difference) —
+then lists your top artist, top language and top song, and charts the last
+7 days: one bar per calendar day with online (`█`) and offline (`░`)
+stacked, ending in `online/offline` counts, plus a progress bar comparing
+**this week vs last week**. Days run midnight to midnight, so `today` and the
+card's `played today` always mean *since midnight*.
 
 ```bash
-flow summary                          # stats card + a 7-day bar chart
+flow summary                          # stats card + a 7-day online/offline chart
 flow summary -l                       # the ranked per-song table
 flow summary -l -s artist --top 50    # sort by artist, 50 rows
-flow summary -c                       # clear the online play history
+flow summary -c                       # clear play history (both stores)
 ```
 
-| Flag        | Description                                               |
-| ----------- | --------------------------------------------------------- |
-| `-l`        | Show the per-song table instead of the stats card         |
-| `-s <sort>` | Table sort: `plays` (default), `recent`, `name`, `artist` |
-| `--top <N>` | Rows to show in the table (default: 20)                   |
-| `-c`        | Clear the logged online plays (`history.db`)              |
+| Flag        | Description                                                         |
+| ----------- | ------------------------------------------------------------------- |
+| `-l`        | Show the per-song table instead of the stats card                   |
+| `-s <sort>` | Table sort: `plays` (default), `recent`, `name`, `artist`           |
+| `--top <N>` | Rows to show in the table (default: 20)                             |
+| `-c`        | Clear all play history (`history.db` rows and `library.db` counts)  |
 
-`-c` only empties the play timeline — the `song_count` totals in
-`library.db` are untouched.
+`-c` wipes both stores so the online/offline split stays honest: the play
+timeline empties and every `song_count` in `library.db` drops to zero.
+Likes, downloads, tags and renames are untouched.
 
 In shell mode `flow summary …` takes the same flags. As a one-shot flag,
 `flow --summary …` also accepts the long `--sort <key>` and `--top <N>`
@@ -250,12 +258,38 @@ it the songs are still copied, just untagged.
 ```bash
 flow playlist create roadtrip
 flow playlist add roadtrip "some song"
+flow playlist add -m roadtrip 3 7 9   # several songs at once (search index or query each)
+flow playlist remove -m roadtrip 2 5  # several by index; indices are resolved high-to-low
+flow playlist remove -m roadtrip a b  # several by title match (first match each)
 flow playlist list
 flow playlist play roadtrip
 flow playlist export roadtrip   # writes roadtrip.m3u to ~/Downloads
 flow playlist import songs.m3u  # name defaults to the file name
 flow playlist download roadtrip # download all YouTube tracks in it
 ```
+
+`-m` may appear right after the subcommand (`playlist add -m pl ...`) or
+after the name (`playlist add pl -m ...`). Without it, `add`/`remove` behave
+as before: every word after the name is one query or one title.</think>
+
+<｜DSML｜tool_calls>
+<｜DSML｜invoke name="edit">
+<｜DSML｜parameter name="newString" string="true">```bash
+flow playlist create roadtrip
+flow playlist add roadtrip "some song"
+flow playlist add -m roadtrip 3 7 9   # several at once (each word = one index or query)
+flow playlist remove -m roadtrip 2 5  # several by index (resolved high-to-low)
+flow playlist remove -m roadtrip a b  # several by title match (first match each)
+flow playlist list
+flow playlist play roadtrip
+flow playlist export roadtrip   # writes roadtrip.m3u to ~/Downloads
+flow playlist import songs.m3u  # name defaults to the file name
+flow playlist download roadtrip # download all YouTube tracks in it
+```
+
+`-m` may sit right after the subcommand (`playlist add -m pl ...`) or after
+the name (`playlist add pl -m ...`). Without it, `add`/`remove` behave as
+before: every word after the name is treated as one query or one title.
 
 `liked` is a reserved playlist name.
 

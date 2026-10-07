@@ -13,11 +13,13 @@ color names, or `config <target> <value>` for one-off changes.
 | `primary` (pri)   | Color for online songs                     | any color name                                       |
 | `secondary` (sec) | Color for offline songs                    | any color name                                       |
 | `tertiary` (ter)  | Color for labels                           | any color name                                       |
-| `display`         | Playback display mode                      | `none`, `bars`, `lyrics`                             |
+| `display`         | Playback display mode                      | `none`, `bars`, `lyrics`, `progress`                   |
 | `barwidth`        | Number of bars in the visualizer           | 4–80                                                 |
 | `barheight`       | Height of bars                             | 10–90                                                |
 | `barspacing`      | Space between bars                         | 0–4, or `min` / `fit` / `max`                        |
-| `barchar`         | Bar character                              | `dot`, `block`, `circle`, or any single char         |
+| `barchar`         | Visualizer bar character                   | `dot`, `block`, `circle`, or any single char         |
+| `progchar`        | Filled part of progress/summary bars       | `dot`, `block`, `circle`, or any single char         |
+| `progcharem`      | Empty part of progress/summary bars        | `dot`, `block`, `circle`, or any single char         |
 | `sensitivity`     | Visualizer sensitivity                     | 0.5–5.0                                              |
 | `format`          | Default download format                    | `opus`, `m4a`, `mp3`, `webm` (non-webm needs ffmpeg) |
 | `ad_skip`         | Skip SponsorBlock segments during playback | `true` / `false`                                     |
@@ -42,6 +44,8 @@ Settings persist to `~/.flow/config.json`:
   "bar_height": 40,
   "bar_spacing": 1,
   "bar_char": "█",
+  "prog_char": "█",
+  "prog_char_em": "░",
   "sensitivity": 1.0,
   "dev": false,
   "ffmpeg": true,
@@ -101,12 +105,18 @@ A song's row is only removed once you have unliked it, deleted the download,
 removed it from Speed Dial **and** never played it — so `song_count` survives
 an unlike.
 
+Alongside the songs, `library.db` keeps `play_days`: one bucket per calendar
+day counting **both** modes. `bump_play` moves it in the same transaction as
+`song_count`, and `flow summary` reads it to chart offline plays per day —
+`history.db` only timestamps streams. Buckets start at the first play after
+this shipped; there is no backfill.
+
 ### history.db
 
 A SQLite database with one row per **online** play: the song name, the
 artist, and when you played it. Local playback is not logged here; it only
-moves the `song_count` in `library.db`. See [`flow
-summary`](../user/command-line.md) and the web **History** panel.
+moves `song_count` and today's `play_days` bucket in `library.db`. See
+[`flow summary`](../user/command-line.md) and the web **History** panel.
 
 ### Title cleanup
 

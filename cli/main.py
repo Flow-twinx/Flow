@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import re
 import shutil
 import signal
 import sys
@@ -173,6 +174,89 @@ def _resume(args):
         )
 
 
+def _full_view():
+    """Full-screen now-playing card: clear, logo + a live progress readout
+    that refreshes once a second (Ctrl-C to exit)."""
+    from backend import status as _status
+
+    def _tty_width(default=96):
+        try:
+            return max(72, min(160, shutil.get_terminal_size().columns))
+        except Exception:
+            return default
+
+    def _frame():
+        from backend import library
+
+        data = _status._read()
+        playing = bool(data.get("playing")) and _status._fresh(data)
+        title = data.get("title") or "—"
+        dur = int(data.get("duration", 0))
+        elapsed = int(data.get("elapsed", 0))
+        mins, secs = divmod(dur, 60)
+        dur_str = f"{mins}:{secs:02d}"
+        status_col = config.CYAN if playing else config.Muted
+        status_val = "playing" if playing else "not playing"
+        width = _tty_width()
+        inner = width - 2
+
+        vid = _status._vid_from_thumb(data.get("thumbnail", ""))
+        artist = album = ""
+        if vid:
+            entry = library.get(vid) or {}
+            artist = entry.get("artist") or ""
+            album = entry.get("album") or ""
+
+        def _row(label, value):
+            text = f"  {label:<16}{value}"
+            plain = len(re.sub(r"\x1b\[[0-9;]*m", "", text))
+            return f"{P}│{R} {text}{' ' * max(0, inner - 1 - plain)}{P}│{R}"
+
+        rows = [
+            ("status", f"{status_col}{status_val}{R}"),
+            ("title", f"{config.WHITE}{title}{R}"),
+        ]
+        if artist:
+            rows.append(("artist", f"{config.WHITE}{artist}{R}"))
+        if album:
+            rows.append(("album", f"{config.WHITE}{album}{R}"))
+        rows.append(("duration", f"{config.WHITE}{dur_str}{R}"))
+        if playing:
+            now = f"{elapsed // 60}:{elapsed % 60:02d}"
+            frac = min(elapsed / dur, 1.0) if dur else 0.0
+            bar_w = min(config.BarWidth, max(4, inner - 40))
+            prog = (
+                f"{config.progress_bar(frac, bar_w)} "
+                f"{config.GREY}{now} / {dur_str}  {int(frac * 100):>3}%{R}"
+            )
+            rows.append(("progress", prog))
+
+        out = [f"\n{P}┌─ Now Playing {'─' * max(0, inner - 13 - 3)}┐{R}"]
+        for label, value in rows:
+            out.append(_row(label, value))
+        out.append(f"{P}└{'─' * inner}┘{R}")
+        out.append(f"{M}  Ctrl-C to exit{R}\n")
+        return "\n".join(out)
+
+    if not sys.stdout.isatty():
+        show_banner()
+        print(_frame())
+        return
+
+    tui_shell.clear_screen()
+    try:
+        while True:
+            sys.stdout.write("\x1b[H")
+            show_banner()
+            print(_frame())
+            sys.stdout.write("\x1b[J")
+            sys.stdout.flush()
+            time.sleep(1)
+    except KeyboardInterrupt:
+        tui_shell.clear_screen()
+        print()
+
+
 def _act_current(action):
     from backend import status as _status
 
@@ -278,6 +362,11 @@ def main():
         "--status", action="store_true", help="show playback and web mode status"
     )
     parser.add_argument(
+        "--full",
+        action="store_true",
+        help="full-screen now-playing view: clear, logo, live progress (Ctrl-C to exit)",
+    )
+    parser.add_argument(
         "--like",
         action="store_true",
         help="like the currently playing song (requires an active player)",
@@ -300,7 +389,7 @@ def main():
     parser.add_argument(
         "--summary",
         action="store_true",
-        help="play statistics; add -l for the ranked per-song table, -c to clear history",
+        help="play statistics; add -l for the ranked per-song table, -c to clear all plays",
     )
     parser.add_argument(
         "--sort",
@@ -412,6 +501,15 @@ def main():
         from backend import summary
 
         summary.cmd_summary(_summary_extra(args, unknown, command=None))
+        sys.exit(0)
+
+    if getattr(args, "full", False):
+        _full_view()
+        sys.exit(0)
+
+    if args.command == "clear":
+        tui_shell.clear_screen()
+        show_banner()
         sys.exit(0)
 
     _check_vlc()
@@ -579,6 +677,10 @@ def main():
                     cmd = parts[0].lower()
                     extra = parts[1:]
                     cmd = shortcuts.resolve(cmd)
+                    if cmd in ("clear", "cls"):
+                        tui_shell.clear_screen()
+                        show_banner()
+                        continue
                     if cmd in ("exit", "quit", "q"):
                         print(f"{M}Goodbye!{R}")
                         break

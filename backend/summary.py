@@ -1,3 +1,4 @@
+import re
 import shutil
 import time
 
@@ -13,7 +14,7 @@ R = config.Reset
 SORTS = ("plays", "recent", "name", "artist")
 
 COMMANDS = {
-    "summary": "Play summary | -l per-song table | -s <sort> | --top N | -c clear history",
+    "summary": "Play summary | -l per-song table | -s <sort> | --top N | -c clear all plays",
 }
 
 DEFAULT_SORT = "plays"
@@ -117,66 +118,122 @@ def _sort_rows(rows: list[dict], sort: str) -> list[dict]:
 
 
 def _box(title: str, rows: list[tuple], width: int) -> None:
-    """The same `┌─ Title ─┐` card `flow --status` prints."""
+    """The full-width `┌─ Title ─┐` card `flow --status` also prints."""
     inner = width - 2
-    print(f"\n{P}┌─ {title} {'─' * max(0, inner - len(title) - 4)}{R}")
+    print(f"{P}┌─ {title} {'─' * max(0, inner - len(title) - 3)}┐{R}")
     for label, value in rows:
-        text = f"  {label:<16}{value}"
-        print(f"{P}│{R} {_truncate(text, inner - 1)}")
-    print(f"{P}└{'─' * inner}{R}\n")
+        line = f"  {label:<16}{value}"
+        plain = len(re.sub(r"\x1b\[[0-9;]*m", "", line))
+        print(
+            f"{P}│{R} {_truncate(line, inner - 1)}"
+            f"{' ' * max(0, inner - 1 - plain)}{P}│{R}"
+        )
+    print(f"{P}└{'─' * inner}┘{R}\n")
 
 
-def _top_artist(rows: list[dict]) -> str:
+def _top_tag(rows: list[dict], key: str) -> str:
+    """`<tag> (N plays)` for the artist/language that owns the most plays."""
     counts: dict[str, int] = {}
     for row in rows:
-        artist = (row.get("artist") or "").strip()
-        if not artist:
-            continue
-        counts[artist] = counts.get(artist, 0) + row["song_count"]
+        for part in re.split(r",\s*", (row.get(key) or "").strip()):
+            if part:
+                counts[part] = counts.get(part, 0) + row["song_count"]
     if not counts:
-        return "-"
-    best = max(counts.items(), key=lambda kv: kv[1])
+        return f"{M}-{R}"
+    best = max(counts.items(), key=lambda kv: (kv[1], kv[0]))
     return f"{best[0]} {G}({best[1]} plays){R}"
 
 
+def _top_song(rows: list[dict]) -> str:
+    """`<title> (N plays)` for the most-played song."""
+    best = max(rows, key=lambda r: (r["song_count"], r["last_played"]))
+    return f"{best['title']} {G}({best['song_count']} plays){R}"
+
+
+def _week_rows() -> list[tuple]:
+    """`(day_offset, online, offline)` per calendar day, oldest first."""
+    buckets = dict(library.play_days(7))
+    rows = []
+    for offset, online in history.per_day(7):
+        combined = max(online, buckets.get(offset, 0))
+        rows.append((offset, online, combined - online))
+    return rows
+
+
+def _week_sums() -> tuple[int, int]:
+    """`(this_week, last_week)` combined plays over the last 14 days."""
+    online = dict(history.per_day(14))
+    buckets = dict(library.play_days(14))
+    this = last = 0
+    for offset in range(14):
+        combined = max(online.get(offset, 0), buckets.get(offset, 0))
+        if offset < 7:
+            this += combined
+        else:
+            last += combined
+    return this, last
+
+
 def show_stats() -> None:
+    """The stats card: the online/offline split, the three tops, the 7-day bars."""
     lib = library.stats()
-    online = history.totals()
+    online = history.totals()["online_plays"]
     rows = library.play_rows()
     width = _tty_width()
+    combined = lib["total_plays"]
+    offline = max(combined - online, 0)
+    print()
     _box(
         "Flow Summary",
         [
-            ("total plays", f"{G}{lib['total_plays']}{R}"),
+            ("combined plays", f"{G}{combined}{R} {M}(both modes){R}"),
+            ("online plays", f"{G}{online}{R} {M}(history.db){R}"),
+            ("offline plays", f"{G}{offline}{R} {M}(combined - online){R}"),
             ("unique songs", f"{G}{lib['unique_songs']}{R}"),
             ("played today", f"{G}{lib['played_today']}{R}"),
-            (
-                "online plays",
-                f"{G}{online['online_plays']}{R} {M}(history.db){R}",
-            ),
-            (
-                "top artist",
-                _top_artist(rows) if rows else f"{M}no plays yet{R}",
-            ),
         ],
         width,
     )
     if not rows:
         return
-    week = history.per_day(7)
+    _box(
+        "Top plays",
+        [
+            ("top artist", _top_tag(rows, "artist")),
+            ("top language", _top_tag(rows, "language")),
+            ("top song", _top_song(rows)),
+        ],
+        width,
+    )
+    week = _week_rows()
     bar_width = 24
-    peak = max((c for _, c in week), default=0)
-    print(f"{T}  last 7 days{R}")
+    peak = max((on + off for _, on, off in week), default=0)
+    count_w = max((len(f"{on}/{off}") for _, on, off in week), default=3)
+    print(f"{T}  last 7 days · online/offline plays{R}")
     if peak:
-        for offset, count in week:
-            filled = int(round((count / peak) * bar_width))
+        for offset, on, off in week:
+            filled = int(round((on + off) / peak * bar_width))
+            online_w = min(int(round(on / peak * bar_width)), filled)
+            offline_w = filled - online_w
             label = "today" if offset == 0 else f"-{offset}d"
+            counts = str(on).rjust(count_w - len(str(off)) - 1) + "/" + str(off)
             print(
-                f"  {M}{label:>6}{R} {P}{'█' * filled}{R}"
-                f"{G}{' ' * (bar_width - filled)}{R} {count}"
+                f"  {M}{label:>6}{R} {P}{'█' * online_w}{M}{'░' * offline_w}{R}"
+                f"{G}{' ' * (bar_width - filled)}{R} {P}{counts}{R}"
             )
     else:
-        print(f"  {M}no online plays logged in the last 7 days{R}")
+        print(f"  {M}no plays logged in the last 7 days{R}")
+
+    this_w, last_w = _week_sums()
+    if this_w or last_w:
+        frac = this_w / last_w if last_w else 1.0
+        pct = int(round(frac * 100)) if last_w else None
+        note = f"{pct}% of last week" if pct is not None else "no last-week plays"
+        print(
+            f"{T}  \nthis week{R} {config.progress_bar(frac, bar_width)}{M} "
+            f"{this_w} vs {last_w} plays · {note}{R}"
+        )
+
     print()
 
 
@@ -209,9 +266,11 @@ def show_table(sort: str = DEFAULT_SORT, top: int = DEFAULT_TOP) -> None:
 
 
 def clear_history() -> None:
+    """Wipe both stores: the online log rows and the library play counters."""
     removed = history.clear()
-    print(f"{P}Cleared {removed} logged online play(s){R}")
-    print(f"{M}  song_count totals in library.db are untouched{R}")
+    reset = library.clear_plays()
+    print(f"{P}Cleared {removed} online play(s) and reset {reset} song count(s){R}")
+    print(f"{M}  both stores wiped: history.db rows + library.db song_count{R}")
 
 
 def cmd_summary(extra: list[str], args=None) -> None:
@@ -233,7 +292,8 @@ def cmd_summary(extra: list[str], args=None) -> None:
 
 def print_help() -> None:
     print(f"{T}summary{R} {M}[-l] [-s sort] [--top N] [-c]{R}")
-    print(f"{G}  Play statistics, and the ranked per-song table.{R}")
+    print(f"{G}  Play statistics: the online/offline split, the top artist,{R}")
+    print(f"{G}  language and song, and the ranked per-song table.{R}")
     print(
         f"  {M}-l{R}          {G}List the per-song table instead of the stats card{R}"
     )
@@ -243,7 +303,10 @@ def print_help() -> None:
     print(
         f"  {M}--top{R} {M}<N>{R}    {G}Rows to show in the table (default: {DEFAULT_TOP}){R}"
     )
-    print(f"  {M}-c{R}          {G}Clear the online play history (history.db){R}")
-    print(f"{G}  Counts come from library.db (every mode); the web History panel{R}")
-    print(f"{G}  shows the online-only timeline from history.db.{R}")
+    print(
+        f"  {M}-c{R}          {G}Clear all play history (history.db + library.db counts){R}"
+    )
+    print(f"{G}  combined = library.db (every mode); online = history.db rows;{R}")
+    print(f"{G}  offline = combined - online. The web History panel shows the{R}")
+    print(f"{G}  online-only timeline from history.db.{R}")
     print()

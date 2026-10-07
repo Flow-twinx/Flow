@@ -76,6 +76,6 @@ uv run flow --pause --next --seek 30  # control running player
 - Prefer targeted `edit` over full rewrites; preserve surrounding indentation/style.
 - If a change could affect multi-process coordination (registry, db, atomic writes, socket), check the relevant backend module first.
 - Docs in `docs/` are the source of truth for deeper details (architecture, control, storage).
-- Don't add comments except one liner docstring in def and clases briefly explaning what is does.
+- Don't add comments except one liner docstring in def and clases briefly explaning what is does under 100-200 words.
 
 If something undocumented is critical (team conventions, release process), ask once via `question` tool; do not ask for anything the repo already makes clear but still if your are unsure always ask never add what is not asked.

@@ -1,15 +1,4 @@
-"""Play-event log for online streams (`~/.flow/history.db`).
-
-One row per play, holding only what a timeline needs: the song name, the
-artist, and when it was played. Offline/local playback is deliberately *not*
-logged here — local files are counted by `library.bump_play()` (the
-`song_count` column in `library.db`) but never produce a timeline row, so the
-history stays a record of what you streamed.
-
-`library.db` answers "how many times have I played this song" across every
-mode; this file answers "what did I listen to, and when".
-"""
-
+import datetime
 import pathlib
 import sqlite3
 import time
@@ -63,10 +52,6 @@ def _row_to_play(row) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# Writes
-# ---------------------------------------------------------------------------
-
 def record(video_id: str, title: str, artist: str = "", ts: float | None = None):
     """Append one online play. Silently gives up on an empty title."""
     if not title:
@@ -74,7 +59,12 @@ def record(video_id: str, title: str, artist: str = "", ts: float | None = None)
     with _session() as conn:
         conn.execute(
             "INSERT INTO plays (video_id, title, artist, played_at) VALUES (?, ?, ?, ?)",
-            (video_id or "", title, artist or "", ts if ts is not None else time.time()),
+            (
+                video_id or "",
+                title,
+                artist or "",
+                ts if ts is not None else time.time(),
+            ),
         )
 
 
@@ -85,18 +75,14 @@ def record_play(
     mode: str = "online",
     duration=0,
 ) -> int:
-    """The single play-tracking entry point used by every player.
-
-    Always bumps `song_count` in `library.db` (online *and* offline). Appends a
-    `history.db` row only for online streams, per the module docstring. Never
-    raises — a bookkeeping failure must not interrupt playback.
-    """
     if not video_id and not title:
         return 0
     from backend import library
 
     try:
-        count = library.bump_play(video_id, title=title, artist=artist, duration=duration)
+        count = library.bump_play(
+            video_id, title=title, artist=artist, duration=duration
+        )
     except Exception:
         count = 0
     if mode == "online" and title:
@@ -114,10 +100,6 @@ def clear() -> int:
         conn.execute("DELETE FROM plays")
         return removed
 
-
-# ---------------------------------------------------------------------------
-# Reads
-# ---------------------------------------------------------------------------
 
 def _since_ts(since: float | None) -> float:
     return since if since else 0.0
@@ -139,11 +121,11 @@ def timeline(
     """
     try:
         limit = max(1, min(int(limit), 500))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         limit = 100
     try:
         offset = max(0, int(offset))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         offset = 0
 
     # `most` / `least` rank by play count, which only means anything once the
@@ -159,7 +141,7 @@ def timeline(
                 key=lambda r: (r["play_count"], r["played_at"]),
                 reverse=sort == "most",
             )
-        return rows[offset:offset + limit]
+        return rows[offset : offset + limit]
 
     order = "ASC" if sort == "oldest" else "DESC"
     with _session() as conn:
@@ -229,14 +211,13 @@ def count() -> int:
 
 def totals() -> dict:
     """Online-stream play totals, used by the CLI summary."""
-    now = time.time()
-    day_start = now - 86400
+    day_start = datetime.datetime.combine(datetime.date.today(), datetime.time.min)
     with _session() as conn:
         row = conn.execute(
             "SELECT COUNT(*), COUNT(DISTINCT COALESCE(NULLIF(video_id, ''), title)),"
             "       SUM(CASE WHEN played_at >= ? THEN 1 ELSE 0 END) "
             "FROM plays",
-            (day_start,),
+            (day_start.timestamp(),),
         ).fetchone()
     return {
         "online_plays": int(row[0] or 0),
@@ -246,13 +227,16 @@ def totals() -> dict:
 
 
 def per_day(days: int = 7) -> list[tuple]:
-    """`(day_offset, play_count)` for the last `days` days, oldest first."""
-    now = time.time()
+    """`(day_offset, play_count)` for the last `days` calendar days, oldest first."""
+    today = datetime.date.today()
     out = []
     with _session() as conn:
         for offset in range(days - 1, -1, -1):
-            start = now - (offset + 1) * 86400
-            end = now - offset * 86400
+            day = today - datetime.timedelta(days=offset)
+            start = datetime.datetime.combine(day, datetime.time.min).timestamp()
+            end = datetime.datetime.combine(
+                day + datetime.timedelta(days=1), datetime.time.min
+            ).timestamp()
             row = conn.execute(
                 "SELECT COUNT(*) FROM plays WHERE played_at >= ? AND played_at < ?",
                 (start, end),

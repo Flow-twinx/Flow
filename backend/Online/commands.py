@@ -109,13 +109,13 @@ COMMANDS = {
     "delete": "Delete a downloaded song (alias: dl-d)",
     "artist": "Play songs by artist | artist <name> | -s shuffle",
     "tags": "Library tags | tags | tags scan (preview) | tags apply",
-    "playlist": "Manage playlists | create add remove list play rename move dup merge sort clear dedupe info export import download",
+    "playlist": "Manage playlists | create add remove list play rename move dup merge sort clear dedupe info export import download (-m for multi add/remove)",
     "switch": "Switch to Offline mode",
     "help": "Show this help message",
     "short": "Show/update command shortcuts",
     "config": "Change primary/secondary/tertiary colors, format, display",
     "check": "Check all dependencies (ffmpeg, vlc, yt-dlp, psutil)",
-    "summary": "Play summary | -l per-song table | -s <sort> | --top N",
+    "summary": "Play summary | -l per-song table | -s <sort> | --top N | -c clear all plays",
     "export": "Copy downloaded songs to ~/Downloads | -p <path> for elsewhere",
     "exit": "Exit Flow",
 }
@@ -837,18 +837,7 @@ def _like_autodownload(url: str, video_id: str, title: str):
     if fmt != "webm" and not config.FFMPEG:
         fmt = "webm"
     try:
-        stop = False
-        t = threading.Thread(
-            target=_spinner,
-            args=(lambda: stop, f"Downloading liked song: {_truncate_title(title)}"),
-            daemon=True,
-        )
-        t.start()
-        try:
-            youtube.download_url(url, config.DOWNLOAD_DIR, fmt=fmt)
-        finally:
-            stop = True
-            t.join()
+        youtube.download_url(url, config.DOWNLOAD_DIR, fmt=fmt, progress=True)
         i(f"    Downloaded: {_truncate_title(title)}")
     except Exception as exc:
         e(f"    Auto-download failed: {exc}")
@@ -905,18 +894,7 @@ def _download_current(title, thumb):
     fmt = config.FORMAT
     if fmt != "webm" and not config.FFMPEG:
         fmt = "webm"
-    stop = False
-    t = threading.Thread(
-        target=_spinner,
-        args=(lambda: stop, f"Downloading: {_truncate_title(title)}"),
-        daemon=True,
-    )
-    t.start()
-    try:
-        youtube.download_url(url, config.DOWNLOAD_DIR, fmt=fmt)
-    finally:
-        stop = True
-        t.join()
+    youtube.download_url(url, config.DOWNLOAD_DIR, fmt=fmt, progress=True)
     i(f"    Downloaded: {_truncate_title(title)}")
 
 
@@ -1259,7 +1237,7 @@ def radio(extra, args):
 
                 _radio_skip = False
                 if dl_dir:
-                    filepath = youtube.download_url(url, dl_dir)
+                    filepath = youtube.download_url(url, dl_dir, progress=True)
                     i(
                         f"    Downloaded ({idx + 1}/{len(_radio_tracks)}): {_truncate_title(title)}"
                     )
@@ -1384,20 +1362,11 @@ def _download_one(entry, fmt):
                 i(f"    Already downloaded: {_truncate_title(title)}")
                 return
 
-    label = f"Downloading: {_truncate_title(title)}"
-    if fmt != "webm":
-        label += f" → {fmt}"
-    stop = False
-    t = threading.Thread(target=_spinner, args=(lambda: stop, label), daemon=True)
-    t.start()
     try:
-        youtube.download_url(url, config.DOWNLOAD_DIR, fmt=fmt)
+        youtube.download_url(url, config.DOWNLOAD_DIR, fmt=fmt, progress=True)
     except Exception as exc:
         e(f"    Failed: {_truncate_title(title)} ({exc})")
         return
-    finally:
-        stop = True
-        t.join()
     if fmt != "webm":
         i(f"    Downloaded and converted to {fmt}: {_truncate_title(title)}")
     else:
@@ -1809,7 +1778,7 @@ def playlist_cmd(extra, args):
                 continue
             url = s.get("ref") or f"https://www.youtube.com/watch?v={vid}"
             try:
-                path = youtube.download_url(url, dl_dir, fmt=fmt)
+                path = youtube.download_url(url, dl_dir, fmt=fmt, progress=True)
                 playlist.backfill_local(actual, idx - 1, path)
                 done += 1
                 i(f"    Downloaded {label}")

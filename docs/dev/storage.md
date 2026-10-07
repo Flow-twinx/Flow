@@ -72,10 +72,15 @@ CREATE TABLE songs (
     last_played  REAL
 );
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE play_days (day TEXT PRIMARY KEY, plays INTEGER NOT NULL DEFAULT 0);
 ```
 
 `meta` holds migration flags only. `song` is the download path (`NULL`
-unless downloaded) and `speed_dial` marks web-UI favorites.
+unless downloaded) and `speed_dial` marks web-UI favorites. `play_days` is
+one bucket per calendar day, bumped alongside `song_count` by
+`library.bump_play()`: `history.db` only timestamps streams, so this table
+is what lets `flow summary` chart *offline* plays per day. There is no
+backfill — buckets only exist from the first play after this shipped.
 
 **The API is still dict-shaped.** `library.load()` returns
 `{video_id: {...}}` and every write goes through `library._mutate(fn)`, so
@@ -123,9 +128,10 @@ Notes:
 ### Play counting
 
 `library.bump_play(video_id, title, artist, duration)` increments
-`song_count` and stamps `first_played` / `last_played`, filling in
-title/artist/duration only when they are not already known. It is called for
-**every** play in both modes, from four entry points:
+`song_count`, stamps `first_played` / `last_played` and upserts today's
+`play_days` bucket, filling in title/artist/duration only when they are not
+already known. It is called for **every** play in both modes, from four
+entry points:
 
 | Entry point | File |
 | --- | --- |
@@ -143,6 +149,12 @@ The web player counts through `POST /api/history/play` (see
 [history.db](#historydb)) rather than `/api/now-playing`, because the player
 bar posts to the latter on play, pause *and* `loadedmetadata`.
 
+`library.clear_plays()` is the other writer: it zeroes `song_count` and the
+two play stamps for every row and drops the `play_days` buckets, keeping
+likes, downloads, tags and renames. It backs `summary -c`, which empties
+`history.db` in the same pass so the CLI's online/offline split stays
+honest.
+
 ## history.db
 
 SQLite (`backend/history.py`) — the online-only play log:
@@ -159,8 +171,8 @@ CREATE TABLE plays (
 
 One row per play event, holding only the song name, the artist and the
 timestamp. **Local playback is deliberately not logged here** — it is counted
-by `song_count` in `library.db` but never produces a timeline row, so the
-history stays a record of what you streamed.
+by `song_count` and today's `play_days` bucket in `library.db` but never
+produces a timeline row, so the history stays a record of what you streamed.
 
 The two databases answer different questions on purpose:
 

@@ -63,3 +63,30 @@ def test_paused_track_fails_the_command_gate(module):
     data = status.read()
 
     assert not (data.get("playing") and status._fresh(data))
+
+
+def test_update_elapsed_preserves_track(module):
+    module._paused = False
+    module._publish_play_state()
+    status.update_elapsed(42)
+
+    data = status.read()
+    assert data["elapsed"] == 42
+    assert data["title"] == "Test Song"
+    assert data["playing"] is True
+    assert status._fresh(data)
+
+
+def test_tick_position_publishes_once_per_second(module):
+    module._pos_pub_at = 0.0
+    module._publish_play_state()
+
+    module._tick_position(None, 12)
+    assert status.read()["elapsed"] == 12
+
+    module._tick_position(None, 30)
+    assert status.read()["elapsed"] == 12  # throttled within the same second
+
+    module._pos_pub_at = 0.0
+    module._tick_position(None, 30)
+    assert status.read()["elapsed"] == 30

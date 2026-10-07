@@ -58,6 +58,23 @@ def _publish_play_state():
         pass
 
 
+_pos_pub_at = 0.0
+
+
+def _tick_position(player, elapsed=None):
+    """Publish live position ~1/s so `flow --full` can render progress."""
+    global _pos_pub_at
+    now = time.time()
+    if now - _pos_pub_at < 1.0:
+        return
+    _pos_pub_at = now
+    try:
+        pos = elapsed if elapsed is not None else player.get_time() / 1000.0
+        status.update_elapsed(pos)
+    except Exception:
+        pass
+
+
 def _teardown():
 
     global _player
@@ -265,7 +282,9 @@ def _display_loop(
 ):
     global _paused
     display = config.Display
-    if display == "bars" and not (sys.stdin.isatty() and sys.stdout.isatty()):
+    if display in ("bars", "progress") and not (
+        sys.stdin.isatty() and sys.stdout.isatty()
+    ):
         display = "none"
     if display == "none":
         paused_printed = False
@@ -285,6 +304,7 @@ def _display_loop(
             elif paused_printed:
                 paused_printed = False
                 _publish_play_state()
+            _tick_position(player)
             time.sleep(0.1)
         return
 
@@ -322,7 +342,6 @@ def _display_loop(
             curses.endwin()
             return
 
-    start = time.time()
     last_lyric_line = None
     paused_printed = False
     try:
@@ -359,9 +378,12 @@ def _display_loop(
                 visualizer.set_paused(False)
                 paused_printed = False
                 _publish_play_state()
-            elapsed = time.time() - start
+            elapsed = max(0.0, player.get_time() / 1000.0)
+            _tick_position(player, elapsed)
             if display == "bars":
                 visualizer.draw()
+            elif display == "progress":
+                config.render_progress(elapsed, duration)
             elif display == "lyrics" and fetched_lyrics:
                 line = lyrics.find_line(fetched_lyrics, elapsed)
                 if line and line != last_lyric_line:

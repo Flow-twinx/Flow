@@ -1,3 +1,4 @@
+import datetime
 import hashlib
 import json
 import pathlib
@@ -49,6 +50,11 @@ CREATE INDEX IF NOT EXISTS idx_songs_played ON songs(last_played DESC);
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT
+);
+
+CREATE TABLE IF NOT EXISTS play_days (
+    day   TEXT PRIMARY KEY,
+    plays INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -363,8 +369,8 @@ def play_rows() -> list:
     """Per-song play counts across every mode (see `summary.py` / the web API)."""
     with _session() as conn:
         rows = conn.execute(
-            "SELECT video_id, title, custom_title, artist, album, song, thumbnail,"
-            "       duration, song_count, first_played, last_played "
+            "SELECT video_id, title, custom_title, artist, album, language, song,"
+            "       thumbnail, duration, song_count, first_played, last_played "
             "FROM songs WHERE song_count > 0"
         ).fetchall()
     return [
@@ -373,6 +379,7 @@ def play_rows() -> list:
             "title": r["custom_title"] or r["title"] or r["video_id"],
             "artist": r["artist"] or "",
             "album": r["album"] or "",
+            "language": r["language"] or "",
             "song": r["song"],
             "thumbnail": r["thumbnail"] or "",
             "duration": int(r["duration"] or 0),
@@ -737,6 +744,11 @@ def bump_play(video_id: str, title: str = "", artist: str = "", duration=0) -> i
         entry["first_played"] = entry.get("first_played") or now
         entry["last_played"] = now
         conn.execute(_UPSERT, (video_id, *_to_values(_sanitize(entry))))
+        conn.execute(
+            "INSERT INTO play_days (day, plays) VALUES (?, 1) "
+            "ON CONFLICT(day) DO UPDATE SET plays = plays + 1",
+            (datetime.date.today().isoformat(),),
+        )
         return entry["song_count"]
 
 
@@ -744,8 +756,8 @@ def stats() -> dict:
     """Library-wide play totals, used by the CLI summary and the RPC surface."""
     rows = play_rows()
     total = sum(r["song_count"] for r in rows)
-    day_start = time.time() - 86400
-    today = sum(1 for r in rows if r["last_played"] >= day_start)
+    day_start = datetime.datetime.combine(datetime.date.today(), datetime.time.min)
+    today = sum(1 for r in rows if r["last_played"] >= day_start.timestamp())
     return {
         "total_plays": total,
         "unique_songs": len(rows),
@@ -753,6 +765,34 @@ def stats() -> dict:
         "downloaded": len(get_downloaded_ids()),
         "liked": len(get_liked_ids()),
     }
+
+
+def play_days(days: int = 7) -> list:
+    """`[(day_offset, plays)]` per calendar day, both modes, oldest first."""
+    today = datetime.date.today()
+    counts: dict[str, int] = {}
+    with _session() as conn:
+        rows = conn.execute(
+            "SELECT day, plays FROM play_days WHERE day >= ?",
+            ((today - datetime.timedelta(days=days - 1)).isoformat(),),
+        ).fetchall()
+    for r in rows:
+        counts[r["day"]] = int(r["plays"] or 0)
+    return [
+        (offset, counts.get((today - datetime.timedelta(days=offset)).isoformat(), 0))
+        for offset in range(days - 1, -1, -1)
+    ]
+
+
+def clear_plays() -> int:
+    """Zero every play counter and day bucket (both modes); rows survive."""
+    with _write() as conn:
+        conn.execute("DELETE FROM play_days")
+        cur = conn.execute(
+            "UPDATE songs SET song_count = 0, first_played = NULL, last_played = NULL "
+            "WHERE song_count > 0"
+        )
+        return int(cur.rowcount)
 
 
 def delete(video_id: str) -> bool:

@@ -1,6 +1,7 @@
 import json
 import os
 import pathlib
+import shutil
 import time
 
 STATUS_FILE = pathlib.Path.home() / ".flow/status.json"
@@ -13,12 +14,28 @@ def update(title, duration=0, playing=True, thumbnail=None):
         "duration": int(duration or 0),
         "playing": bool(playing),
         "thumbnail": thumbnail or "",
+        "elapsed": 0,
         "ts": time.time(),
     }
     STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
     tmp = STATUS_FILE.with_name(STATUS_FILE.name + ".tmp")
     tmp.write_text(json.dumps(data))
     os.replace(tmp, STATUS_FILE)
+
+
+def update_elapsed(elapsed):
+    """Refresh the live playback position so `flow --full` can render progress."""
+    try:
+        data = _read()
+        if not data.get("title"):
+            return
+        data["elapsed"] = int(max(0, float(elapsed)))
+        data["ts"] = time.time()
+        tmp = STATUS_FILE.with_name(STATUS_FILE.name + ".tmp")
+        tmp.write_text(json.dumps(data))
+        os.replace(tmp, STATUS_FILE)
+    except Exception:
+        pass
 
 
 def _read():
@@ -56,14 +73,25 @@ def _fresh(data):
     return time.time() - ts <= max(120.0, dur + 30.0)
 
 
+def _tty_width(default: int = 96) -> int:
+    try:
+        return max(72, min(140, shutil.get_terminal_size().columns))
+    except Exception:
+        return default
+
+
 def _print_plain(Primary, GREY, Reset, entries):
-    sep = f"{GREY}{'─' * 44}{Reset}"
-    print(f"\n{Primary}┌─ Flow Status{Reset}")
-    print(sep)
-    for label, rendered, _ in entries:
-        print(f"{Primary}│{Reset}  {label:<17}: {rendered}")
-    print(sep)
-    print(f"{Primary}└─{Reset}\n")
+    width = _tty_width()
+    inner = width - 2
+    title = "Flow Status"
+    print(f"\n{Primary}┌─ {title} {'─' * max(0, inner - len(title) - 3)}┐{Reset}")
+    for label, rendered, plain in entries:
+        line = f"  {label:<17}: {rendered}"
+        print(
+            f"{Primary}│{Reset} {line}{' ' * max(0, inner - 1 - (21 + plain))}"
+            f"{Primary}│{Reset}"
+        )
+    print(f"{Primary}└{'─' * inner}┘{Reset}\n")
 
 
 def _vid_from_thumb(thumb: str):

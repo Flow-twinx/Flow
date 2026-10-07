@@ -1,5 +1,6 @@
 import logging
 import pathlib
+import sys
 
 import yt_dlp
 
@@ -94,8 +95,29 @@ def search(query, limit=3):
     return results
 
 
-def download_url(url, outdir, fmt=None):
+def progress_hook(d):
+    """yt-dlp hook: draw a `\\r` block bar while a track downloads."""
+    if d.get("status") != "downloading":
+        return
+    total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+    got = d.get("downloaded_bytes") or 0
+    if total <= 0:
+        return
+    pct = got / total * 100
+    title = (d.get("info_dict") or {}).get("title", "") or ""
+    if len(title) > 26:
+        title = title[:25] + "…"
+    label = f"  {title}" if title else ""
+    sys.stdout.write(
+        f"\r{label}  {config.progress_bar(got / total, config.BarWidth)} {pct:5.1f}%"
+    )
+    sys.stdout.flush()
+
+
+def download_url(url, outdir, fmt=None, progress=False):
     opts = {**ydl_opts_dwn, "outtmpl": f"{outdir}/%(id)s.%(ext)s"}
+    if progress and sys.stdout.isatty():
+        opts["progress_hooks"] = [progress_hook]
     pps = sponsor.download_postprocessors()
     if fmt and fmt != "webm":
         pps = pps + [{"key": "FFmpegExtractAudio", "preferredcodec": fmt}]
@@ -112,6 +134,9 @@ def download_url(url, outdir, fmt=None):
         logger.warning("Download failed for %s: %s", url, exc)
         config.down_notify(url, error=True)
         raise
+    if opts.get("progress_hooks"):
+        sys.stdout.write("\r" + " " * 60 + "\r")
+        sys.stdout.flush()
     config.dev_print(
         "YouTube Download",
         {

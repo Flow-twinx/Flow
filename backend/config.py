@@ -5,6 +5,7 @@ import re
 import shutil
 import signal as _signal
 import subprocess
+import sys
 
 CONFIG_FILE = pathlib.Path.home() / ".flow/config.json"
 
@@ -102,7 +103,7 @@ _TARGET_ALIASES = {
     "spin": "spinner",
 }
 _TARGETS = {"primary", "secondary", "tertiary", "display"}
-_DISPLAY_MODES = {"none", "bars", "lyrics"}
+_DISPLAY_MODES = {"none", "bars", "lyrics", "progress"}
 _BAR_SPACING = {"min", "fit", "max"}
 
 Primary = CYAN
@@ -114,6 +115,8 @@ BarWidth = 20
 BarHeight = 40
 BarSpacing = 1
 BarChar = "\u2588"
+ProgChar = "\u2588"
+ProgCharEm = "\u2591"
 Sensitivity = 1.0
 SPINNER = "|/-\\"
 
@@ -516,6 +519,8 @@ def _load_config():
         BarHeight, \
         BarSpacing, \
         BarChar, \
+        ProgChar, \
+        ProgCharEm, \
         Sensitivity, \
         SPINNER, \
         DEV_MODE, \
@@ -573,6 +578,18 @@ def _load_config():
         ):
             BarChar = data["bar_char"][:1]
         if (
+            "prog_char" in data
+            and isinstance(data["prog_char"], str)
+            and data["prog_char"]
+        ):
+            ProgChar = data["prog_char"][:1]
+        if (
+            "prog_char_em" in data
+            and isinstance(data["prog_char_em"], str)
+            and data["prog_char_em"]
+        ):
+            ProgCharEm = data["prog_char_em"][:1]
+        if (
             "spinner" in data
             and isinstance(data["spinner"], str)
             and 2 <= len(data["spinner"]) <= 16
@@ -624,6 +641,8 @@ def _save_config():
         "bar_height": BarHeight,
         "bar_spacing": BarSpacing,
         "bar_char": BarChar,
+        "prog_char": ProgChar,
+        "prog_char_em": ProgCharEm,
         "sensitivity": Sensitivity,
         "spinner": SPINNER,
         "dev": DEV_MODE,
@@ -789,7 +808,7 @@ def _apply_color(which, value):
 def _apply_display(value):
     global Display
     if value not in _DISPLAY_MODES:
-        return f"Unknown display mode '{value}'. Options: none, bars, lyrics"
+        return f"Unknown display mode '{value}'. Options: none, bars, lyrics, progress"
     Display = value
     _save_config()
     return f"{Tertiary}Display mode changed to {value}{Reset}"
@@ -822,6 +841,42 @@ def _apply_bar_char(v):
     BarChar = str(char)[:1]
     _save_config()
     return f"{Tertiary}Bar char changed to {BarChar}{Reset}"
+
+
+def _apply_prog_char(v):
+    global ProgChar
+    char = _BAR_CHARS.get(str(v).lower(), v)
+    ProgChar = str(char)[:1]
+    _save_config()
+    return f"{Tertiary}Progress char changed to {ProgChar}{Reset}"
+
+
+def _apply_prog_char_em(v):
+    global ProgCharEm
+    char = _BAR_CHARS.get(str(v).lower(), v)
+    ProgCharEm = str(char)[:1]
+    _save_config()
+    return f"{Tertiary}Progress empty char changed to {ProgCharEm}{Reset}"
+
+
+def progress_bar(frac, width=None):
+    """A block bar filled to `frac` in Primary, remainder muted."""
+    width = width or BarWidth
+    frac = max(0.0, min(1.0, float(frac)))
+    filled = int(round(frac * width))
+    return f"{Primary if Mode == 'Online' else Secondary}{ProgChar * filled}{Reset}{Muted}{ProgCharEm * (width - filled)}{Reset}"
+
+
+def render_progress(elapsed, duration, width=None):
+    """Draw a live `\\r` progress line for the playing track."""
+    duration = max(int(duration or 0), 0)
+    frac = min(float(elapsed) / duration, 1.0) if duration else 0.0
+    total = f"{duration // 60}:{duration % 60:02d}" if duration else "--:--"
+    now = f"{int(elapsed) // 60}:{int(elapsed) % 60:02d}"
+    sys.stdout.write(
+        f"\r  {progress_bar(frac, width)}  {now} / {total}  {int(frac * 100):>3}%"
+    )
+    sys.stdout.flush()
 
 
 def _apply_sensitivity(v):
@@ -876,6 +931,8 @@ PLUGIN_SAFE_KEYS = {
     "barheight",
     "barspacing",
     "barchar",
+    "progchar",
+    "progcharem",
     "sensitivity",
     "format",
     "max_search",
@@ -921,6 +978,10 @@ def apply_config(key, value):
         return "sensitivity must be between 0.5 and 5.0"
     if target in ("barchar", "bar_char"):
         return _apply_bar_char(value)
+    if target in ("progchar", "prog_char"):
+        return _apply_prog_char(value)
+    if target in ("progcharem", "prog_char_em"):
+        return _apply_prog_char_em(value)
     if target == "format":
         return _apply_format(value)
     if target == "ad_skip":
@@ -975,6 +1036,8 @@ def config_get(key):
         "barheight": lambda: BarHeight,
         "barspacing": lambda: BarSpacing,
         "barchar": lambda: BarChar,
+        "progchar": lambda: ProgChar,
+        "progcharem": lambda: ProgCharEm,
         "sensitivity": lambda: Sensitivity,
         "format": lambda: FORMAT,
         "dev": lambda: DEV_MODE,
@@ -1013,6 +1076,8 @@ def cmd_config(extra: list[str], args=None):
         BarHeight, \
         BarSpacing, \
         BarChar, \
+        ProgChar, \
+        ProgCharEm, \
         Sensitivity, \
         DEV_MODE, \
         FORMAT, \
@@ -1032,6 +1097,12 @@ def cmd_config(extra: list[str], args=None):
         print(f"  {GREY}barspacing{Reset} (0-4, min, fit, max — current: {BarSpacing})")
         print(
             f"  {GREY}barchar{Reset}    (dot, block, circle, or any single char — current: {BarChar})"
+        )
+        print(
+            f"  {GREY}progchar{Reset}   (progress bar fill — dot/block/circle or any single char, current: {ProgChar})"
+        )
+        print(
+            f"  {GREY}progcharem{Reset} (progress bar empty part — dot/block/circle or any single char, current: {ProgCharEm})"
         )
         print(f"  {GREY}sensitivity{Reset} (0.5-5.0, current: {Sensitivity})")
         print(
@@ -1099,6 +1170,10 @@ def cmd_config(extra: list[str], args=None):
         print(_apply_sensitivity(v))
     elif target in ("barchar", "bar_char"):
         print(_apply_bar_char(value))
+    elif target in ("progchar", "prog_char"):
+        print(_apply_prog_char(value))
+    elif target in ("progcharem", "prog_char_em"):
+        print(_apply_prog_char_em(value))
     elif target == "dev":
         if value not in ("true", "false"):
             print("Usage: config dev true/false")
@@ -1196,7 +1271,7 @@ def _interactive_config():
             "type": "select",
             "name": "display",
             "message": "Display mode",
-            "choices": ["none", "bars", "lyrics"],
+            "choices": ["none", "bars", "lyrics", "progress"],
             "default": Display,
         },
         {
@@ -1255,6 +1330,20 @@ def _interactive_config():
             "message": "Bar char (dot/block/circle or single char)",
             "default": _BC_NAME(BarChar),
             "when": lambda a: a["display"] == "bars",
+        },
+        {
+            "type": "text",
+            "name": "prog_char",
+            "message": "Progress bar fill char (dot/block/circle or single char)",
+            "default": _BC_NAME(ProgChar),
+            "when": lambda a: a["display"] == "progress",
+        },
+        {
+            "type": "text",
+            "name": "prog_char_em",
+            "message": "Progress bar empty char (dot/block/circle or single char)",
+            "default": _BC_NAME(ProgCharEm),
+            "when": lambda a: a["display"] == "progress",
         },
         {
             "type": "text",
@@ -1345,6 +1434,11 @@ def _interactive_config():
                         print(_apply_sensitivity(v))
                 except ValueError:
                     pass
+        if answers.get("display") == "progress":
+            if "prog_char" in answers:
+                print(_apply_prog_char(answers["prog_char"]))
+            if "prog_char_em" in answers:
+                print(_apply_prog_char_em(answers["prog_char_em"]))
 
         if "format" in answers:
             print(_apply_format(answers["format"]))

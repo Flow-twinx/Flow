@@ -151,11 +151,12 @@ def test_table_is_empty_before_anything_is_played(capsys):
 
 def test_stats_card_reports_both_stores(capsys):
     out = run(capsys, [])
-    assert "total plays" in out
-    # 7 plays across 3 songs in library.db, but only 4 online events logged.
-    assert re.search(r"total plays\s+7\b", out)
-    assert re.search(r"unique songs\s+3\b", out)
+    assert "combined plays" in out
+    # 7 plays across 3 songs in library.db, 4 of them online events logged.
+    assert re.search(r"combined plays\s+7\b", out)
     assert re.search(r"online plays\s+4\b", out)
+    assert re.search(r"offline plays\s+3\b", out)
+    assert re.search(r"unique songs\s+3\b", out)
     assert "history.db" in out
 
 
@@ -165,13 +166,53 @@ def test_stats_card_lists_the_top_artist(capsys):
     assert "4 plays" in out
 
 
-def test_clear_only_empties_the_online_log(capsys):
+def test_stats_card_lists_the_top_song(capsys):
+    out = run(capsys, [])
+    assert "top song" in out
+    assert "Around the World (4 plays)" in out
+
+
+def test_stats_card_ranks_languages_by_plays(capsys):
+    library.update_meta("sum-test-1", {"language": "english"})
+    out = run(capsys, [])
+    # 4 plays on the only tagged song; the two untagged songs are skipped.
+    assert re.search(r"top language\s+english \(4 plays\)", out)
+
+
+def test_stats_card_shows_a_dash_without_any_language_tag(capsys):
+    out = run(capsys, [])
+    assert re.search(r"top language[ \t]+-[ \t]*│", out, re.M)
+
+
+def test_chart_stacks_online_and_offline_for_today(capsys):
+    online = history.totals()["online_today"]
+    offline = max(dict(library.play_days(7))[0] - online, 0)
+    out = run(capsys, [])
+    # The seed logs 4 streams today; the offline count comes from the bucket.
+    assert online == 4
+    assert offline >= 3
+    assert re.search(rf"today\s+[█░]+\s*{online}/{offline}", out)
+
+
+def test_summary_renders_week_progress_line(capsys):
+    out = run(capsys, [])
+    assert re.search(
+        r"this week\s+[█░]+\s+\d+ vs \d+ plays · (no last-week plays|\d+% of last week)",
+        out,
+    )
+
+
+def test_clear_wipes_both_stores(capsys):
     out = run(capsys, ["-c"])
     assert "Cleared 4" in out
     assert history.count() == 0
-    # song_count lives in library.db and must survive a history wipe.
-    assert library.get_song_count("sum-test-1") == 4
-    assert re.search(r"total plays\s+7\b", run(capsys, []))
+    # Both modes go to zero together, otherwise offline would swallow the lot.
+    assert library.get_song_count("sum-test-1") == 0
+    assert all(count == 0 for _, count in library.play_days(7))
+    out = run(capsys, [])
+    assert re.search(r"combined plays\s+0\b", out)
+    assert re.search(r"online plays\s+0\b", out)
+    assert re.search(r"offline plays\s+0\b", out)
 
 
 def test_help_lists_every_flag(capsys):
@@ -189,3 +230,36 @@ def test_cli_sorts_and_web_sorts_are_different_sets():
     assert set(summary.SORTS) == {"plays", "recent", "name", "artist"}
     assert set(history.SORTS) == {"recent", "oldest", "most", "least"}
     assert summary.SORTS != history.SORTS
+
+
+# ---------------------------------------------------------------------------
+# Full-width boxes — `flow --status` and `--summary` cards fill the terminal
+# ---------------------------------------------------------------------------
+
+def test_summary_box_spans_the_full_width(capsys):
+    summary._box("Flow Summary", [("combined plays", "12")], 96)
+    lines = ANSI.sub("", capsys.readouterr().out).splitlines()
+    top, row, bottom, empty = lines
+    assert top.startswith("┌─ Flow Summary ") and top.endswith("┐")
+    assert len(top) == 96
+    assert len(row) == 96 and row.endswith("│")
+    assert len(bottom) == 96
+    assert bottom.startswith("└") and bottom.endswith("┘")
+    assert empty == ""
+
+
+def test_status_box_spans_the_full_width(capsys, monkeypatch):
+    from backend import config, status
+
+    monkeypatch.setattr(status, "_tty_width", lambda: 96)
+    status._print_plain(
+        config.Primary, config.GREY, config.Reset, [("status", "playing", 7)]
+    )
+    lines = ANSI.sub("", capsys.readouterr().out).splitlines()
+    _, top, row, bottom, empty = lines
+    assert top.startswith("┌─ Flow Status ") and top.endswith("┐")
+    assert len(top) == 96
+    assert len(row) == 96 and row.endswith("│")
+    assert len(bottom) == 96
+    assert bottom.startswith("└") and bottom.endswith("┘")
+    assert empty == ""

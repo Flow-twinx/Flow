@@ -59,6 +59,23 @@ def _publish_play_state():
         pass
 
 
+_pos_pub_at = 0.0
+
+
+def _tick_position(player, elapsed=None):
+    """Publish live position ~1/s so `flow --full` can render progress."""
+    global _pos_pub_at
+    now = time.time()
+    if now - _pos_pub_at < 1.0:
+        return
+    _pos_pub_at = now
+    try:
+        pos = elapsed if elapsed is not None else player.get_time() / 1000.0
+        status.update_elapsed(pos)
+    except Exception:
+        pass
+
+
 def _clear_stale_pid():
     if config.read_pid() == os.getpid():
         config.clear_pid()
@@ -237,10 +254,12 @@ def _attach_vlc_events():
             pass
 
 
-def _display_loop(player, title=None, args=None, next_title=None, stop_check=None):
+def _display_loop(player, title=None, args=None, next_title=None, stop_check=None, duration=0):
     global _paused
     display = config.Display
-    if display == "bars" and not (sys.stdin.isatty() and sys.stdout.isatty()):
+    if display in ("bars", "progress") and not (
+        sys.stdin.isatty() and sys.stdout.isatty()
+    ):
         display = "none"
     if display == "none":
         paused_printed = False
@@ -260,6 +279,7 @@ def _display_loop(player, title=None, args=None, next_title=None, stop_check=Non
             elif paused_printed:
                 paused_printed = False
                 _publish_play_state()
+            _tick_position(player)
             time.sleep(0.1)
         return
 
@@ -318,8 +338,12 @@ def _display_loop(player, title=None, args=None, next_title=None, stop_check=Non
                 visualizer.set_paused(False)
                 paused_printed = False
                 _publish_play_state()
+            elapsed = max(0.0, player.get_time() / 1000.0)
+            _tick_position(player, elapsed)
             if display == "bars":
                 visualizer.draw()
+            elif display == "progress":
+                config.render_progress(elapsed, duration)
             try:
                 time.sleep(0.08)
             except OSError:
@@ -439,6 +463,7 @@ def play_file(filepath, title, args=None, flags=None, next_title=None, nav=None)
                 args=args,
                 next_title=next_title,
                 stop_check=stop_check,
+                duration=duration,
             )
         except KeyboardInterrupt:
             _player.stop()

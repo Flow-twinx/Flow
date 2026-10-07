@@ -28,6 +28,11 @@ def show_banner():
     builtins.print()
 
 
+def clear_screen():
+    sys.stdout.write("\x1b[2J\x1b[H")
+    sys.stdout.flush()
+
+
 def input(prompt: str = "") -> str:
     if config.Mode == "Online":
         return builtins.input(f"{config.Primary}{prompt}$ {config.Reset}")

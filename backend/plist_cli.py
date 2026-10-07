@@ -53,6 +53,12 @@ def _resolve_or_error(name):
     return None
 
 
+def _multi_split(extra):
+    """Strip `-m`/`--multi` and report whether the multi flag was given."""
+    tokens = [t for t in extra if t not in ("-m", "--multi")]
+    return len(tokens) != len(extra), tokens
+
+
 def _print_tracks(name, tracks):
     i(f"  {name}:")
     if not tracks:
@@ -273,43 +279,94 @@ def handle(extra, args=None, hooks=None):
         _print_tracks(actual, playlist.get(actual))
 
     elif subcmd == "remove":
-        if len(extra) < 3:
-            e("Usage: playlist remove <name> <index_or_name>")
+        multi, toks = _multi_split(extra)
+        multi = multi or bool(getattr(args, "multi", False))
+        if len(toks) < 3:
+            e("Usage: playlist remove [-m] <name> <index|name> [more...]")
             return
-        actual = _resolve_or_error(extra[1])
+        actual = _resolve_or_error(toks[1])
         if not actual:
             return
-        target = " ".join(extra[2:])
-        if target.isdigit():
-            ok, msg = playlist.remove_song(actual, index=int(target) - 1)
+        targets = toks[2:]
+        if not multi:
+            target = " ".join(targets)
+            if target.isdigit():
+                ok, msg = playlist.remove_song(actual, index=int(target) - 1)
+            else:
+                ok, msg = playlist.remove_song(actual, title_match=target)
+            if ok:
+                i(f"Removed: {msg} from {actual}")
+            else:
+                e(f"     {msg}")
+            return
+        removed, missing = [], 0
+        for idx in sorted((int(t) - 1 for t in targets if t.isdigit()), reverse=True):
+            ok, msg = playlist.remove_song(actual, index=idx)
+            if ok:
+                removed.append(msg)
+            else:
+                missing += 1
+        for word in (t for t in targets if not t.isdigit()):
+            ok, msg = playlist.remove_song(actual, title_match=word)
+            if ok:
+                removed.append(msg)
+            else:
+                missing += 1
+        tail = f" ({missing} not found)" if missing else ""
+        if removed:
+            i(f"Removed {len(removed)} from {actual}: "
+              f"{', '.join(_truncate(t) for t in removed)}{tail}")
         else:
-            ok, msg = playlist.remove_song(actual, title_match=target)
-        if ok:
-            i(f"Removed: {msg} from {actual}")
-        else:
-            e(f"     {msg}")
+            m(f"Removed nothing from {actual}{tail}")
 
     elif subcmd == "add":
-        if len(extra) < 3:
-            e("Usage: playlist add <name> <index_or_query>")
+        multi, toks = _multi_split(extra)
+        multi = multi or bool(getattr(args, "multi", False))
+        if len(toks) < 3:
+            e("Usage: playlist add [-m] <name> <index|query> [more...]")
             return
-        actual = _resolve_or_error(extra[1])
+        actual = _resolve_or_error(toks[1])
         if not actual:
             return
         make_source = hooks.get("add_source")
         if make_source is None:
             e("     Add is not supported in this mode")
             return
-        track = make_source(extra[2:], args)
-        if track is None:
+        if not multi:
+            track = make_source(toks[2:], args)
+            if track is None:
+                return
+            state, msg = playlist.add_track(actual, track)
+            if state == "added":
+                i(f"Added: {_truncate(track.get('title'))} to {actual}")
+            elif state == "skipped":
+                m(f"Already in {actual}: {_truncate(track.get('title'))}")
+            else:
+                e(f"     {msg}")
             return
-        state, msg = playlist.add_track(actual, track)
-        if state == "added":
-            i(f"Added: {_truncate(track.get('title'))} to {actual}")
-        elif state == "skipped":
-            m(f"Already in {actual}: {_truncate(track.get('title'))}")
+        added, skipped, failed = [], 0, []
+        for word in toks[2:]:
+            track = make_source([word], args)
+            if track is None:
+                failed.append(word)
+                continue
+            state, msg = playlist.add_track(actual, track)
+            if state == "added":
+                added.append(_truncate(track.get("title")))
+            elif state == "skipped":
+                skipped += 1
+            else:
+                failed.append(word)
+        bits = []
+        if skipped:
+            bits.append(f"{skipped} skipped")
+        if failed:
+            bits.append(f"{len(failed)} failed")
+        tail = f" ({', '.join(bits)})" if bits else ""
+        if added:
+            i(f"Added {len(added)} to {actual}: {', '.join(added)}{tail}")
         else:
-            e(f"     {msg}")
+            m(f"Added nothing to {actual}{tail}")
 
     elif subcmd == "download":
         if len(extra) < 2:

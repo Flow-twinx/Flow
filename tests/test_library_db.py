@@ -315,6 +315,30 @@ def test_play_rows_exclude_unplayed_and_report_totals(song):
     assert stats["unique_songs"] == len(rows)
 
 
+def test_clear_plays_zeroes_counts_but_keeps_the_row(song):
+    library.mark_liked(song, "Kept Anthem")
+    library.bump_play(song, "Kept Anthem", ARTIST, 180)
+    assert library.get_song_count(song) == 1
+
+    assert library.clear_plays() >= 1
+
+    assert library.get_song_count(song) == 0
+    assert song not in {r["video_id"] for r in library.play_rows()}
+    entry = library.get(song)
+    assert entry and entry["liked"] is True
+    assert entry["title"] == "Kept Anthem"
+
+
+def test_play_days_counts_a_play_and_clear_drops_the_bucket(song):
+    before = dict(library.play_days(7))[0]
+    library.bump_play(song, SONG_TITLE, ARTIST, 120)
+    assert dict(library.play_days(7))[0] == before + 1
+
+    library.clear_plays()
+
+    assert all(count == 0 for _, count in library.play_days(7))
+
+
 # ---------------------------------------------------------------------------
 # history.db — online-only event log
 # ---------------------------------------------------------------------------

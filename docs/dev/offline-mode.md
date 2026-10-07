@@ -56,12 +56,13 @@ around local files:
   queue built from the current command's selection, saves the pid to
   `~/.flow/vlc.pid`, updates `status.json` (thumbnail resolved to the local
   cache path), publishes MPRIS metadata, and runs `_display_loop` (same
-  `bars`/`lyrics`/`none` renderers as online mode).
+  `bars`/`lyrics`/`progress`/`none` renderers as online mode).
 - The same signal set from online mode is installed
   (`setup_nav_signals()`): play/pause, next/previous, seek, stop.
 - `play_file` records the play with `history.record_play(stem, ..., mode="offline")`.
-  Offline playback moves `song_count` in `library.db` but does **not** add a
-  row to `history.db` — the online play log stays online-only. The filename
+  Offline playback moves `song_count` and today's `play_days` bucket in
+  `library.db` but does **not** add a row to `history.db` — the online play
+  log stays online-only. The filename
   stem *is* the video id, so a downloaded song shares one counter with its
   online plays. See [Play counting](storage.md#play-counting).
 

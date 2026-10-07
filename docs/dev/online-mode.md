@@ -85,6 +85,8 @@ See [Playback control](control.md) for the full picture.
 - `lyrics` — `backend/lyrics.py` fetches timed lyrics (LRCLIB, then
   YouTube Music) and prints the current line; untimed lyrics print once as a
   static block.
+- `progress` — a live `\r` block bar (elapsed/total, percent) via
+  `config.render_progress`, drawn from `config.progress_bar`.
 - `none` — minimal progress output.
 
 ## Downloads
