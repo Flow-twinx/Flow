@@ -191,6 +191,66 @@ def test_web_rename_route_stores_the_name(song):
         )
 
 
+def test_tag_rows_filter_and_sort_by_name(tmp_path):
+    """Filtering and ordering are checked against this test's own rows only:
+    the scratch `library.db` is shared with every other test module."""
+    mine = {}
+    for idx, (name, language, artist) in enumerate(
+        (
+            ("Zed Track", "punjabi", "Testartist Zed"),
+            ("Alpha Track", "hindi", "Testartist Alpha"),
+            ("Mid Track", "punjabi", "Testartist Zed, Second"),
+        )
+    ):
+        video_id = f"tagvid{idx}"
+        path = tmp_path / f"{video_id}.opus"
+        path.write_bytes(b"")
+        mine[video_id] = name
+        library.track_download(
+            video_id, str(path), name, {"language": language, "artist": artist}
+        )
+
+    def titles(field, tag):
+        return [
+            r["title"]
+            for r in library.get_tag_rows(field, tag)
+            if r["video_id"] in mine
+        ]
+
+    assert titles("language", "punjabi") == ["Mid Track", "Zed Track"]
+    assert titles("language", "pun") == ["Mid Track", "Zed Track"]
+    assert titles("language", "hindi") == ["Alpha Track"]
+    assert titles("artist", "testartist zed") == ["Mid Track", "Zed Track"]
+    assert library.get_tag_rows("language", "") == []
+    assert library.get_tag_rows("artist", "no-such-artist") == []
+
+
+def test_tag_counts_split_collaborators():
+    for idx, (language, artist) in enumerate(
+        (
+            ("testlang", "Countartist One"),
+            ("testlang", "Countartist One"),
+            ("otherlang", "Countartist Two"),
+        )
+    ):
+        video_id = f"cntvid{idx}"
+        library.track_download(video_id, f"/tmp/{video_id}.opus", f"Track {idx}")
+        library.update_meta(video_id, {"language": language, "artist": artist})
+
+    langs = dict(library.get_tag_counts()[0])
+    artists = dict(library.get_tag_counts()[1])
+    assert langs["testlang"] == 2
+    assert artists["countartist one"] == 2
+    assert artists["countartist two"] == 1
+
+
+def test_only_downloaded_songs_are_tagged():
+    """A liked or searched track that was never downloaded has no tag rows."""
+    library.update_meta("undl", {"language": "hindi", "artist": "Nobody"})
+    assert library.get_tag_rows("language", "hindi") == []
+    assert library.get_tag_rows("artist", "Nobody") == []
+
+
 # ---------------------------------------------------------------------------
 # library.db — play counting (both modes)
 # ---------------------------------------------------------------------------

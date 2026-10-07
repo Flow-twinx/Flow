@@ -65,12 +65,12 @@ Everything lives under `~/.flow/`.
 | `library.db`                                | Per-song data + play counts, keyed by YouTube video id             |
 | `history.db`                                | Play log for online streams (song name, artist, when)              |
 | `status.json`                               | Current/last played track                                          |
+| `search.json`                               | Rows of the last `flow-min search`, so `flow-min play <index>` can pick one |
 | `downloads/`                                | Downloaded audio, named by video id (e.g. `TucWbkH5WX0.webm`)      |
 | `downloads/.cache/`                         | Thumbnails (`<video_id>.jpg`)                                      |
 | `downloads/liked songs/`                    | Copies of liked songs (offline liked list)                         |
 | `music/`                                    | Album folders browsable as albums in the web UI                    |
 | `playlists/`                                | One JSON file per playlist (schema v2)                             |
-| `playlist/`                                 | Folder used by `playlist download`                                 |
 | `shortcuts.json`                            | User command shortcuts                                             |
 | `ignore.txt`                                | Filler words stripped from titles (edit freely; `#` lines ignored) |
 | `plugins/`                                  | Installed plugins and plugin repo caches                           |

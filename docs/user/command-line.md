@@ -6,31 +6,34 @@
 2. **One-shot flags** — `flow --play "song"`, `flow --status`, `flow --summary`, control flags, etc.
 3. **Shell-mode commands** — `flow <command> <args>` runs a single command and exits.
 
+There is also a fourth front end, [`flow-min`](#flow-min-plain-non-interactive), for
+scripts, ssh sessions and agents.
+
 ## One-shot flags
 
-| Flag | Description |
-| ---- | ----------- |
-| `-bg` | Play in the background and return to the shell |
-| `-s` | Shuffle (used with play/radio) |
-| `-r [n]` | Repeat `n` times, or repeat forever when no number is given |
-| `-d` | Download the played song |
-| `--play <name>` | Play a song from YouTube |
-| `--play-off <name>` | Play from the local library without going online (auto-background) |
-| `--rd <name>` | Radio mix from YouTube (auto-background) |
-| `--radio-off` | Radio over the shuffled local library (auto-background) |
-| `--resume` | Resume the last played track from `~/.flow/status.json` (auto-background) |
-| `--pause` | Toggle play/pause in the running player (VLC, TUI, or web) |
-| `--next` | Skip to the next track in the running player |
-| `--previous` | Go back to the previous track in the running player |
-| `--seek SEC` | Seek SEC seconds forward in the running player |
-| `--seekb SEC` | Seek SEC seconds backward in the running player |
-| `--status` | Print the playback status card and exit |
-| `--summary` | Play statistics; see [summary](#summary) below |
-| `--like` | Like the currently playing song (requires an active player) |
-| `--unlike` | Unlike the currently playing song |
-| `--download` | Download the currently playing song |
-| `--setup-island` | Install the Hyprland music island into `~/.config/quickshell` |
-| `--check` | Check all dependencies |
+| Flag                | Description                                                               |
+| ------------------- | ------------------------------------------------------------------------- |
+| `-bg`               | Play in the background and return to the shell                            |
+| `-s`                | Shuffle (used with play/radio)                                            |
+| `-r [n]`            | Repeat `n` times, or repeat forever when no number is given               |
+| `-d`                | Download the played song                                                  |
+| `--play <name>`     | Play a song from YouTube                                                  |
+| `--play-off <name>` | Play from the local library without going online (auto-background)        |
+| `--rd <name>`       | Radio mix from YouTube (auto-background)                                  |
+| `--radio-off`       | Radio over the shuffled local library (auto-background)                   |
+| `--resume`          | Resume the last played track from `~/.flow/status.json` (auto-background) |
+| `--pause`           | Toggle play/pause in the running player (VLC, TUI, or web)                |
+| `--next`            | Skip to the next track in the running player                              |
+| `--previous`        | Go back to the previous track in the running player                       |
+| `--seek SEC`        | Seek SEC seconds forward in the running player                            |
+| `--seekb SEC`       | Seek SEC seconds backward in the running player                           |
+| `--status`          | Print the playback status card and exit                                   |
+| `--summary`         | Play statistics; see [summary](#summary) below                            |
+| `--like`            | Like the currently playing song (requires an active player)               |
+| `--unlike`          | Unlike the currently playing song                                         |
+| `--download`        | Download the currently playing song                                       |
+| `--setup-island`    | Install the Hyprland music island into `~/.config/quickshell`             |
+| `--check`           | Check all dependencies                                                    |
 
 `-bg`, `-s`, `-r`, `-d`, and `-m` are also accepted inline at the end of
 shell-mode commands, e.g. `flow play daft punk -s -r 3`. Single-letter flags
@@ -42,14 +45,14 @@ combine, so `-dm` is the same as `-d -m` (`-ms`, `-dms` work too).
 at once. Without `questionary` installed the picker falls back to a prompt where
 you type `1,3,5-7`, `1-`, `-3`, or `all`.
 
-| Command | Result |
-| --- | --- |
-| `flow download <query> -m` | download every ticked track |
-| `flow search <query> -dm` | download every ticked track |
-| `flow play <query> -dm` | download every ticked track, then play |
-| `flow search <query> -m` | play the ticked tracks as a queue |
-| `flow play <query> -m` | play the ticked tracks as a queue |
-| `flow play <query> -m` (offline) | play the ticked songs as a queue |
+| Command                          | Result                                 |
+| -------------------------------- | -------------------------------------- |
+| `flow download <query> -m`       | download every ticked track            |
+| `flow search <query> -dm`        | download every ticked track            |
+| `flow play <query> -dm`          | download every ticked track, then play |
+| `flow search <query> -m`         | play the ticked tracks as a queue      |
+| `flow play <query> -m`           | play the ticked tracks as a queue      |
+| `flow play <query> -m` (offline) | play the ticked songs as a queue       |
 
 Queued playback wires up next/prev between the selected tracks, and `-r` still
 repeats the queue.
@@ -113,27 +116,30 @@ These work in both the interactive prompt and shell mode. `search` shows
 results with indices; `play <index>` plays a result by number, and after a
 download the matching index can be used the same way.
 
-| Command | Description |
-| ------- | ----------- |
-| `play <name, index, or liked>` | Play a song by name or search-result number; offline also supports `play liked` and `play all`. `-m` plays a ticked selection as a queue |
-| `search <query>` | Search YouTube (online) or the local library (offline); `-dm` downloads a ticked selection |
-| `list` | List the local library (offline; alias `ls`) |
-| `savan <name>` | Play a song from JioSaavn (online) |
-| `savan-s <query>` | Search JioSaavn (online) |
-| `radio <name> [index]` | Radio mix (online) or shuffle-loop library (offline). Bare `radio` shuffles everything; a name seeds the loop with that song. `-p` saves as playlist |
-| `like` / `unlike` | Like/unlike the current song; liked songs are saved to the library and played with `play liked` |
-| `download <query or index>` | Save a streamed song (online; `-f <format>` picks opus/m4a/mp3/webm). Add `-m` to tick and download several |
-| `delete <name or index>` | Delete a downloaded song (alias: `dl-d`) |
-| `rename <name or index>` | Rename a downloaded song (offline; alias: `re`). You are then asked for the new name. An index is the number in the `list` output (ascending by name) and the prompt repeats it |
-| `playlist <sub>` | Manage playlists — see below |
-| `switch` | Toggle between online and offline mode |
-| `config [target [value]]` | Change settings; run bare for an interactive wizard |
-| `short` | Show/update command shortcuts |
-| `check` | Check all dependencies |
-| `summary` | Play statistics and the ranked per-song table — see below |
-| `export [-p <path>]` | Copy downloaded songs (tagged) to `~/Downloads`, or to `<path>` |
-| `help` / `help -i` | Command list / detailed help |
-| `exit` | Leave the interactive shell |
+| Command                        | Description                                                                                                                                                                                                                       |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `play <name, index, or liked>` | Play a song by name or search-result number; offline also supports `play liked` and `play all`. `-m` plays a ticked selection as a queue                                                                                          |
+| `search <query>`               | Search YouTube (online) or the local library (offline); `-dm` downloads a ticked selection                                                                                                                                        |
+| `list`                         | List the local library (offline; alias `ls`)                                                                                                                                                                                      |
+| `savan <name>`                 | Play a song from JioSaavn (online)                                                                                                                                                                                                |
+| `savan-s <query>`              | Search JioSaavn (online)                                                                                                                                                                                                          |
+| `radio <name> [index]`         | Radio mix (online) or shuffle-loop library (offline). Bare `radio` shuffles everything; a name seeds the loop with that song. `-p` saves as playlist                                                                              |
+| `like` / `unlike`              | Like/unlike the current song; liked songs are saved to the library and played with `play liked`                                                                                                                                   |
+| `download <query or index>`    | Save a streamed song (online; `-f <format>` picks opus/m4a/mp3/webm). Add `-m` to tick and download several                                                                                                                       |
+| `delete <name or index>`       | Delete a downloaded song (alias: `dl-d`)                                                                                                                                                                                          |
+| `rename <name or index>`       | Rename a downloaded song (offline; alias: `re`). You are then asked for the new name. An index is the number in the `list` output (ascending by name) and the prompt repeats it                                                   |
+| `lang <tag>`                   | Play every downloaded song with that language tag (offline). One word — `hindi`, `punjabi`, `telugu`, ... — set when the song was downloaded. Partial words work (`lang pun`); `-s` shuffles                                      |
+| `artist <name>`                | Play every song by that artist. Offline plays your downloads, online plays the YouTube results whose title credits the artist (falling back to the current track's artist). Partial words work; `-s` shuffles (alias: `ar`)       |
+| `tags [scan \| apply]`         | List the language and artist tags in your library. `tags scan` asks YouTube for each downloaded song's metadata and writes `~/.flow/tags-preview.tsv` (nothing is saved); `tags apply` writes that reviewed file into the library |
+| `playlist <sub>`               | Manage playlists — see below                                                                                                                                                                                                      |
+| `switch`                       | Toggle between online and offline mode                                                                                                                                                                                            |
+| `config [target [value]]`      | Change settings; run bare for an interactive wizard                                                                                                                                                                               |
+| `short`                        | Show/update command shortcuts                                                                                                                                                                                                     |
+| `check`                        | Check all dependencies                                                                                                                                                                                                            |
+| `summary`                      | Play statistics and the ranked per-song table — see below                                                                                                                                                                         |
+| `export [-p <path>]`           | Copy downloaded songs (tagged) to `~/Downloads`, or to `<path>`                                                                                                                                                                   |
+| `help` / `help -i`             | Command list / detailed help                                                                                                                                                                                                      |
+| `exit`                         | Leave the interactive shell                                                                                                                                                                                                       |
 
 ### summary
 
@@ -148,12 +154,12 @@ flow summary -l -s artist --top 50    # sort by artist, 50 rows
 flow summary -c                       # clear the online play history
 ```
 
-| Flag | Description |
-| ---- | ----------- |
-| `-l` | Show the per-song table instead of the stats card |
+| Flag        | Description                                               |
+| ----------- | --------------------------------------------------------- |
+| `-l`        | Show the per-song table instead of the stats card         |
 | `-s <sort>` | Table sort: `plays` (default), `recent`, `name`, `artist` |
-| `--top <N>` | Rows to show in the table (default: 20) |
-| `-c` | Clear the logged online plays (`history.db`) |
+| `--top <N>` | Rows to show in the table (default: 20)                   |
+| `-c`        | Clear the logged online plays (`history.db`)              |
 
 `-c` only empties the play timeline — the `song_count` totals in
 `library.db` are untouched.
@@ -167,10 +173,46 @@ flow --summary -l --sort recent --top 10
 ```
 
 The **web History panel** shows the other half of the data: an online-only
-timeline you can sort by *newest*, *oldest*, *most played* or *least played*
+timeline you can sort by _newest_, _oldest_, _most played_ or _least played_
 and filter to today / 7 days / 30 days. The split is deliberate — the CLI
 ranks a per-song table (a terminal is bad at a long event log), the web panel
 sorts an event stream (a scrollable column is bad at aggregates).
+
+### lang / artist / tags
+
+Every download stores two tags in `~/.flow/library.db`: a one-word **language**
+(`hindi`, `punjabi`, `telugu`, …) and the **artist**. They come from YouTube's
+own metadata — its language field, else the script the title is written in, and
+the credited artist (never the channel name). Everything else in a music video's
+title and description — credits, hashtags, `(Official Video)` — is thrown away.
+
+```bash
+flow tags                     # what you can play by right now
+flow lang hindi               # every hindi download, ascending by name
+flow lang pun -s              # partial word, shuffled
+flow artist karan             # every Karan Aujla song, ascending by name
+flow artist "Arijit Singh"    # matches on part of the name, not just the start
+```
+
+`lang` is offline-only, since it filters your downloads. `artist` works in both
+modes: offline it filters your library the same way; online there is no library
+to filter, so it keeps the search results whose **title** credits the artist and,
+when none of them do, falls back to the artist of the track that is playing.
+
+Songs downloaded before tags existed have none. `tags scan` asks YouTube about
+each of them, one at a time, and writes what it finds to
+`~/.flow/tags-preview.tsv` — one row per song, nothing saved to the library
+until you say so:
+
+```bash
+flow tags scan     # writes ~/.flow/tags-preview.tsv
+$EDITOR ~/.flow/tags-preview.tsv    # read it, fix or drop rows you disagree with
+flow tags apply    # writes the file into library.db
+```
+
+`apply` sets the language tag and only fills in an artist where there is none,
+so it never replaces an artist you already have. Add `all` (`flow tags scan all`)
+to re-scan songs that already have a language tag.
 
 ### export
 
@@ -182,8 +224,8 @@ flow export                    # -> ~/Downloads
 flow export -p ~/Music/flow    # -> anywhere else
 ```
 
-| Flag | Description |
-| ---- | ----------- |
+| Flag        | Description                                                           |
+| ----------- | --------------------------------------------------------------------- |
 | `-p <path>` | Destination directory (created if missing). Defaults to `~/Downloads` |
 
 Each copy is named after the song — `Never Gonna Give You Up.webm`, not
@@ -216,3 +258,59 @@ flow playlist download roadtrip # download all YouTube tracks in it
 ```
 
 `liked` is a reserved playlist name.
+
+## flow-min: plain, non-interactive
+
+`flow-min` is a fourth front end over the same player and library, with every
+interactive affordance removed: no colour, no spinner, no prompts. It is for
+the places where a prompt is a bug — an ssh session on a terminal with no
+colour, a pipe, a cron job, or an agent driving the player.
+
+```bash
+flow-min status                     one line of player state
+flow-min play "karan aujla 52 bars" search YouTube and play, then return
+flow-min play-off 52 bars           play a downloaded song
+flow-min search "arijit singh"      list the results as 1..N
+flow-min play 2                     play row 2 of that search
+flow-min --json search "arijit singh" | jq '.[0].video_id'
+flow-min lang punjabi -s            play every downloaded punjabi song, shuffled
+flow-min next                       skip, from any terminal
+```
+
+`search` remembers the rows it printed, so a bare `play <index>` picks one of
+them instead of searching again — no prompt in between, and nothing to copy
+by hand. With no saved search it exits `1` and says so; a number past the end
+reports the range.
+
+The commands are the part of the table above that never needs a conversation:
+`status`, `play`, `play-off`, `resume`, `search`, `stop`, `pause`, `next`,
+`prev`, `seek`, `seek-back`, `list`, `liked`, `like`, `unlike`, `download`,
+`delete`, `rename`, `lang`, `artist`, `radio`, `radio-off`, `tags`, `lyrics`,
+`playlist`, `history`, `stats`. The conversational ones — `config`, `switch`,
+`summary`, `export`, the shortcuts and the dependency check — stay with
+`flow`.
+
+Three rules:
+
+- **One line by default, one JSON document with `--json`** — before or after
+  the command: `flow-min --json status`, `flow-min status --json`.
+- **It never asks.** Where the shell prompts you for the new name, `flow-min`
+  takes `rename <song> --to <new name>`; where a name matches several songs
+  it prints the candidates and exits `2` so the caller can retry with a
+  longer one.
+- **It never blocks by accident.** Playback detaches and prints the new pid;
+  add `--fg` to keep it in the foreground.
+
+Exit codes: `0` success, `1` failure, `2` ambiguous input, `130` interrupted.
+
+```console
+$ flow-min delete bars
+52 Bars  /home/me/.flow/downloads/4DfVxVeqk2o.opus
+Achha Ji  /home/me/.flow/downloads/ZN_XrB_St-8.opus
+flow-min: 2 songs match 'bars'; be more specific
+$ echo $?
+2
+```
+
+`flow` and `flow-min` share `~/.flow` completely: a song downloaded by one is
+listed by the other, and either can control a player the other started.

@@ -103,6 +103,9 @@ COMMANDS = {
     "unlike": "Unlike the currently playing song",
     "delete": "Delete a downloaded song (alias: dl-d)",
     "rename": "Rename a downloaded song (alias: re)",
+    "lang": "Play songs by language tag | lang <tag> | -s shuffle",
+    "artist": "Play songs by artist | artist <name> | -s shuffle",
+    "tags": "Library tags | tags | tags scan (preview) | tags apply",
     "playlist": "Manage playlists | create add remove list play rename move dup merge sort clear dedupe info export import (alias: plist)",
     "switch": "Switch to Online mode (checks connection)",
     "help": "Show this help message",
@@ -135,6 +138,12 @@ class _Completer:
                 options = sorted(
                     set(n for n in songs if n.lower().startswith(text.lower()))
                 )
+            elif parts[0] in ("lang", "artist", "ar"):
+                index = 1 if parts[0] in ("artist", "ar") else 0
+                words = library.get_tag_counts()[index]
+                options = sorted(w for w, _ in words if w.startswith(text.lower()))
+            elif parts[0] == "tags":
+                options = [a for a in ("scan", "apply", "all") if a.startswith(text)]
             else:
                 options = []
             self.matches = options
@@ -184,6 +193,12 @@ def run(cmd: str, extra: list[str], args):
         delete_song(extra)
     elif cmd in ("rename", "re"):
         rename_track(extra)
+    elif cmd in ("lang", "language"):
+        lang_track(extra, args)
+    elif cmd in ("artist", "ar"):
+        artist_track(extra, args)
+    elif cmd == "tags":
+        tags_cmd(extra, args)
     elif cmd in ("playlist", "plist"):
         playlist_cmd(extra, args)
     elif cmd == "switch":
@@ -877,6 +892,159 @@ def list_library():
             m(f"  {lib.display_name(p)}")
     if not songs and not liked:
         e("No music in library")
+
+
+def _play_tag_rows(rows, args, label):
+    paths = [
+        pathlib.Path(r["song"])
+        for r in rows
+        if r.get("song") and pathlib.Path(r["song"]).exists()
+    ]
+    if not paths:
+        e(f"No downloaded songs tagged {label}")
+        return
+    if getattr(args, "shuffle", False):
+        random.shuffle(paths)
+    i(f"  {len(paths)} song(s) tagged {label}")
+    _play_queue(paths, args)
+
+
+def lang_track(extra, args):
+    """`lang <tag>` plays every downloaded song with that one-word language tag."""
+    tag = " ".join(extra).strip()
+    if not tag:
+        e("Usage: lang <tag>")
+        list_tags()
+        return
+    _play_tag_rows(library.get_tag_rows("language", tag), args, f"'{tag}'")
+
+
+def artist_track(extra, args):
+    """`artist <name>` plays every downloaded song by that artist."""
+    name = " ".join(extra).strip()
+    if not name:
+        e("Usage: artist <name>")
+        list_tags()
+        return
+    _play_tag_rows(library.get_tag_rows("artist", name), args, f"'{name}'")
+
+
+def list_tags():
+    """What the library can be played by right now."""
+    langs, artists = library.get_tag_counts()
+    if not langs and not artists:
+        e("No tags yet - run: tags scan")
+        return
+    if langs:
+        m("\nLanguages:")
+        for word, count in langs:
+            m(f"  {word} ({count})")
+    if artists:
+        m("\nArtists:")
+        for word, count in artists:
+            m(f"  {word} ({count})")
+
+
+PREVIEW_FILE = config.DOWNLOAD_DIR.parent / "tags-preview.tsv"
+
+
+def _preview_targets(force):
+    rows = []
+    for video_id, entry in library.load().items():
+        if not entry.get("downloaded"):
+            continue
+        if force or not (entry.get("language") or "").strip():
+            rows.append((video_id, entry.get("title") or video_id))
+    return rows
+
+
+def scan_tags(extra):
+    """`tags scan` writes the tags YouTube reports to a file; nothing is saved."""
+    from ..Online import youtube
+    from ..tags import tags_from_info
+
+    force = any(x in ("-a", "--all", "all") for x in extra)
+    targets = _preview_targets(force)
+    if not targets:
+        m("     Every downloaded song already has a language tag")
+        return
+
+    lines = ["# video_id\tlanguage\tartist\ttitle"]
+    failed = []
+    for pos, (video_id, title) in enumerate(targets, 1):
+        print(f"\r{P}  [{pos}/{len(targets)}] {title[:46]:48}{R}", end="", flush=True)
+        info = youtube.fetch_info(video_id)
+        if not info:
+            failed.append(title)
+            continue
+        found = tags_from_info(info)
+        lines.append(
+            "\t".join(
+                [
+                    video_id,
+                    found.get("language") or "",
+                    (found.get("artist") or "").replace("\t", " "),
+                    title.replace("\t", " "),
+                ]
+            )
+        )
+    print("\r" + " " * 66 + "\r", end="")
+
+    PREVIEW_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PREVIEW_FILE.write_text("\n".join(lines) + "\n")
+    i(f"  Preview written: {PREVIEW_FILE}")
+    i(f"  {len(lines) - 1} song(s), {len(failed)} failed")
+    m("  Nothing was saved. Review the file, then run: tags apply")
+
+
+def apply_tags(extra):
+    """`tags apply` writes the reviewed preview into library.db."""
+    path = pathlib.Path(next((x for x in extra if not x.startswith("-")), PREVIEW_FILE))
+    if not path.exists():
+        e(f"     No preview at {path} - run: tags scan")
+        return
+    saved_langs = 0
+    saved_artists = 0
+    missing = 0
+    for line in path.read_text().splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) < 4:
+            continue
+        video_id, language, artist, title = parts[0], parts[1], parts[2], parts[3]
+        entry = library.get(video_id)
+        if entry is None:
+            missing += 1
+            continue
+        meta = {}
+        if language and language != (entry.get("language") or ""):
+            meta["language"] = language
+        if artist and not (entry.get("artist") or "").strip():
+            meta["artist"] = artist
+        if meta:
+            library.update_meta(video_id, meta)
+            saved_langs += "language" in meta
+            saved_artists += "artist" in meta
+    i(f"  Saved {saved_langs} language tag(s), filled {saved_artists} missing artist(s)")
+    if missing:
+        m(f"  {missing} row(s) in the file are no longer in the library")
+    m("  Play with: lang <tag>  |  artist <name>")
+
+
+def tags_cmd(extra, args):
+    """`tags` lists tags, `tags scan` previews fresh metadata, `tags apply` saves it."""
+    action = extra[0].lower() if extra else ""
+    rest = extra[1:]
+    if action == "scan":
+        scan_tags(rest)
+    elif action == "apply":
+        apply_tags(rest)
+    elif not action:
+        list_tags()
+    else:
+        e(f"Unknown tags action: {action}")
+        m("  Try: tags | tags scan | tags apply")
 
 
 def switch_mode():

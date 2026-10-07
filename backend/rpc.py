@@ -24,13 +24,15 @@ arbitrary flag surface, and it's gated host-side.
 import json
 import os
 import pathlib
-import socket
 import signal as _signal_mod
+import socket
 import sys
 import time
 
-from backend import config, control, status as _status
-from backend.config import GREY, Muted, Primary, RED, Reset, YELLOW
+from backend import config, control
+from backend import status as _status
+from backend.config import GREY, RED, YELLOW, Muted, Primary, Reset
+
 E = RED
 G = GREY
 M = Muted
@@ -41,10 +43,6 @@ Y = YELLOW
 #: Typed-only, gated-raw version of the plugin API.
 API_VERSION = 4
 
-
-# ---------------------------------------------------------------------------
-# Host-side capability + validation
-# ---------------------------------------------------------------------------
 
 def _plugin_manifest(name: str) -> dict | None:
     """Read an installed plugin's plugin.json (host-validated surface)."""
@@ -76,10 +74,6 @@ def _conn_capabilities(conn: socket.socket) -> dict:
 def _conn_plugin_name(conn: socket.socket) -> str | None:
     return getattr(conn, "_flow_plugin_name", None)
 
-
-# ---------------------------------------------------------------------------
-# State reads (stay file-based — cheap, no IPC round trip needed)
-# ---------------------------------------------------------------------------
 
 def rpc_status():
     return _status.read()
@@ -127,7 +121,7 @@ def rpc_history(params: dict | None = None) -> list:
     since = time.time() - days * 86400 if days else None
     try:
         limit = int(params.get("limit", 25))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         limit = 25
     return history.timeline(
         sort=sort,
@@ -136,10 +130,6 @@ def rpc_history(params: dict | None = None) -> list:
         unique=bool(params.get("unique")) or sort in ("most", "least"),
     )
 
-
-# ---------------------------------------------------------------------------
-# Player control (host-routed, mirrors cli/main.py::_send_control)
-# ---------------------------------------------------------------------------
 
 def _player_running() -> bool:
     from backend import registry
@@ -197,13 +187,6 @@ def rpc_seek_back(sec: float) -> str:
 
 
 def _act_current(action: str) -> str:
-    """Like/unlike/download the current track, host-routed like the CLI.
-
-    Mirrors `cli/main.py::_act_current`: the thumbnail path is what tells us
-    whether the live track is an online stream or a local file, so the same
-    decision routes to the Online or the Offline command module. Returns a
-    message for the plugin (the command modules print to the daemon's stdout).
-    """
     data = _status._read()
     title = (data.get("title") or "").strip()
     thumb = data.get("thumbnail") or ""
@@ -243,19 +226,11 @@ def rpc_download() -> str:
     return _act_current("download")
 
 
-# ---------------------------------------------------------------------------
-# Player registry (live players, host-readable)
-# ---------------------------------------------------------------------------
-
 def rpc_players():
     from backend import registry
 
     return registry.live()
 
-
-# ---------------------------------------------------------------------------
-# Config (PLUGIN_SAFE_KEYS enforced host-side — never trust the client)
-# ---------------------------------------------------------------------------
 
 def rpc_get_config(key: str):
     value, ok = config.config_get(key)
@@ -306,10 +281,6 @@ def rpc_set_spinner(chars: str):
     return {"message": msg}
 
 
-# ---------------------------------------------------------------------------
-# Raw (gated)
-# ---------------------------------------------------------------------------
-
 def rpc_raw_cli(conn, args: list[str]):
     caps = _conn_capabilities(conn)
     if not caps.get("raw"):
@@ -325,10 +296,6 @@ def rpc_raw_cli(conn, args: list[str]):
     code, out = cli_raw.run(*args)
     return {"code": code, "output": out}
 
-
-# ---------------------------------------------------------------------------
-# Introspection
-# ---------------------------------------------------------------------------
 
 METHODS = (
     "status",
@@ -366,10 +333,6 @@ def rpc_introspect():
         "transport": "socket",
     }
 
-
-# ---------------------------------------------------------------------------
-# Frame handling
-# ---------------------------------------------------------------------------
 
 def handle(frame: dict, conn: socket.socket | None = None) -> dict | None:
     """Dispatch a single `{method, params}` frame. Returns a response dict."""
@@ -422,7 +385,11 @@ def handle(frame: dict, conn: socket.socket | None = None) -> dict | None:
         if method == "get_configs":
             return {"result": rpc_get_configs(params)}
         if method == "set_config":
-            return {"result": rpc_set_config(str(params.get("key", "")), params.get("value"))}
+            return {
+                "result": rpc_set_config(
+                    str(params.get("key", "")), params.get("value")
+                )
+            }
         if method == "set_theme":
             return {"result": rpc_set_theme(str(params.get("name", "")))}
         if method == "list_themes":

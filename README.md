@@ -34,7 +34,9 @@ between the CLI shell, the Textual TUI, and the web GUI.
 - **Visualizer** — audio-reactive spectrum bars (or synced lyrics) while playing
 - **Lyrics** — synced lines from [LRCLIB](https://lrclib.net) (YouTube Music as fallback): the `lyrics` display mode prints them in the terminal, the web GUI's lyrics button (`l`) scrolls them with the track
 - **Rename** — correct a misspelt title once (`rename` in the CLI, `R` in the TUI, the ⋮ menu in the web GUI) and every surface, including lyrics search, shows the new name
+- **Play by tag** — every download stores a one-word language and the credited artist, trimmed out of the video's metadata: `lang punjabi` plays your punjabi songs, `artist karan` every Karan Aujla one (`tags` to see what you have, `tags scan`/`tags apply` to tag the back catalogue)
 - **Three interfaces** — interactive CLI shell, full-screen [TUI](docs/user/interface.md), and a [web GUI](docs/user/interface.md) on port 5000
+- **Scriptable** — `flow-min` runs the same commands with no colour, spinner or prompt: one plain line (or one `--json` document) per command, documented exit codes, safe in pipes, over ssh and for agents
 - **Plugins** — community plugins run in isolated processes
 
 ## Requirements
@@ -73,6 +75,7 @@ flow --radio-off                     # shuffle-loop the whole library (auto-bg)
 flow                                 # interactive shell (type `help`)
 flow-tui                             # full-screen TUI
 flow-web                             # web GUI → http://127.0.0.1:5000
+flow-min status --json               # plain non-interactive: one JSON document
 ```
 
 Playback control works across interfaces from any terminal:

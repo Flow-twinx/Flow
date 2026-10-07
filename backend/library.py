@@ -1,6 +1,7 @@
 import hashlib
 import json
 import pathlib
+import re
 import sqlite3
 import time
 import urllib.request
@@ -33,6 +34,7 @@ CREATE TABLE IF NOT EXISTS songs (
     custom_title TEXT,
     artist       TEXT,
     album        TEXT,
+    language     TEXT,
     duration     INTEGER,
     song         TEXT,
     thumbnail    TEXT    NOT NULL DEFAULT '',
@@ -64,6 +66,7 @@ _COLUMNS = (
     "first_played",
     "last_played",
     "custom_title",
+    "language",
 )
 
 _PLACEHOLDERS = ", ".join(["?"] * (len(_COLUMNS) + 1))
@@ -91,6 +94,8 @@ def _ensure_schema(conn):
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(songs)")}
     if "custom_title" not in cols:
         conn.execute("ALTER TABLE songs ADD COLUMN custom_title TEXT")
+    if "language" not in cols:
+        conn.execute("ALTER TABLE songs ADD COLUMN language TEXT")
     _migrate_from_json(conn)
 
 
@@ -180,6 +185,7 @@ def _legacy_to_row(video_id, entry):
         entry.get("first_played") or None,
         entry.get("last_played") or None,
         _truncate_title(entry.get("custom_title") or "") or None,
+        entry.get("language") or None,
     )
 
 
@@ -193,6 +199,7 @@ def _row_to_entry(row) -> dict:
         "custom_title": custom,
         "artist": row["artist"],
         "album": row["album"],
+        "language": row["language"],
         "duration": row["duration"],
         "song": row["song"],
         "thumbnail": row["thumbnail"] or "",
@@ -222,6 +229,7 @@ def _to_values(entry: dict) -> tuple:
         entry.get("first_played") or None,
         entry.get("last_played") or None,
         _truncate_title(entry.get("custom_title") or "") or None,
+        entry.get("language") or None,
     )
 
 
@@ -230,6 +238,7 @@ def _sanitize(entry: dict) -> dict:
     out = dict(entry)
     out["title"] = _truncate_title(entry.get("title") or "")
     out["custom_title"] = _truncate_title(entry.get("custom_title") or "")
+    out["language"] = (entry.get("language") or "").strip().lower() or None
     out["song_count"] = int(entry.get("song_count") or 0)
     return out
 
@@ -375,6 +384,55 @@ def play_rows() -> list:
     ]
 
 
+def _by_name(rows) -> list:
+    return sorted(rows, key=lambda r: (r["title"] or r["video_id"] or "").lower())
+
+
+def get_tag_rows(field: str, tag: str) -> list:
+    """Downloaded rows whose `language`/`artist` tag fuzzy-matches `tag`, by name."""
+    field = "artist" if field == "artist" else "language"
+    needle = (tag or "").strip().lower()
+    with _session() as conn:
+        rows = conn.execute(
+            "SELECT video_id, title, custom_title, artist, album, language, song "
+            "FROM songs WHERE downloaded = 1 AND song IS NOT NULL AND song != ''"
+        ).fetchall()
+    matches = [r for r in rows if needle and needle in (r[field] or "").lower()]
+    return [
+        {
+            "video_id": r["video_id"],
+            "title": r["custom_title"] or r["title"] or r["video_id"],
+            "artist": r["artist"] or "",
+            "album": r["album"] or "",
+            "language": r["language"] or "",
+            "song": r["song"],
+        }
+        for r in _by_name(matches)
+    ]
+
+
+def get_tag_counts() -> list:
+    """`[("hindi", 42), ("punjabi", 7)]` over downloaded songs, most common first."""
+    with _session() as conn:
+        rows = conn.execute(
+            "SELECT language, artist FROM songs "
+            "WHERE downloaded = 1 AND song IS NOT NULL AND song != ''"
+        ).fetchall()
+    languages = {}
+    artists = {}
+    for r in rows:
+        for key, counts in (("language", languages), ("artist", artists)):
+            word = (r[key] or "").strip().lower()
+            if not word:
+                continue
+            for part in re.split(r",\s*", word):
+                if part:
+                    counts[part] = counts.get(part, 0) + 1
+    langs = sorted(languages.items(), key=lambda kv: (-kv[1], kv[0]))
+    names = sorted(artists.items(), key=lambda kv: (-kv[1], kv[0]))
+    return langs, names
+
+
 def _default_entry(video_id: str, title: str = "") -> dict:
     return {
         "liked": False,
@@ -384,6 +442,7 @@ def _default_entry(video_id: str, title: str = "") -> dict:
         "custom_title": "",
         "artist": None,
         "album": None,
+        "language": None,
         "duration": None,
         "song": None,
         "thumbnail": thumbnail_path(video_id),
@@ -571,20 +630,15 @@ def track_download(video_id: str, path: str, title: str = "", meta=None):
 
 
 def meta_from_info(info: dict) -> dict:
+    """Trim a track's YouTube metadata down to the fields the library stores."""
+    from .tags import tags_from_info
+
     meta = {}
-    artist = info.get("artist")
-    if not artist:
-        artists = info.get("artists")
-        if (
-            isinstance(artists, list)
-            and artists
-            and all(isinstance(a, str) for a in artists)
-        ):
-            artist = ", ".join(artists)
-    if isinstance(artist, (list, tuple)):
-        artist = ", ".join(str(a) for a in artist if a) or None
-    if artist:
-        meta["artist"] = str(artist)
+    tags = tags_from_info(info)
+    if tags.get("artist"):
+        meta["artist"] = tags["artist"]
+    if tags.get("language"):
+        meta["language"] = tags["language"]
     if info.get("album"):
         meta["album"] = info.get("album")
     duration = info.get("duration")

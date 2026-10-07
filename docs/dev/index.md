@@ -2,8 +2,8 @@
 
 Flow is a terminal music player with online (streaming) and offline (local
 library) modes. The backend holds all logic; thin entry points in `cli/`,
-`tui/`, and `web/` launch it in one of three shapes: an interactive shell, a
-Textual TUI, or a Flask web app.
+`tui/`, `web/` and `minimal/` launch it in one of four shapes: an interactive
+shell, a Textual TUI, a Flask web app, or a plain non-interactive CLI.
 
 ## Entry points
 
@@ -14,6 +14,7 @@ Declared in `pyproject.toml` `[project.scripts]`:
 | `flow` | `cli.main:main` | Interactive command shell (readline-style prompt) plus one-shot flags |
 | `flow-tui` | `tui:main` | Full-screen Textual UI |
 | `flow-web` | `web.main:main` | Daemonized Flask web server |
+| `flow-min` | `minimal.main:main` | Plain lines or JSON, no prompts, no spinner, playback detaches by default |
 | `flow daemon` | `backend/daemon.py` | Resident RPC host for plugins (`~/.flow/flow.sock`) |
 
 ## Package layout
@@ -37,6 +38,7 @@ backend/               # all logic
   mpris.py             #   MPRIS D-Bus integration
   visualizer.py        #   audio-reactive spectrum bars (sounddevice/numpy)
   lyrics.py            #   synced lyrics (LRCLIB, YouTube Music fallback)
+  tags.py              #   one-word language + artist tags trimmed from metadata
   sponsor.py           #   SponsorBlock segment skip / cut
   plugins.py           #   plugin install/run/update
   daemon.py            #   resident RPC host (socket owner, plugin lifecycle)
@@ -61,6 +63,15 @@ web/                   # `flow-web` entry point
   app.py               #   routes, search/download/library/playlist APIs
   devlog.py            #   DEV_MODE request logging
   templates/           #   index.html, script.js, style.css
+minimal/               # `flow-min` entry point
+  main.py              #   argparse command surface (the only dispatcher)
+  out.py               #   private stdout, fd-level silencing, exit codes, bg fork
+  common.py            #   ns(), live_player(), signal(), clock, library_rows
+  core.py              #   status, transport control, search, play/resume, queues
+  local.py             #   list/liked/like/download/delete/rename/lang/artist
+  extras.py            #   radio, tags, lyrics, playlists
+  stats.py             #   history, stats
+  __main__.py          #   python -m minimal
 ```
 
 ## How a `flow` launch works
@@ -103,6 +114,17 @@ into the other mode's commands (online's `switch` goes offline, offline's
 `switch` re-checks the connection), and `cli.main` reloads the command module
 afterward. The TUI keeps its own `mode` string and re-populates the track
 list on `Tab`.
+
+## The `flow-min` entry point
+
+`minimal/` skips the interactive dispatch entirely: it never sets a mode, has
+no command table, and calls `backend.*` functions directly. Because a
+non-interactive caller cannot answer a spinner or a prompt, it prints plain
+lines (or one JSON document with `--json`), silences the backend at the
+file-descriptor level around every call, and detaches playback by default.
+Control commands still go through the shared registry and signals, so
+`flow-min next` works against a `flow`, TUI or web player. Details in
+[Minimal CLI](minimal.md).
 
 ## Testing
 

@@ -12,6 +12,7 @@ crash mid-write can never truncate them. The two databases
 ├── history.db             # online play log (backend/history.py)
 ├── library.json.bak       # pre-v0.9 store, kept after the one-time import
 ├── status.json            # current/last track (backend/status.py)
+├── search.json            # rows of the last `flow-min search` (minimal/core.py)
 ├── shortcuts.json         # command aliases (backend/shortcuts.py)
 ├── ignore.txt             # filler words stripped from titles
 ├── seek.txt               # pending seek delta in milliseconds
@@ -29,7 +30,6 @@ crash mid-write can never truncate them. The two databases
 ├── playlists/             # one JSON file per playlist (schema v2)
 │   └── .lock              # flock guard for playlist ops
 ├── playlists.json         # legacy single-file store (migrated once → .bak)
-├── playlist/              # target folder for `playlist download`
 ├── plugins/               # installed plugins + repo caches
 │   ├── <name>/            #   plugin.json, flow_api.py, entry source
 │   ├── _repo/             #   clone of the default plugin repo
@@ -63,6 +63,7 @@ CREATE TABLE songs (
     custom_title TEXT,
     artist       TEXT,
     album        TEXT,
+    language     TEXT,
     duration     INTEGER,
     song         TEXT,
     thumbnail    TEXT    NOT NULL DEFAULT '',
@@ -101,6 +102,20 @@ Notes:
   (CLI, TUI, web, lyrics search) shows it without knowing the column exists.
   Fresh downloads and metadata rebuilds only write `title`, so a rename is
   never overwritten. The column is added by `_ensure_schema` on first open.
+- `language` and `artist` are the two **tags** a download stores, trimmed out of
+  the video's YouTube metadata by `backend/tags.py`. `tags_from_info(info)`
+  is the only caller (`library.meta_from_info`), so every download path — CLI,
+  TUI, web — tags the same way. `language` is one lowercase word: YouTube's
+  language field if it has one, else the script the title/description is written
+  in, else `english` for plain Latin text. `artist` prefers yt-dlp's field, then
+  a `Singer:`-style credit in the description, then `Tile.parse_title` on the
+  raw title; the channel name is deliberately not used. Both columns are added by
+  `_ensure_schema` on first open.
+- `library.get_tag_rows(field, tag)` is the read side: downloaded rows only,
+  fuzzy (case-insensitive substring) on `language` or `artist`, ascending by
+  display name. `library.get_tag_counts()` returns both tag lists with counts.
+  The `Offline.lang_track` / `Offline.artist_track` commands and `tags apply`
+  are the only writers.
 - **A row is only deleted when nothing is left to remember** — not liked, not
   downloaded, not on speed dial, no `song` path, *and* `song_count == 0` —
   so a play count survives an unlike or a delete.
@@ -223,8 +238,9 @@ online, a local path (`.cache/` or under `~/.flow`) means offline — used by
 - A legacy single-file store (`~/.flow/playlists.json`, pre-v2) is migrated
   on first use — entries are split into per-file stores and the legacy file
   is renamed to `playlists.json.bak`.
-- `liked` is a reserved name; `playlist download` writes into
-  `~/.flow/playlist/<slug>`.
+- `liked` is a reserved name; `playlist download` saves every track into
+  the default `downloads/` folder alongside the rest of the library, and
+  backfills `local_path` on the track so `resolve_track` finds it.
 
 ## Shortcuts
 

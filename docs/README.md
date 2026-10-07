@@ -10,7 +10,7 @@ How to install, configure, and use Flow.
 | -------------------------------------- | ----------------------------------------------- |
 | [Introduction](user/index.md)          | What Flow is and how to get started             |
 | [Installation](user/installation.md)   | Requirements, install methods, dependency check |
-| [Command line](user/command-line.md)   | Flags, shell mode, commands, shortcuts          |
+| [Command line](user/command-line.md)   | Flags, shell mode, commands, shortcuts, `flow-min` |
 | [Interfaces](user/interface.md)        | Textual TUI and web GUI                         |
 | [Configuration](user/configuration.md) | Settings, storage layout, exports               |
 | [Plugins](user/plugins.md)             | Installing and running plugins                  |
@@ -24,6 +24,7 @@ How Flow is built and how its subsystems fit together.
 | [Architecture](dev/index.md)        | Package layout, entry points, startup flow                 |
 | [Online mode](dev/online-mode.md)   | YouTube/JioSaavn search, streaming, radio, downloads       |
 | [Offline mode](dev/offline-mode.md) | Local library scanning, playback, liked songs              |
+| [Minimal CLI](dev/minimal.md)       | `flow-min`: plain, non-interactive front end and its contract |
 | [Storage](dev/storage.md)           | Files under `~/.flow` and their schemas                    |
 | [Playback control](dev/control.md)  | Signals, pid files, status, MPRIS, web control             |
 | [Interfaces](dev/interface.md)      | TUI internals, Flask app, visualizer, lyrics, SponsorBlock |

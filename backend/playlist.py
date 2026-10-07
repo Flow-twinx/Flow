@@ -10,7 +10,6 @@ import time
 PLAYLISTS_DIR = pathlib.Path.home() / ".flow/playlists"
 PLAYLISTS_FILE = pathlib.Path.home() / ".flow/playlists.json"
 LEGACY_BAK = pathlib.Path.home() / ".flow/playlists.json.bak"
-PLAYLIST_DIR = pathlib.Path.home() / ".flow/playlist"
 
 _SCHEMA_VERSION = 2
 _LOCK_FILE = PLAYLISTS_DIR / ".lock"
@@ -87,7 +86,7 @@ def _load_file(path):
         data = json.loads(path.read_text())
         if isinstance(data, dict) and isinstance(data.get("tracks"), list):
             return data
-    except (json.JSONDecodeError, OSError):
+    except json.JSONDecodeError, OSError:
         pass
     return None
 
@@ -112,7 +111,7 @@ def _migrate_legacy_locked():
         return
     try:
         legacy = json.loads(PLAYLISTS_FILE.read_text())
-    except (json.JSONDecodeError, OSError):
+    except json.JSONDecodeError, OSError:
         return
     if not isinstance(legacy, dict) or not legacy:
         os.replace(PLAYLISTS_FILE, LEGACY_BAK)
@@ -416,7 +415,9 @@ def add_track(name, track):
     return state, track.get("title", "")
 
 
-def add_song(name, title, video_id="", url="", duration=0, source=None, local_path=None):
+def add_song(
+    name, title, video_id="", url="", duration=0, source=None, local_path=None
+):
     """Compat wrapper around add_track. Returns True only when newly added."""
     state, _ = add_track(
         name,
@@ -563,6 +564,7 @@ def export_m3u(name, out_path=None):
         dur = int(t.get("duration") or 0)
         try:
             from .config import _truncate_title
+
             title = _truncate_title(t.get("title", "Unknown"))
         except Exception:
             title = t.get("title", "Unknown")
@@ -587,7 +589,7 @@ def import_m3u(path, name=None):
     pending_dur = 0
     try:
         text = path.read_text(encoding="utf-8-sig")
-    except (UnicodeDecodeError, OSError):
+    except UnicodeDecodeError, OSError:
         text = path.read_text(encoding="utf-8", errors="replace")
     for raw in text.splitlines():
         line = raw.strip()
@@ -634,13 +636,21 @@ def find_local_copy(video_id):
     return None
 
 
-def local_available(track):
+def local_path_of(track):
+    """The existing local file for a track, or None when it isn't on disk."""
     lp = track.get("local_path")
-    if lp and pathlib.Path(lp).exists():
-        return True
+    if lp and pathlib.Path(lp).is_file():
+        return str(lp)
+    ref = str(track.get("ref") or "")
+    if ref and not ref.startswith(("http://", "https://")) and pathlib.Path(ref).is_file():
+        return ref
     if track.get("source") == "youtube":
-        return bool(find_local_copy(track.get("id")))
-    return False
+        return find_local_copy(track.get("id"))
+    return None
+
+
+def local_available(track):
+    return local_path_of(track) is not None
 
 
 def resolve_track(track):
@@ -690,14 +700,3 @@ def backfill_thumb(name, index, path):
         _mutate(name, fn)
     except Exception:
         pass
-
-
-def download_dir(name):
-    # Sanitize so a raw playlist name can never traverse out of the playlist
-    # directory (e.g. "../../.ssh" or "/tmp/x"). _slugify strips path and
-    # dot characters entirely.
-    raw = str(name or "").strip()
-    safe = _slugify(raw) if raw else "playlist"
-    d = PLAYLIST_DIR / safe
-    d.mkdir(parents=True, exist_ok=True)
-    return d

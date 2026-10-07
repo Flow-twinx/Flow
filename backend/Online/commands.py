@@ -16,9 +16,11 @@ from backend import (
     playlist,
     plist_cli,
     shortcuts,
+    status,
     summary,
 )
 from backend.config import merge_flags
+from backend.Offline import commands as off_commands
 from backend.Offline import player as off_player
 from backend.Online import player, savan, youtube
 from backend.ui import make_choice, parse_index_list, pick_many
@@ -105,6 +107,8 @@ COMMANDS = {
     "unlike": "Unlike the currently playing song",
     "download": "Download audio from YouTube | -f <format> (opus, m4a, mp3, webm)",
     "delete": "Delete a downloaded song (alias: dl-d)",
+    "artist": "Play songs by artist | artist <name> | -s shuffle",
+    "tags": "Library tags | tags | tags scan (preview) | tags apply",
     "playlist": "Manage playlists | create add remove list play rename move dup merge sort clear dedupe info export import download",
     "switch": "Switch to Offline mode",
     "help": "Show this help message",
@@ -149,6 +153,10 @@ def run(cmd: str, extra: list[str], args):
         download(extra, args)
     elif cmd in ("delete", "del"):
         delete_download(extra)
+    elif cmd in ("artist", "ar"):
+        artist_track(extra, args)
+    elif cmd == "tags":
+        off_commands.tags_cmd(extra, args)
     elif cmd == "switch":
         switch_mode()
     elif cmd == "help":
@@ -489,6 +497,63 @@ def play(extra: list[str], args):
             if not _fork_bg("Now playing"):
                 return
         player.play_entry(entry, title, args)
+
+
+def _queue_artist() -> str:
+    """Artist of the track now playing (or last played), when the name isn't clear."""
+    titles = []
+    if _last_played:
+        titles.append(str(_last_played[1] if len(_last_played) > 1 else _last_played[0]))
+    current = status.read() or {}
+    if current.get("title"):
+        titles.append(str(current["title"]))
+    entries = library.load()
+    by_title = {(e.get("title") or "").lower(): e for e in entries.values()}
+    for title in titles:
+        needle = title.strip().lower()
+        entry = by_title.get(needle)
+        if entry is None:
+            entry = next(
+                (e for t, e in by_title.items() if needle and needle in t),
+                None,
+            )
+        artist = (entry or {}).get("artist") or ""
+        if artist:
+            return artist
+    return ""
+
+
+def _artist_results(name: str) -> list:
+    """YouTube results whose title credits `name`; ascending by title."""
+    _do_search(f"{name} songs")
+    needle = name.strip().lower()
+    matches = [r for r in _last_results if needle in (r[1] or "").lower()]
+    return sorted(matches, key=lambda r: (r[1] or "").lower())
+
+
+def artist_track(extra, args):
+    """`artist <name>` plays every result whose title credits that artist."""
+    name = " ".join(extra).strip()
+    if not name:
+        print("Usage: artist <name>")
+        return
+    if config.kill_stored():
+        print(f"{P}Stopped VLC{R}")
+    _clear_all_nav()
+    results = _artist_results(name)
+    if not results:
+        queued = _queue_artist()
+        if queued and queued.strip().lower() != name.strip().lower():
+            print(f"{G}  No title matched '{name}' - trying '{queued}' from the queue{R}")
+            results = _artist_results(queued)
+            name = queued
+    if not results:
+        print(f"No results for artist '{name}'")
+        return
+    if getattr(args, "shuffle", False):
+        random.shuffle(results)
+    i(f"  {len(results)} song(s) by {name}")
+    _play_queue(results, args)
 
 
 def _play_queue(results, args):
@@ -1091,7 +1156,7 @@ def radio(extra, args):
             return
 
     if getattr(args, "download", False):
-        dl_dir = playlist.download_dir(pl_name) if save_pl else config.DOWNLOAD_DIR
+        dl_dir = config.DOWNLOAD_DIR
     else:
         dl_dir = None
 
@@ -1726,24 +1791,30 @@ def playlist_cmd(extra, args):
             m(f"  {idx}. {_truncate_title(s.get('title', 'Unknown'))}")
 
     def download(actual, tracks, args):
-        dl_dir = playlist.download_dir(actual)
+        dl_dir = config.DOWNLOAD_DIR
+        fmt = _resolve_fmt(args) or "webm"
         i(f"    Downloading {len(tracks)} songs to {dl_dir}...")
         done = 0
         for idx, s in enumerate(tracks, 1):
             vid = s.get("id", "")
-            url = s.get("ref") or f"https://www.youtube.com/watch?v={vid}"
-            try:
-                youtube.download_url(url, dl_dir)
-                local = playlist.find_local_copy(vid) or str(dl_dir)
+            label = f"({idx}/{len(tracks)}): {_truncate_title(s.get('title'))}"
+            local = playlist.local_path_of(s)
+            if local:
                 playlist.backfill_local(actual, idx - 1, local)
                 done += 1
-                i(
-                    f"    Downloaded ({idx}/{len(tracks)}): {_truncate_title(s.get('title'))}"
-                )
+                i(f"    Already on device {label}")
+                continue
+            if s.get("source") != "youtube":
+                e(f"     Failed {label} - file is gone and it has no URL")
+                continue
+            url = s.get("ref") or f"https://www.youtube.com/watch?v={vid}"
+            try:
+                path = youtube.download_url(url, dl_dir, fmt=fmt)
+                playlist.backfill_local(actual, idx - 1, path)
+                done += 1
+                i(f"    Downloaded {label}")
             except Exception as exc:
-                e(
-                    f"     Failed ({idx}/{len(tracks)}): {_truncate_title(s.get('title'))} - {exc}"
-                )
+                e(f"     Failed {label} - {exc}")
         if done == len(tracks):
             i(f"    All {done} tracks available on device")
 

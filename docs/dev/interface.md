@@ -27,6 +27,23 @@ through it rather than spawning the `flow` CLI.
 See [plugins.md](plugins.md) for the protocol contract and
 [control.md](control.md) for how player control is routed through it.
 
+## Minimal CLI (`flow-min`, `minimal/`)
+
+The non-interactive front end: the same backend with every affordance
+removed — one plain line (or one `--json` document) per command, no colour,
+no spinner, no prompt, exit codes `0`/`1`/`2` (ambiguous)/`130` (interrupted).
+It never asks: ambiguous names print the candidates and exit `2`, and playback
+detaches unless `--fg` is given.
+
+All I/O lives in the package. `minimal/out.py` keeps a private dup of fd 1 and
+wraps backend calls in `out.quiet()`, which dup2's fds 1/2 onto `/dev/null` so
+the backend's banners, prompts and yt-dlp writes cannot reach stdout.
+`minimal/main.py` is argparse wiring only; the behaviour sits in `core.py`,
+`local.py`, `extras.py` and `stats.py`, which import `backend.*` directly —
+nothing in `backend/` imports `minimal`.
+
+Module map, output contract and test notes: [minimal.md](minimal.md).
+
 ## TUI (`tui/main.py`)
 
 `Flow(App)` is a single Textual screen composed of two panels: the

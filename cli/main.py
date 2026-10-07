@@ -10,10 +10,6 @@ import urllib.request
 from pathlib import Path
 
 if __name__ == "__main__" and __package__ is None:
-    # `python cli/main.py` puts `cli/` on sys.path instead of the repo root, so
-    # the absolute `backend` / `cli` imports below would not resolve. The frozen
-    # build runs this file as top-level `main` (so `__package__` is None there
-    # too) and its own bootloader already puts the bundle dir on sys.path.
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from backend import config, shortcuts
@@ -95,20 +91,6 @@ def _load_commands():
 
 
 def _summary_extra(args, unknown, command="summary"):
-    """Rebuild `summary`'s own flags out of what argparse handed us.
-
-    `--sort` and `--top` are declared as real options so `flow --summary --top 3`
-    parses, but the short spellings (`-s recent`, `-l`, `-c`) can only be
-    declared on the `summary` command itself — `-s` and friends already mean
-    something to playback. Both halves therefore arrive mixed together:
-
-    * declared long options land on `args.sort` / `args.top`,
-    * unrecognised short options stay in `unknown`,
-    * and the *value* of an unrecognised option gets parked on the `command`
-      positional, e.g. `-l -s recent` parses as `command='recent'`.
-
-    This puts all three back into the flat list `summary._parse_args` expects.
-    """
     extra = list(unknown)
     if args.sort:
         extra += ["-s", args.sort]
@@ -147,13 +129,6 @@ def _check_vlc():
 
 
 def _bundle_root():
-    """Repo root for a source run, PyInstaller's unpack dir for the frozen build.
-
-    Data files are shipped inside the bundle next to their package, and the
-    frozen entry script lives at `<bundle>/main.py` — so this file's own
-    `parent.parent` is the system temp dir, not the bundle. Only usable when
-    running from a checkout.
-    """
     if getattr(sys, "frozen", False):
         return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
     return Path(__file__).resolve().parent.parent
@@ -529,6 +504,11 @@ def main():
         "dl-d",
         "rename",
         "re",
+        "lang",
+        "language",
+        "artist",
+        "ar",
+        "tags",
         "switch",
         "help",
         "short",

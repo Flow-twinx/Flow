@@ -16,6 +16,7 @@ Requires [VLC](https://www.videolan.org/vlc/) for playback (`python-vlc`). ffmpe
 Defined in `pyproject.toml`:
 
 - `flow` → `cli.main:main` (interactive shell + one-shot flags)
+- `flow-min` → `minimal.main:main` (plain, non-interactive; no colour/prompt, `--json` per command)
 - `flow-tui` → `tui:main` (Textual TUI)
 - `flow-web` → `web.main:main` (Flask web server on port 5000)
 - `flow daemon` → `backend/daemon.py` (RPC socket at `~/.flow/flow.sock`)
@@ -49,9 +50,9 @@ uv run flow --pause --next --seek 30  # control running player
 
 ## Architecture essentials
 
-- **Backend is source of truth** (`backend/`). CLI/TUI/Web are thin entry points.
+- **Backend is source of truth** (`backend/`). CLI/TUI/Web/minimal are thin entry points.
 - **Mode system**: `backend/config.py` holds global `Mode` ("Online"/"Offline"). `is_connected()` (HTTPS to 1.1.1.1 with TCP fallback) decides default mode. Switching calls the other mode's `switch` command; modes don't hand off mid-command.
-- **Package boundaries**: `cli/`, `backend/` (core + `Online/`, `Offline/`), `tui/`, `web/`. Excludes built artifacts (`build/`, `dist/`, `*.egg-info/`).
+- **Package boundaries**: `cli/`, `backend/` (core + `Online/`, `Offline/`), `minimal/`, `tui/`, `web/`. Excludes built artifacts (`build/`, `dist/`, `*.egg-info/`). `minimal/` imports `backend.*` and owns all its I/O; nothing in `backend/` imports `minimal`.
 - **Control flow**: control flags (`--pause/--next/--prev/--seek/--seekb`) signal the running player via PID in `~/.flow/vlc.pid` or POST to web `/api/control` if web server is up. Seek writes delta to `~/.flow/seek.txt` first.
 
 ## Key quirks & constraints
@@ -62,9 +63,11 @@ uv run flow --pause --next --seek 30  # control running player
   - `players.json` via `backend/registry.py` is the live registry (pid files mirror)
   - `playlists/*.json` written atomically (tmp+rename) with `flock` on `.lock`
   - `status.json` is "latest writer wins"; files under `~/.flow/` coordinate, not shared memory
+  - `search.json` via `minimal/core.py` holds the last `flow-min search` rows, which `flow-min play <index>` reads back
 - **Daemon RPC**: socket at `~/.flow/flow.sock`, typed dispatch in `backend/rpc.py` with capability gating (`PLUGIN_SAFE_KEYS`, `raw_cli` requires explicit capability). The daemon spawns `flow` for plugins and only allows `raw_cli` behind gating.
 - **Plugin commands**: plugin/host commands (`plugins`, `install`, `uninstall/remove`, `run`, `update`, `daemon`) are handled before mode/VLC checks and may exit early. `flow run` lazily starts daemon.
 - **Seek mechanism**: flags write delta (ms) to `~/.flow/seek.txt` before signaling; the player reads it. Preserve this behavior if modifying control path.
+- **`flow-min` output contract**: `minimal/out.py` keeps a private dup of fd 1 and silences the backend by dup2'ing fds 1/2 onto `/dev/null` (`out.quiet()`). New `minimal/` commands wrap backend calls in `out.quiet()` and print via `out.emit`/`out.fail` only, so stdout stays exactly one line or one JSON document. Details: `docs/dev/minimal.md`.
 - **No enforced lint/typecheck**: repo has no ruff/mypy/CI configs present. Don't add generic tooling unless necessary; stick to existing patterns and commands.
 
 ## When editing

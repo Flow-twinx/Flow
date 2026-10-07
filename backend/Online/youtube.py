@@ -136,6 +136,23 @@ def download_url(url, outdir, fmt=None):
     return filename
 
 
+def fetch_info(video_id: str):
+    """Full metadata for one video, or None. Used by the tag backfill scan."""
+    video_id = str(video_id or "").strip()
+    if not video_id:
+        return None
+    url = (
+        video_id
+        if "://" in video_id
+        else f"https://www.youtube.com/watch?v={video_id}"
+    )
+    try:
+        return sponsor.stream_info(url, opts=ydl_opts_play, with_segments=False)
+    except Exception as exc:
+        logger.warning("Metadata fetch failed for %s: %s", video_id, exc)
+        return None
+
+
 def fetch_radio(query, max_results=30):
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:

@@ -23,9 +23,10 @@ uv sync            # or: pip install .
 uv run flow        # or: flow
 ```
 
-This installs three commands:
+This installs four commands:
 
 - `flow` — interactive CLI shell
+- `flow-min` — plain non-interactive CLI (scripts, ssh, agents)
 - `flow-tui` — full-screen TUI
 - `flow-web` — web GUI
 
