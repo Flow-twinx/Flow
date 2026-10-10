@@ -1519,7 +1519,16 @@ def _interactive_config():
 
 def _cname(style):
     """Last color word of a style, as a prompt_toolkit-friendly hex or name."""
-    name = str(style).rsplit(" ", 1)[-1]
+    s = str(style)
+    if s.startswith("\x1b"):
+        # ANSI escape code: map back to the chosen rich style string.
+        resolved = None
+        for which in ("primary", "secondary", "tertiary"):
+            if s == _sgr(_STYLE[which]):
+                resolved = _STYLE[which]
+                break
+        s = resolved or "white"
+    name = s.rsplit(" ", 1)[-1]
     try:
         from rich.color import Color
 
