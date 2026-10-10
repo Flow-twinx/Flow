@@ -86,8 +86,11 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.binary }}
 
+      - name: Stage release asset with OS-specific name
+        run: cp "${{ matrix.binary }}" "dist/${{ matrix.artifact }}"
+
       - name: Attach to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.binary }}
-          overwrite: true
+          files: dist/${{ matrix.artifact }}
+          overwrite_files: true
