@@ -99,6 +99,7 @@ COMMANDS = {
     "search": "Search local music library",
     "list": "List local music library",
     "radio": "Radio mode | shuffle & loop library (seed: radio <song>) | Ctrl+C next | Ctrl+Q quit",
+    "clear": "Clears the terminal and re-print the logo.",
     "like": "Like the currently playing song",
     "unlike": "Unlike the currently playing song",
     "delete": "Delete a downloaded song (alias: dl-d)",
@@ -166,9 +167,6 @@ def run(cmd: str, extra: list[str], args):
     cmd = shortcuts.resolve(cmd)
     inf = "-i" in extra
     extra = [x for x in extra if x != "-i"]
-    # `-f <format>` is an online download flag; a local library never downloads,
-    # and letting it swallow the next token eats the song name (`play -f Song`).
-    # Drop it as the unknown flag it is here so the name survives.
     if "-f" in extra:
         extra = [x for x in extra if x != "-f"]
         print(f"Unknown flag: -f")
@@ -1026,7 +1024,9 @@ def apply_tags(extra):
             library.update_meta(video_id, meta)
             saved_langs += "language" in meta
             saved_artists += "artist" in meta
-    i(f"  Saved {saved_langs} language tag(s), filled {saved_artists} missing artist(s)")
+    i(
+        f"  Saved {saved_langs} language tag(s), filled {saved_artists} missing artist(s)"
+    )
     if missing:
         m(f"  {missing} row(s) in the file are no longer in the library")
     m("  Play with: lang <tag>  |  artist <name>")

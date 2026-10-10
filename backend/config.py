@@ -859,23 +859,54 @@ def _apply_prog_char_em(v):
     return f"{Tertiary}Progress empty char changed to {ProgCharEm}{Reset}"
 
 
+import shutil
+
+MIN_BAR = 8
+
+
+def bar_width(reserved=0, preferred=None):
+    preferred = preferred or BarWidth
+    cols = shutil.get_terminal_size((80, 24)).columns
+    avail = cols - reserved - 1
+    if avail < MIN_BAR:
+        return 0
+    return min(preferred, avail)
+
+
 def progress_bar(frac, width=None):
     """A block bar filled to `frac` in Primary, remainder muted."""
-    width = width or BarWidth
+    if width is None:
+        width = bar_width()
+    if width <= 0:
+        return ""
     frac = max(0.0, min(1.0, float(frac)))
     filled = int(round(frac * width))
-    return f"{Primary if Mode == 'Online' else Secondary}{ProgChar * filled}{Reset}{Muted}{ProgCharEm * (width - filled)}{Reset}"
+    color = Primary if Mode == "Online" else Secondary
+    return f"{color}{ProgChar * filled}{Reset}{Muted}{ProgCharEm * (width - filled)}{Reset}"
 
 
 def render_progress(elapsed, duration, width=None):
     """Draw a live `\\r` progress line for the playing track."""
     duration = max(int(duration or 0), 0)
-    frac = min(float(elapsed) / duration, 1.0) if duration else 0.0
+    elapsed = max(int(elapsed or 0), 0)
+    frac = min(elapsed / duration, 1.0) if duration else 0.0
     total = f"{duration // 60}:{duration % 60:02d}" if duration else "--:--"
-    now = f"{int(elapsed) // 60}:{int(elapsed) % 60:02d}"
-    sys.stdout.write(
-        f"\r  {progress_bar(frac, width)}  {now} / {total}  {int(frac * 100):>3}%"
-    )
+    now = f"{elapsed // 60}:{elapsed % 60:02d}"
+    text = f"{now} / {total}  {int(frac * 100):>3}%"
+
+    reserved = 2 + 2 + len(text)
+    if width is None:
+        width = bar_width(reserved=reserved)
+
+    cols = shutil.get_terminal_size((80, 24)).columns
+    if width > 0:
+        line = f"  {progress_bar(frac, width)}  {text}"
+    elif len(text) + 2 < cols:
+        line = f"  {text}"
+    else:
+        line = f"{int(frac * 100)}%"  # ultra-narrow fallback
+
+    sys.stdout.write(f"\r\033[2K{line}")
     sys.stdout.flush()
 
 

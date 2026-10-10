@@ -1,16 +1,3 @@
-"""Resident Flow host for plugins.
-
-A single always-on process owns the plugin RPC socket (`~/.flow/flow.sock`,
-mode 0600). The socket bind is the lock: a launcher that can't bind simply
-connects to the running host instead of fighting it, so there's never more
-than one server.
-
-Plugins never spawn the `flow` CLI for reads/writes/controls — they connect
-over this socket and call a small typed method surface (`backend/rpc.py`),
-which runs the real validated backend functions in-process. See
-`docs/dev/plugins.md`.
-"""
-
 import json
 import os
 import pathlib
@@ -21,7 +8,8 @@ import threading
 import time
 
 from backend import config as _colors
-from backend.config import GREY, Muted, Primary, RED, Reset
+from backend.config import GREY, RED, Muted, Primary, Reset
+
 E = RED
 G = GREY
 M = Muted
@@ -171,9 +159,7 @@ def serve(foreground: bool = False) -> int:
                 conn, _ = server.accept()
             except socket.timeout:
                 continue
-            threading.Thread(
-                target=_handle_conn, args=(conn,), daemon=True
-            ).start()
+            threading.Thread(target=_handle_conn, args=(conn,), daemon=True).start()
     except KeyboardInterrupt:
         pass
     finally:
@@ -218,7 +204,7 @@ def _handle_conn(conn: socket.socket):
                     resp = rpc.handle(frame, flow_conn)
                     if resp is not None:
                         conn.sendall((json.dumps(resp) + "\n").encode())
-        except (ConnectionError, OSError):
+        except ConnectionError, OSError:
             pass
         finally:
             try:

@@ -103,6 +103,7 @@ COMMANDS = {
     "savan": "Play a song from JioSaavn (alias: svn)",
     "savan-s": "Search JioSaavn for tracks (alias: svn-s)",
     "radio": "Generate a mix | radio <song> [index] | -p save as playlist | -d download",
+    "clear": "Clears the terminal and re-prints the logo",
     "like": "Like a song",
     "unlike": "Unlike the currently playing song",
     "download": "Download audio from YouTube | -f <format> (opus, m4a, mp3, webm)",

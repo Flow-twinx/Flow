@@ -7,11 +7,11 @@ requires-python = ">=3.14"
 dynamic = []
 dependencies = [
     "dbus-fast>=5.0.22",
-    "dbus-python>=1.4.0",
+    "dbus-python>=1.4.0; sys_platform == 'linux'",
+    "pygobject>=3.58.0; sys_platform == 'linux'",
     "flask",
     "numpy",
     "psutil>=7.2.2",
-    "pygobject>=3.58.0",
     "python-vlc",
     "questionary",
     "sounddevice",

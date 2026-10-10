@@ -535,8 +535,10 @@ def play_entry(entry, title, args=None, flags=None, next_title=None, nav=None):
     _player = instance.media_player_new()
 
     stream_url = sponsor.stream_url(entry)
-    if not stream_url:
-        e("     No playable stream found")
+    if not stream_url or stream_url.startswith(
+        ("https://www.youtube.com/watch", "https://youtu.be/")
+    ):
+        e("     No playable stream found for this video")
         _teardown()
         return
     media = instance.media_new(stream_url)

@@ -167,9 +167,7 @@ def fetch_info(video_id: str):
     if not video_id:
         return None
     url = (
-        video_id
-        if "://" in video_id
-        else f"https://www.youtube.com/watch?v={video_id}"
+        video_id if "://" in video_id else f"https://www.youtube.com/watch?v={video_id}"
     )
     try:
         return sponsor.stream_info(url, opts=ydl_opts_play, with_segments=False)
@@ -234,11 +232,39 @@ def fetch_radio(query, max_results=30):
     return results
 
 
+def _entry_failure(exc) -> str:
+    """Classify an entry-extraction failure: age / signin / format / other."""
+    low = str(exc).lower()
+    if "confirm your age" in low or "age" in low:
+        return "age"
+    if "signed-in" in low or "sign in" in low:
+        return "signin"
+    if "requested format is not available" in low:
+        return "format"
+    return "other"
+
+
+def _print_entry_failure(exc):
+    """Print an actionable hint for entry failures (age gating, empty formats)."""
+    kind = _entry_failure(exc)
+    if kind in ("age", "signin"):
+        print(
+            f"{config.RED}This video is age-restricted or sign-in only. {hint}{config.Reset}"
+        )
+    elif kind == "format":
+        print(
+            f"{config.RED}This video has no playable audio format available.{config.Reset}"
+        )
+    else:
+        print(f"{config.RED}Could not load this video: {exc}{config.Reset}")
+
+
 def get_entry(url):
     try:
         entry = sponsor.stream_info(url, opts=ydl_opts_play)
     except Exception as exc:
-        logger.warning("Failed to get entry for %s: %s", url, exc)
+        logger.debug("Failed to get entry for %s: %s", url, exc)
+        _print_entry_failure(exc)
         return None
     if entry:
         formats_info = []

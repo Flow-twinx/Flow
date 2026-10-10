@@ -21,13 +21,7 @@ def send(command: str, delta=None):
 
 
 def take():
-    """Atomically consume the pending command.
 
-    The file is rename()'d out of the way before reading, so a command written
-    between our read and an earlier non-atomic unlink can't be deleted, and two
-    concurrent pollers can't double-deliver: only the poller that wins the
-    rename sees the command.
-    """
     consumed = CONTROL_FILE.with_name(CONTROL_FILE.name + ".consumed")
     try:
         os.replace(CONTROL_FILE, consumed)
@@ -35,7 +29,7 @@ def take():
         return ""
     try:
         data = json.loads(consumed.read_text())
-    except (json.JSONDecodeError, OSError):
+    except json.JSONDecodeError, OSError:
         data = {}
     finally:
         consumed.unlink(missing_ok=True)
