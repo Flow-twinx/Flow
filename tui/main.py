@@ -4,7 +4,6 @@ import asyncio
 import os
 import pathlib
 import random
-import signal
 import threading
 import time
 from dataclasses import dataclass
@@ -27,7 +26,7 @@ from textual.widgets import (
     Static,
 )
 
-from backend import config, history, library, mpris, sponsor, status
+from backend import config, history, ipc, library, mpris, sponsor, status
 from backend.Offline import file as offline_file
 from backend.Online import youtube
 
@@ -405,9 +404,9 @@ class Flow(App):
         self._update_mode_ui()
         self._reload_library()
         self._loop = asyncio.get_running_loop()
-        config.save_pid_if_free(os.getpid())
-        config.save_tui_pid(os.getpid())
-        self._install_signals()
+        port = ipc.serve(self._signal_dispatch, kind="tui")
+        config.save_pid_if_free(os.getpid(), ctl_port=port)
+        config.save_tui_pid(os.getpid(), ctl_port=port)
 
     def _apply_launch_modes(self) -> None:
         np = self.now_playing
@@ -417,22 +416,6 @@ class Flow(App):
             np.shuffle = True
         if self._repeat or self._shuffle:
             np.refresh_status()
-
-    def _install_signals(self) -> None:
-        for sig, action in (
-            (signal.SIGUSR1, "pause"),
-            (signal.SIGUSR2, "next"),
-            (config.SIG_PREV, "prev"),
-            (config.SIG_REPEAT, "repeat"),
-            (config.SIG_SHUFFLE, "shuffle"),
-            (config.SIG_STOP_ALL, "stop"),
-            (config.SIG_SEEK_FWD, "seek"),
-            (config.SIG_SEEK_BWD, "seek"),
-        ):
-            try:
-                signal.signal(sig, lambda *_, a=action: self._signal_dispatch(a))
-            except (ValueError, OSError):
-                pass
 
     def _signal_dispatch(self, action: str) -> None:
         if self._loop is None:
@@ -451,9 +434,9 @@ class Flow(App):
                 self.action_toggle_repeat()
             elif action == "shuffle":
                 self.action_toggle_shuffle()
-            elif action == "stop":
+            elif action in ("stop", "stop_all"):
                 self.action_stop()
-            elif action == "seek":
+            elif action in ("seek", "seek_fwd", "seek_bwd"):
                 self._apply_seek()
         except Exception:
             pass

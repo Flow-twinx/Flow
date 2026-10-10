@@ -4,12 +4,11 @@ import json
 import os
 import pathlib
 import shutil
-import signal
 import subprocess
 import sys
 import time
 
-from backend import config
+from backend import config, platform
 from backend.config import GREY, RED, Muted, Primary, Reset, Secondary
 
 P = Primary
@@ -152,9 +151,9 @@ def _ensure_daemon() -> bool:
         # entry point does (editable install, site-packages, or a source
         # checkout on sys.path) — a bare script path would depend on the
         # cwd/editable-finder and can break for users.
-        subprocess.Popen(
+        platform.spawn_detached(
             [sys.executable, "-m", "backend.daemon", "start"],
-            start_new_session=True,
+            env=dict(os.environ),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -387,15 +386,7 @@ def _pid_file(name: str) -> pathlib.Path:
 
 
 def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return False
+    return platform.pid_exists(pid)
 
 
 def running() -> dict[str, int]:
@@ -477,11 +468,10 @@ def cmd_run(extra) -> int:
         LOGS_DIR.mkdir(parents=True, exist_ok=True)
         log_file = open(LOGS_DIR / f"{name}.log", "ab", buffering=0)
 
-    proc = subprocess.Popen(
+    proc = platform.spawn_detached(
         [sys.executable, str(entry_path), *plugin_args],
         cwd=str(dest),
         env=env,
-        start_new_session=True,
         stdout=log_file,
         stderr=log_file,
     )
@@ -503,21 +493,13 @@ def cmd_run(extra) -> int:
 
 
 def _kill_pid(name: str, pid: int):
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
-    except OSError as exc:
-        print(f"{E}Failed to signal {name}: {exc}{R}")
+    platform.kill_pid(pid)
     for _ in range(50):
         if not _alive(pid):
             break
         time.sleep(0.1)
     else:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except OSError:
-            pass
+        platform.kill_pid(pid, force=True)
     _pid_file(name).unlink(missing_ok=True)
     print(f"{P}Stopped plugin '{name}'{R}")
 

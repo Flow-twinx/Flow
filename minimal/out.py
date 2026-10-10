@@ -65,6 +65,10 @@ def quiet():
 def fork_bg():
     """Fork for background playback: the parent gets the child pid, the child goes quiet."""
     sys.stdout.flush()
+    from backend import platform
+
+    if not platform.can_fork():
+        return None
     pid = os.fork()
     if pid:
         from backend import config

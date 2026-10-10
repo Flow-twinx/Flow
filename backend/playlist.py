@@ -1,11 +1,12 @@
 import contextlib
-import fcntl
 import hashlib
 import json
 import os
 import pathlib
 import re
 import time
+
+from backend import lockfile
 
 PLAYLISTS_DIR = pathlib.Path.home() / ".flow/playlists"
 PLAYLISTS_FILE = pathlib.Path.home() / ".flow/playlists.json"
@@ -65,14 +66,8 @@ def _slugify(name):
 
 @contextlib.contextmanager
 def _locked():
-    PLAYLISTS_DIR.mkdir(parents=True, exist_ok=True)
-    fd = os.open(_LOCK_FILE, os.O_CREAT | os.O_RDWR)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+    with lockfile.locked(_LOCK_FILE):
         yield
-    finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)
 
 
 def _atomic_write_json(path, obj):

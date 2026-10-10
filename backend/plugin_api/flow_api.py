@@ -66,10 +66,33 @@ def _connect() -> socket.socket | None:
     target = socket_path()
     if not os.path.exists(target):
         return None
+    if os.name == "nt":
+        return _connect_tcp(target)
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(_CONNECT_TIMEOUT)
     try:
         sock.connect(target)
+    except OSError:
+        try:
+            sock.close()
+        except OSError:
+            pass
+        return None
+    return sock
+
+
+def _connect_tcp(address_file: str) -> socket.socket | None:
+    """Windows: the socket file holds ``host:port`` for the loopback daemon."""
+    try:
+        host, _, port = pathlib.Path(address_file).read_text().strip().rpartition(":")
+    except OSError:
+        return None
+    if not host or not port.isdigit():
+        return None
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(_CONNECT_TIMEOUT)
+    try:
+        sock.connect((host, int(port)))
     except OSError:
         try:
             sock.close()

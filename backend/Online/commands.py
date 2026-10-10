@@ -1,18 +1,18 @@
-import errno
-import fcntl
 import os
 import pathlib
 import random
 import signal
 import sys
-import termios
 import threading
 import time
 
 from backend import (
     config,
     help_detail,
+    ipc,
+    keys,
     library,
+    platform,
     playlist,
     plist_cli,
     shortcuts,
@@ -60,12 +60,15 @@ def _radio_sigquit(sig, frame):
 
 def _fork_bg(label):
     config.kill_stored()
+    if not platform.can_fork():
+        i(f"{label} (background playback is unavailable on this OS)")
+        return True
     pid = os.fork()
     if pid > 0:
         config.save_pid(pid)
         i(f"{label} in background (PID: {pid})")
         return False
-    player.setup_nav_signals()
+    player._install_controls()
     devnull = os.open(os.devnull, os.O_RDWR)
     os.dup2(devnull, 0)
     os.dup2(devnull, 1)
@@ -1151,57 +1154,27 @@ def radio(extra, args):
             return
 
     old_sigint = signal.signal(signal.SIGINT, _radio_sigint)
-    old_sigquit = signal.signal(signal.SIGQUIT, _radio_sigquit)
-    old_sigusr1 = signal.getsignal(signal.SIGUSR1)
-
-    fd = sys.stdin.fileno()
+    old_sigquit = None
+    old_sigusr1 = None
+    ctl = sys.stdin.fileno()
     tty_fd = None
-    old_term = None
-    old_fd_flags = None
-    try:
-        tty_fd = os.open("/dev/tty", os.O_RDWR)
-        ctl = tty_fd
-    except OSError:
-        ctl = fd
-    try:
-        old_term = termios.tcgetattr(ctl)
-        new = termios.tcgetattr(ctl)
-        new[0] &= ~termios.IXON
-        new[6][termios.VQUIT] = 0x11
-        new[6][termios.VSUSP] = 0
-        termios.tcsetattr(ctl, termios.TCSADRAIN, new)
-        old_fd_flags = fcntl.fcntl(ctl, fcntl.F_GETFL)
-        fcntl.fcntl(ctl, fcntl.F_SETFL, old_fd_flags | os.O_NONBLOCK)
-    except termios.error, OSError:
-        pass
-
-    def _radio_sigusr1(sig, frame):
-        player._sigusr1_toggle(sig, frame)
-
-    signal.signal(signal.SIGUSR1, _radio_sigusr1)
-    signal.signal(signal.SIGTSTP, signal.SIG_IGN)
     player._radio_active = True
 
-    radio_stop = threading.Event()
-
-    def _radio_input_reader():
+    if not platform.is_windows():
+        old_sigquit = signal.signal(signal.SIGQUIT, _radio_sigquit)
+        old_sigusr1 = signal.getsignal(signal.SIGUSR1)
         try:
-            while not radio_stop.is_set():
-                try:
-                    ch = os.read(ctl, 1)
-                except OSError as ex:
-                    if ex.errno == errno.EAGAIN:
-                        time.sleep(0.05)
-                        continue
-                    break
-                if not ch:
-                    break
-                if ch == b"\x10":
-                    os.kill(os.getpid(), signal.SIGUSR1)
+            tty_fd = os.open("/dev/tty", os.O_RDWR)
+            ctl = tty_fd
         except OSError:
             pass
+        signal.signal(signal.SIGTSTP, signal.SIG_IGN)
 
-    radio_reader = threading.Thread(target=_radio_input_reader, daemon=True)
+    def _radio_key(ch):
+        if ch == 0x10:
+            ipc.dispatch("pause")
+
+    radio_reader = keys.RawReader(_radio_key, fd=ctl)
     radio_reader.start()
 
     flags = {"quit": lambda: _radio_quit, "skip": lambda: _radio_skip}
@@ -1268,24 +1241,22 @@ def radio(extra, args):
         _radio_quit = True
     finally:
         player._radio_active = False
-        radio_stop.set()
-        if radio_reader.is_alive():
-            radio_reader.join(timeout=0.2)
-        if old_term is not None:
+        radio_reader.stop()
+        if not platform.is_windows():
+            if tty_fd is not None:
+                try:
+                    os.close(tty_fd)
+                except OSError:
+                    pass
             try:
-                if old_fd_flags is not None:
-                    fcntl.fcntl(ctl, fcntl.F_SETFL, old_fd_flags)
-                termios.tcsetattr(ctl, termios.TCSADRAIN, old_term)
-            except termios.error, OSError:
+                signal.signal(signal.SIGQUIT, old_sigquit)
+            except (ValueError, OSError):
                 pass
-        if tty_fd is not None:
             try:
-                os.close(tty_fd)
-            except OSError:
+                signal.signal(signal.SIGUSR1, old_sigusr1)
+            except (ValueError, OSError):
                 pass
         signal.signal(signal.SIGINT, old_sigint)
-        signal.signal(signal.SIGQUIT, old_sigquit)
-        signal.signal(signal.SIGUSR1, old_sigusr1)
 
 
 def _resolve_fmt(args, extra=None):

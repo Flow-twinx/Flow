@@ -1,13 +1,15 @@
 import argparse
 import builtins
 import os
-import signal
+import subprocess
 import sys
 import time
 import warnings
 from pathlib import Path
 
 import psutil
+
+from backend import platform
 
 WEB_PID = Path.home() / ".flow/web.pid"
 WEB_PORT_FILE = Path.home() / ".flow/web_port"
@@ -131,7 +133,7 @@ def _stop_all():
     return 0
 
 
-def _start_server(new, port):
+def _start_server(new, port, spawned=False):
     from backend import config
 
     P = config.Primary
@@ -171,10 +173,7 @@ def _start_server(new, port):
                         break
                     time.sleep(0.2)
             else:
-                try:
-                    os.kill(existing_pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
+                platform.kill_pid(existing_pid)
             WEB_PID.unlink(missing_ok=True)
             WEB_PORT_FILE.unlink(missing_ok=True)
             from backend import registry
@@ -193,18 +192,40 @@ def _start_server(new, port):
         warnings.filterwarnings(
             "ignore", category=DeprecationWarning, message=".*fork.*"
         )
-        pid = os.fork()
-        if pid > 0:
-            WEB_PID.write_text(str(pid))
+        if not spawned and platform.can_fork():
+            pid = os.fork()
+            if pid > 0:
+                WEB_PID.write_text(str(pid))
+                WEB_PORT_FILE.write_text(str(port))
+                from backend import registry
+
+                registry.register("web", pid, port=port)
+                print(f"{P}Flow web server → http://127.0.0.1:{port}{R}")
+                return
+            devnull = os.open(os.devnull, os.O_RDWR)
+            os.dup2(devnull, 1)
+            os.dup2(devnull, 2)
+            _run_web(port)
+            return
+        if not spawned:
+            proc = platform.spawn_detached(
+                [sys.executable, "-m", "web.main", f"--_spawn={port}"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            WEB_PID.write_text(str(proc.pid))
             WEB_PORT_FILE.write_text(str(port))
             from backend import registry
 
-            registry.register("web", pid, port=port)
+            registry.register("web", proc.pid, port=port)
             print(f"{P}Flow web server → http://127.0.0.1:{port}{R}")
             return
-        devnull = os.open(os.devnull, os.O_RDWR)
-        os.dup2(devnull, 1)
-        os.dup2(devnull, 2)
+        WEB_PID.write_text(str(os.getpid()))
+        WEB_PORT_FILE.write_text(str(port))
+        from backend import registry
+
+        registry.register("web", os.getpid(), port=port)
         _run_web(port)
     else:
         WEB_PID.write_text(str(os.getpid()))
@@ -247,13 +268,19 @@ def main():
         metavar="PORT",
         help="start the web server on a specific port",
     )
+    parser.add_argument(
+        "--_spawn",
+        type=int,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args()
 
     if args.stop_all:
         sys.exit(_stop_all())
     if args.stop is not None:
         sys.exit(_stop_port(args.stop or _default_web_port()))
-    _start_server(new=args.new, port=args.port)
+    _start_server(new=args.new, port=args.port or args._spawn, spawned=args._spawn is not None)
 
 
 if __name__ == "__main__":

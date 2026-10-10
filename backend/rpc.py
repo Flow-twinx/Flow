@@ -137,53 +137,46 @@ def _player_running() -> bool:
     return registry.resolve("vlc") is not None or registry.resolve("web") is not None
 
 
-def _send_player(command: str, sig, label: str, delta=None):
+def _send_player(action: str, label: str, delta=None):
     """Host-authoritative player routing — same as the CLI does it."""
-    from backend import registry
+    from backend import ipc, registry
 
     entry = registry.resolve("vlc")
     if entry is not None:
         pid = entry["pid"]
-        try:
-            if delta is not None:
-                config.write_seek(int(delta))
-            os.kill(pid, sig)
-        except ProcessLookupError:
-            config.clear_pid_if(pid)
-        except OSError:
-            pass
-        return f"{label} (VLC pid {pid})"
-    else:
-        control.send(command, delta)
-        return f"{label} (web player)"
+        if delta is not None:
+            config.write_seek(int(delta))
+        payload = {"delta": delta} if delta is not None else None
+        if ipc.send(entry, action, payload):
+            return f"{label} (VLC pid {pid})"
+        config.clear_pid_if(pid)
+    command = ipc.WEB_COMMANDS.get(action, action)
+    control.send(command, delta)
+    return f"{label} (web player)"
 
 
 def rpc_pause() -> str:
-    return _send_player("stop", config.SIG_STOP, "Toggled pause/resume")
+    return _send_player("pause", "Toggled pause/resume")
 
 
 def rpc_resume() -> str:
-    return _send_player("stop", config.SIG_STOP, "Resumed playback")
+    return _send_player("pause", "Resumed playback")
 
 
 def rpc_next() -> str:
-    return _send_player("next", config.SIG_NEXT, "Skipped to next track")
+    return _send_player("next", "Skipped to next track")
 
 
 def rpc_previous() -> str:
-    return _send_player("previous", config.SIG_PREV, "Went to previous track")
+    return _send_player("prev", "Went to previous track")
 
 
 def rpc_seek(sec: float) -> str:
-    return _send_player(
-        "seek", config.SIG_SEEK_FWD, f"Seeked forward {int(sec)}s", int(sec) * 1000
-    )
+    return _send_player("seek_fwd", f"Seeked forward {int(sec)}s", int(sec) * 1000)
 
 
 def rpc_seek_back(sec: float) -> str:
-    return _send_player(
-        "seekb", config.SIG_SEEK_BWD, f"Seeked backward {int(sec)}s", -int(sec) * 1000
-    )
+    return _send_player("seek_bwd", f"Seeked backward {int(sec)}s", -int(sec) * 1000)
 
 
 def _act_current(action: str) -> str:

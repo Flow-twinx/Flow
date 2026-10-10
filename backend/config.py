@@ -9,14 +9,18 @@ import sys
 
 CONFIG_FILE = pathlib.Path.home() / ".flow/config.json"
 
-SIG_STOP = _signal.SIGUSR1
-SIG_NEXT = _signal.SIGUSR2
-SIG_PREV = _signal.SIGRTMIN + 2
-SIG_SEEK_FWD = _signal.SIGRTMIN + 3
-SIG_SEEK_BWD = _signal.SIGRTMIN + 4
-SIG_REPEAT = _signal.SIGRTMIN + 5
-SIG_SHUFFLE = _signal.SIGRTMIN + 6
-SIG_STOP_ALL = _signal.SIGRTMIN + 7
+SIG_STOP = getattr(_signal, "SIGUSR1", None)
+SIG_NEXT = getattr(_signal, "SIGUSR2", None)
+if hasattr(_signal, "SIGRTMIN"):
+    SIG_PREV = _signal.SIGRTMIN + 2
+    SIG_SEEK_FWD = _signal.SIGRTMIN + 3
+    SIG_SEEK_BWD = _signal.SIGRTMIN + 4
+    SIG_REPEAT = _signal.SIGRTMIN + 5
+    SIG_SHUFFLE = _signal.SIGRTMIN + 6
+    SIG_STOP_ALL = _signal.SIGRTMIN + 7
+else:
+    SIG_PREV = SIG_SEEK_FWD = SIG_SEEK_BWD = None
+    SIG_REPEAT = SIG_SHUFFLE = SIG_STOP_ALL = None
 
 
 _FLAG_MAP = {"-bg": "bg", "-s": "shuffle", "-d": "download", "-m": "multi"}
@@ -694,12 +698,12 @@ def clear_seek():
     SEEK_FILE.unlink(missing_ok=True)
 
 
-def save_pid(pid: int):
+def save_pid(pid: int, ctl_port: int | None = None):
     PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     PID_FILE.write_text(str(pid))
     from backend import registry
 
-    registry.register("vlc", pid)
+    registry.register("vlc", pid, ctl_port=ctl_port)
 
 
 def read_pid() -> int | None:
@@ -719,12 +723,12 @@ def clear_pid():
     registry.unregister("vlc")
 
 
-def save_tui_pid(pid: int):
+def save_tui_pid(pid: int, ctl_port: int | None = None):
     TUI_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     TUI_PID_FILE.write_text(str(pid))
     from backend import registry
 
-    registry.register("tui", pid)
+    registry.register("tui", pid, ctl_port=ctl_port)
 
 
 def read_tui_pid() -> int | None:
@@ -744,7 +748,7 @@ def clear_tui_pid():
     registry.unregister("tui")
 
 
-def save_pid_if_free(pid: int) -> bool:
+def save_pid_if_free(pid: int, ctl_port: int | None = None) -> bool:
     """Claim the player pid slot unless another live player already holds it."""
     existing = read_pid()
     if existing is not None and existing != pid:
@@ -755,7 +759,10 @@ def save_pid_if_free(pid: int) -> bool:
                 return False
         except Exception:
             pass
-    save_pid(pid)
+    if ctl_port is not None:
+        save_pid(pid, ctl_port=ctl_port)
+    else:
+        save_pid(pid)
     return True
 
 
@@ -772,16 +779,12 @@ def clear_tui_pid_if(pid: int):
 
 
 def kill_stored():
-    import os
-    import signal
+    from backend import platform
 
     pid = read_pid()
     if pid is None:
         return False
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
+    platform.kill_pid(pid)
     clear_pid()
     return True
 
@@ -1256,7 +1259,13 @@ def notify(title, body=""):
     if not NOTIFY:
         return
     try:
-        subprocess.run(["notify-send", title, body], check=False)
+        if sys.platform == "darwin":
+            subprocess.run(
+                ["osascript", "-e", f'display notification "{body}" with title "{title}"'],
+                check=False,
+            )
+        elif os.name != "nt":
+            subprocess.run(["notify-send", title, body], check=False)
     except OSError:
         pass
 

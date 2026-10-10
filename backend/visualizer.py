@@ -1,4 +1,3 @@
-import curses
 import re
 import shutil
 import subprocess
@@ -7,6 +6,11 @@ import threading
 import numpy as np
 import sounddevice as sd
 from backend import config
+
+try:
+    import curses
+except ImportError:
+    curses = None
 
 BLOCK_SIZE = 4096
 SAMPLE_RATE = 48000
@@ -204,6 +208,8 @@ def _audio_callback(indata, frames, time_info, status):
 
 def start(stdscr, ansi_color):
     global _stream, _bins, _bars, _peak, _stdscr, _orig_source
+    if curses is None:
+        return False
     if _stream is not None:
         return
     _stdscr = stdscr

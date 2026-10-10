@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [beta, main]
+  pull_request:
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.12.x"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install system deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            vlc \
+            libgirepository1.0-dev \
+            libcairo2-dev \
+            gobject-introspection \
+            libdbus-1-dev \
+            libportaudio2
+
+      - name: Sync project
+        run: uv sync --group dev
+
+      - name: Run tests
+        run: uv run pytest -q

@@ -1,0 +1,105 @@
+FLOW CROSS-PLATFORM PORT + GITHUB ACTIONS — TO-DO
+=================================================
+Scope: core parity on Linux/macOS/Windows; Linux extras disable; standalone
+PyInstaller binaries per OS via GitHub Actions. Full plan:
+/home/twinx/.opencode/plan/flow-cross-platform.md
+
+[x] = done, [ ] = pending, [~] = in progress
+
+
+PHASE 0 — BASELINE CI (Linux only)
+----------------------------------
+[x] 0.1 Create .github/workflows/ci.yml with Linux-only job
+      (ubuntu-latest, Python 3.14, system libvlc + gir deps, install dev deps, pytest)
+[ ] 0.2 Run workflow / verify green (needs push to origin; verify after Phase 1 commit)
+[x] 0.3 Confirm pyproject + uv.lock install cleanly (dev group incl. pyinstaller)
+
+
+PHASE 1 — INSTALLABLE EVERYWHERE (pyproject.toml)
+-------------------------------------------------
+[x] 1.1 dbus-python -> marker: dbus-python>=1.4.0 ; sys_platform == "linux"
+[x] 1.2 pygobject   -> marker: pygobject>=3.58.0   ; sys_platform == "linux"
+[x] 1.3 Keep dbus-fast unconditional
+[ ] 1.4 Verify pip install -e . on macOS and Windows (imports of flow/flow-tui/flow-web)
+[x] 1.5 uv.lock in sync (uv lock --check passes after pull from main)
+
+NOTE (post-pull, v0.8.4): minimal/ (flow-min) is live source again and IS in scope.
+tile-twinx>=1.0.1 dep is vestigial (never imported) but pure-Python + OS-independent
+(PyPI-confirmed) - harmless, not a blocker. Optional cleanup: drop it.
+
+
+PHASE 2 — PLATFORM ABSTRACTION (critical path)
+-----------------------------------------------
+[x] 2.1 backend/platform.py: is_linux/is_macos/is_windows, pid_exists()
+[x] 2.2 backend/ipc.py: send_control(pid, action) + serve_controls(handler)
+[x] 2.3   Linux: keep current signals
+[x] 2.4   macOS: SIGUSR1/2 for pause/next, localhost socket for rest (no SIGRTMIN)
+[x] 2.5   Windows: localhost TCP control socket (port via registry pid files)
+[x] 2.6 Rewire senders: cli/main.py:58-77,458-487 ; tui/__init__.py:24-92
+[x] 2.6b Rewire senders: minimal/common.py:51-63 signal() helper (os.kill -> ipc)
+[x] 2.7 Rewire senders: backend/rpc.py:150-168 ; backend/mpris.py:94-117
+[x] 2.8 Rewire receivers: tui/main.py:350-364
+[x] 2.9 Rewire receivers: backend/Online/player.py, Offline/player.py (signal.signal blocks)
+[x] 2.10 Rewire radio: backend/Online/commands.py, Offline/commands.py signal blocks
+[x] 2.11 kill_pid()/pid_exists() helpers: web/main.py, config.py, daemon.py,
+       plugins.py, registry.py
+[x] 2.12 backend/lockfile.py: flock (POSIX) / msvcrt.locking (Windows)
+[x] 2.13 Replace fcntl in backend/playlist.py (flock -> lockfile)
+[x] 2.14 spawn_detached(): POSIX start_new_session=True / Windows
+       DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP
+[x] 2.15 Replace os.fork: daemon.py double-fork daemon (spawn -f child on Windows)
+[x] 2.16 Replace os.fork: Offline/commands.py, Online/commands.py (-bg guarded)
+[x] 2.17 Replace os.fork: web/main.py (spawn_detached + --_spawn child flag)
+[x] 2.18 Replace start_new_session direct use: plugins.py daemon + plugin spawns
+[x] 2.18b Replace os.fork: minimal/out.py fork_bg() -> can_fork guard
+[x] 2.19 Daemon socket: AF_UNIX POSIX / TCP loopback Windows
+       (backend/daemon.py + backend/plugin_api/flow_api.py connect)
+[x] 2.20 Guard os.chmod(..., 0o600) to POSIX (daemon.py)
+[x] 2.21 Unit/smoke test: control round-trip (tests/test_ipc_control.py;
+       per-OS verification via CI in Phase 6)
+
+
+PHASE 3 — INPUT PORT (msvcrt)
+-----------------------------
+[x] 3.1 backend/keys.py: termios (POSIX) / msvcrt.kbhit+getwch thread (Windows)
+[x] 3.2 Replace O_NONBLOCK blocks: Online/player.py pause-key reader
+[x] 3.3 Replace O_NONBLOCK blocks: Offline/player.py pause-key reader
+[x] 3.4 Replace O_NONBLOCK blocks: Online/commands.py radio keys
+[x] 3.5 Replace O_NONBLOCK blocks: Offline/commands.py radio keys
+[x] 3.6 Verify /dev/tty and os.devnull dup2 juggling on Windows (guards in place)
+
+
+PHASE 4 — LINUX EXTRAS DISABLE
+------------------------------
+[x] 4.1 visualizer.py: gate pactl + "pulse" + curses to Linux; skip note elsewhere
+[x] 4.2 cli/main.py --setup-island: Linux-only flag
+[x] 4.3 notify-send (config.py): Linux as-is, macOS osascript, Windows skip
+[x] 4.4 MPRIS: confirm no-op fallback already sufficient
+
+
+PHASE 5 — PACKAGING (standalone binaries)
+-----------------------------------------
+[ ] 5.1 packaging/flow.linux.spec (move + keep "drop bundled libvlc" logic)
+[ ] 5.2 packaging/flow.macos.spec (find_lib + VLC_PLUGIN_PATH bootstrap)
+[ ] 5.3 packaging/flow.windows.spec (find_lib + VLC_PLUGIN_PATH bootstrap)
+[ ] 5.4 Conditional hiddenimports per OS (dbus/gi linux-only)
+[ ] 5.5 Runtime VLC_PLUGIN_PATH bootstrap in cli/main.py for macOS/Windows
+[ ] 5.6 Build binary locally on Linux, smoke test
+
+
+PHASE 6 — GITHUB ACTIONS
+------------------------
+[ ] 6.1 ci.yml: matrix ubuntu/macos/windows + Python 3.14
+[ ] 6.2 Per-OS system deps: apt vlc / brew vlc / portable VLC zip + VLC_PLUGIN_PATH
+[ ] 6.3 Headless smoke test per OS (offline playback fixture, TUI boots, control round-trip)
+[ ] 6.4 release.yml: tag v* -> 3 parallel PyInstaller onefile builds
+[ ] 6.5 Smoke test built binaries, upload artifacts, attach to GitHub Release
+[ ] 6.6 Trigger a test release and verify binaries run
+
+
+PHASE 7 — DOCS + TEST GATING
+----------------------------
+[ ] 7.1 docs/user/installation.md: per-OS VLC install + VLC_PLUGIN_PATH instructions
+[ ] 7.2 Gate test_daemon_rpc.py, test_registry.py with skipif(win32)
+[ ] 7.3 Add Windows control-IPC test exercising Phase 2
+[ ] 7.4 Final pass: remove stale flow-min entrypoint refs if appropriate (minimal/ gone)

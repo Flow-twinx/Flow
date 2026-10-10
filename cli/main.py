@@ -3,7 +3,6 @@ import json
 import os
 import re
 import shutil
-import signal
 import sys
 import threading
 import time
@@ -13,7 +12,7 @@ from pathlib import Path
 if __name__ == "__main__" and __package__ is None:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from backend import config, shortcuts
+from backend import config, platform, shortcuts
 from backend.Offline import commands as _offline_commands
 from backend.Online import commands as _online_commands
 from backend.ping import is_connected
@@ -53,21 +52,20 @@ def _send_web_command(port, command, payload=None):
         return False
 
 
-def _send_control(command, sig, label, payload=None):
-    from backend import registry
+def _send_control(action, label, payload=None):
+    from backend import ipc, registry
 
     entry = registry.resolve("vlc")
     if entry is not None:
         pid = entry["pid"]
-        try:
-            os.kill(pid, sig)
+        if ipc.send(entry, action, payload):
             print(f"{P}{label} (VLC PID: {pid}){R}")
             return
-        except ProcessLookupError:
-            config.clear_pid_if(pid)
+        config.clear_pid_if(pid)
 
     web = registry.resolve("web")
     if web is not None and web.get("port"):
+        command = ipc.WEB_COMMANDS.get(action, action)
         if _send_web_command(web["port"], command, payload):
             print(f"{P}{label} (web player){R}")
             return
@@ -440,6 +438,9 @@ def main():
     args, unknown = parser.parse_known_args()
 
     if getattr(args, "setup_island", False):
+        if not platform.is_linux():
+            print(f"{config.Muted}--setup-island is Linux-only (Hyprland) and is skipped here{R}")
+            sys.exit(0)
         _setup_island()
         sys.exit(0)
 
@@ -529,34 +530,27 @@ def main():
 
     control_args = []
     if getattr(args, "pause", False):
-        control_args.append(("stop", signal.SIGUSR1, "Toggled pause/resume", None))
+        control_args.append(("pause", "Toggled pause/resume", None))
     if getattr(args, "next", False):
-        control_args.append(("next", signal.SIGUSR2, "Skipped to next track", None))
+        control_args.append(("next", "Skipped to next track", None))
     if getattr(args, "previous", False):
-        control_args.append(
-            ("previous", config.SIG_PREV, "Went to previous track", None)
-        )
+        control_args.append(("prev", "Went to previous track", None))
     if getattr(args, "seek", None) is not None:
-        control_args.append(
-            ("seek", config.SIG_SEEK_FWD, "Seeked forward", getattr(args, "seek"))
-        )
+        control_args.append(("seek_fwd", "Seeked forward", getattr(args, "seek")))
     if getattr(args, "seekb", None) is not None:
-        control_args.append(
-            ("seekb", config.SIG_SEEK_BWD, "Seeked backward", -getattr(args, "seekb"))
-        )
+        control_args.append(("seek_bwd", "Seeked backward", -getattr(args, "seekb")))
     if control_args:
-        for command, sig, label, delta in control_args:
+        for action, label, delta in control_args:
             if delta is not None:
                 from backend import registry
 
-                if registry.resolve("vlc") is not None:
+                if registry.resolve("vlc") is not None or registry.resolve("tui") is not None:
                     config.write_seek(delta * 1000)
                 label = f"{label} {abs(delta)}s"
             _send_control(
-                command,
-                sig,
+                action,
                 label,
-                payload={"delta": delta} if delta is not None else None,
+                payload={"delta": delta * 1000} if delta is not None else None,
             )
         sys.exit(0)
 

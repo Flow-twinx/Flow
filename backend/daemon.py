@@ -1,13 +1,14 @@
 import json
 import os
 import pathlib
-import signal
 import socket
+import subprocess
 import sys
 import threading
 import time
 
 from backend import config as _colors
+from backend import platform
 from backend.config import GREY, RED, Muted, Primary, Reset
 
 E = RED
@@ -40,15 +41,7 @@ def is_running() -> bool:
 
 
 def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return False
+    return platform.pid_exists(pid)
 
 
 def _cleanup_stale():
@@ -67,21 +60,14 @@ def _cleanup_stale():
 
 
 def stop_signal(pid: int) -> bool:
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return False
-    except OSError:
+    if not platform.kill_pid(pid):
         return False
     for _ in range(50):
         if not _alive(pid):
             break
         time.sleep(0.1)
     else:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except OSError:
-            pass
+        platform.kill_pid(pid, force=True)
     return True
 
 
@@ -125,21 +111,29 @@ def serve(foreground: bool = False) -> int:
     FLOW_DIR.mkdir(parents=True, exist_ok=True)
     _cleanup_stale()
 
-    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    try:
-        server.bind(str(SOCKET_FILE))
-    except OSError:
-        # Socket exists — either stale or a live daemon owns it.
-        if is_running():
-            print(f"{P}Flow daemon is already running{R}")
-            return 0
-        SOCKET_FILE.unlink(missing_ok=True)
+    if platform.is_windows():
+        # Windows has no AF_UNIX daemon socket in this design: bind a
+        # loopback TCP port and advertise "host:port" in the socket file.
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind(("127.0.0.1", 0))
+        SOCKET_FILE.write_text(f"127.0.0.1:{server.getsockname()[1]}")
+    else:
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
             server.bind(str(SOCKET_FILE))
-        except OSError as exc:
-            print(f"{E}Could not bind {SOCKET_FILE}: {exc}{R}")
-            return 1
-    os.chmod(SOCKET_FILE, 0o600)
+        except OSError:
+            # Socket exists — either stale or a live daemon owns it.
+            if is_running():
+                print(f"{P}Flow daemon is already running{R}")
+                return 0
+            SOCKET_FILE.unlink(missing_ok=True)
+            try:
+                server.bind(str(SOCKET_FILE))
+            except OSError as exc:
+                print(f"{E}Could not bind {SOCKET_FILE}: {exc}{R}")
+                return 1
+        os.chmod(SOCKET_FILE, 0o600)
     server.listen(32)
 
     if not foreground:
@@ -214,6 +208,8 @@ def _handle_conn(conn: socket.socket):
 
 
 def _daemonize():
+    if not platform.can_fork():
+        return
     if os.fork() > 0:
         os._exit(0)
     os.setsid()
@@ -233,6 +229,16 @@ def cmd_start(foreground: bool = False) -> int:
     from backend import registry
 
     registry.prune()  # drop dead players before we start serving
+    if not foreground and not platform.can_fork():
+        # Windows: relaunch ourselves detached in foreground mode.
+        platform.spawn_detached(
+            [sys.executable, "-m", "backend.daemon", "start", "-f"],
+            env=dict(os.environ),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return 0
     return serve(foreground=foreground)
 
 

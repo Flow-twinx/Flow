@@ -6,6 +6,7 @@ import threading
 import time
 
 from backend import config
+from backend import ipc
 
 BUS_NAME = "org.mpris.MediaPlayer2.flow"
 OBJECT_PATH = "/org/mpris/MediaPlayer2"
@@ -89,32 +90,25 @@ def _next_trackid() -> str:
 
 
 class _Control:
-    """Sends flow's control signals to the current process (the player)."""
-
-    @staticmethod
-    def _kill(sig):
-        try:
-            os.kill(os.getpid(), sig)
-        except OSError:
-            pass
+    """Sends control actions to the current process."""
 
     def play(self):
-        self._kill(config.SIG_STOP)
+        ipc.dispatch("pause")
 
     def pause(self):
-        self._kill(config.SIG_STOP)
+        ipc.dispatch("pause")
 
     def playpause(self):
-        self._kill(config.SIG_STOP)
+        ipc.dispatch("pause")
 
     def stop(self):
-        self._kill(config.SIG_STOP_ALL)
+        ipc.dispatch("stop_all")
 
     def next(self):
-        self._kill(config.SIG_NEXT)
+        ipc.dispatch("next")
 
     def previous(self):
-        self._kill(config.SIG_PREV)
+        ipc.dispatch("prev")
 
 
 def _art_uri(value):

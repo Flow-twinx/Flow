@@ -60,17 +60,17 @@ def stop():
 
 def pause():
     """Toggle pause on the running player."""
-    _control("pause", config.SIG_STOP, "pause toggled")
+    _control("pause", "pause toggled")
 
 
 def next_track():
     """Skip to the next track."""
-    _control("next", config.SIG_NEXT, "next")
+    _control("next", "next")
 
 
 def prev_track():
     """Go back to the previous track."""
-    _control("previous", config.SIG_PREV, "previous")
+    _control("prev", "previous")
 
 
 def seek(seconds, back=False):
@@ -78,18 +78,17 @@ def seek(seconds, back=False):
     if live_player() is None:
         out.fail("no player running")
     delta = int(seconds) * 1000 * (-1 if back else 1)
-    command = "seekb" if back else "seek"
-    sig = config.SIG_SEEK_BWD if back else config.SIG_SEEK_FWD
+    action = "seek_bwd" if back else "seek_fwd"
     with out.quiet():
         config.write_seek(delta)
-        target = signal(command, sig, {"delta": delta})
+        target = signal(action, {"delta": delta})
     if target is None:
         out.fail("no player running")
     direction = "back" if back else "forward"
     out.emit(
         {
             "status": "ok",
-            "command": command,
+            "command": "seekb" if back else "seek",
             "seconds": int(seconds),
             "pid": _pid(target),
         },
@@ -97,12 +96,18 @@ def seek(seconds, back=False):
     )
 
 
-def _control(command, sig, label):
+_EMIT_CMD = {"prev": "previous"}
+
+
+def _control(action, label):
     with out.quiet():
-        target = signal(command, sig)
+        target = signal(action)
     if target is None:
         out.fail("no player running")
-    out.emit({"status": "ok", "command": command, "pid": _pid(target)}, f"ok  {label}")
+    out.emit(
+        {"status": "ok", "command": _EMIT_CMD.get(action, action), "pid": _pid(target)},
+        f"ok  {label}",
+    )
 
 
 def _pid(target):
@@ -214,7 +219,7 @@ def play_paths(paths, foreground=False, label=None):
         out.emit(payload, f"played  {len(paths)} track(s)")
         return
     _spawn(
-        off_player.setup_nav_signals,
+        off_player._install_controls,
         lambda: off_commands._play_queue(paths, args),
         payload,
         label or f"playing  {len(paths)} track(s)",
@@ -233,7 +238,7 @@ def play_online_queue(results, foreground=False, label=None):
         out.emit(payload, f"played  {len(results)} track(s)")
         return
     _spawn(
-        on_player.setup_nav_signals,
+        on_player._install_controls,
         lambda: on_commands._play_queue(results, args),
         payload,
         label or f"playing  {len(results)} track(s)",
@@ -278,7 +283,7 @@ def _play_online(info, title, shuffle=False, foreground=False):
         out.emit(payload, f"played  {title}")
         return
     _spawn(
-        on_player.setup_nav_signals,
+        on_player._install_controls,
         lambda: on_player.play_entry(info, title, args),
         payload,
         f"playing  {title}",
@@ -301,7 +306,7 @@ def _play_file(path, shuffle=False, foreground=False, matches=1):
         out.emit(payload, f"played  {title}")
         return
     _spawn(
-        off_player.setup_nav_signals,
+        off_player._install_controls,
         lambda: off_player.play_file(path, title, args),
         payload,
         f"playing  {title}",
