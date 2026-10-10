@@ -80,6 +80,7 @@ def restore_config_globals():
     config.ProgChar = "\u2588"
     config.ProgCharEm = "\u2591"
     config.Sensitivity = 1.0
+    config.SPINNER = "|/-\\"
     config.Primary = config.CYAN
     config.Secondary = config.PURPLE
     config.Tertiary = config.BLUE
@@ -178,7 +179,8 @@ def test_interactive_config_picks_confirm(
     assert config.NOTIFY is False
 
 
-def test_interactive_config_lists_every_setting():
+def test_interactive_config_lists_every_setting(restore_config_globals):
+    config.Display = "rich"
     rows = config._interactive_rows()
     keys = {r[0] for r in rows}
     assert len(rows) == len(keys)  # no duplicate keys
@@ -189,6 +191,13 @@ def test_interactive_config_lists_every_setting():
         "down_on_like", "notify", "max_search", "max_radio",
     ):
         assert key in keys
+
+
+def test_interactive_config_hides_rich_columns_outside_rich(restore_config_globals):
+    config.Display = "bars"
+    keys = {r[0] for r in config._interactive_rows()}
+    assert "progress_columns" not in keys
+    assert "display" in keys
 
 
 def test_display_mode_accepts_progress():
@@ -262,3 +271,79 @@ def test_youtube_progress_hook_renders_bar(capsys):
 def test_youtube_progress_hook_ignores_other_statuses(capsys):
     youtube.progress_hook({"status": "finished"})
     assert capsys.readouterr().out == ""
+
+
+def test_rich_display_active_gates_on_display(monkeypatch, restore_config_globals):
+    import backend.rich_display as rich_display
+    import sys
+
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    config.Display = "bars"
+    assert rich_display.active() is False
+    config.Display = "rich"
+    assert rich_display.active() is True
+
+
+def test_rich_panel_renders_track_metadata(capsys, restore_config_globals):
+    import backend.rich_display as rich_display
+
+    disp = rich_display.NowPlaying("First", duration=60)
+    disp.start()
+    disp.set_track(
+        "Second", artist="Artist", album="Album", duration=120, status="playing"
+    )
+    disp.update(5.0)
+    disp.stop()
+    out = capsys.readouterr().out
+    assert "Second" in out
+    assert "Artist" in out
+    assert "Album" in out
+    assert "playing" in out
+
+
+def test_connection_spinner_delegates_to_rich(monkeypatch, restore_config_globals):
+    import cli.main as cli_main
+    import backend.rich_display as rich_display
+
+    calls = []
+    monkeypatch.setattr(rich_display, "active", lambda: True)
+    monkeypatch.setattr(
+        rich_display, "spinner_run", lambda stop, label="": calls.append(label)
+    )
+    config.Display = "rich"
+    cli_main._spinner(lambda: True)
+    assert calls == ["Checking connection"]
+
+
+def test_search_spinner_delegates_to_rich(monkeypatch, restore_config_globals):
+    from backend.Online import commands as online_commands
+    import backend.rich_display as rich_display
+
+    calls = []
+    monkeypatch.setattr(rich_display, "active", lambda: True)
+    monkeypatch.setattr(
+        rich_display, "spinner_run", lambda stop, label="": calls.append(label)
+    )
+    config.Display = "rich"
+    online_commands._spinner(lambda: True, label="Searching")
+    assert calls == ["Searching"]
+
+
+def test_download_hook_delegates_to_rich(monkeypatch, restore_config_globals):
+    import backend.rich_display as rich_display
+
+    calls = []
+    monkeypatch.setattr(rich_display, "active", lambda: True)
+    monkeypatch.setattr(
+        rich_display,
+        "download_update",
+        lambda got, total: calls.append((got, total)),
+    )
+    youtube.progress_hook(
+        {
+            "status": "downloading",
+            "downloaded_bytes": 5_000_000,
+            "total_bytes": 10_000_000,
+        }
+    )
+    assert calls == [(5_000_000, 10_000_000)]

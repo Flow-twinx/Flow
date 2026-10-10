@@ -184,6 +184,11 @@ def run(cmd: str, extra: list[str], args):
 
 
 def _spinner(stop, label="Searching"):
+    from backend import rich_display
+
+    if rich_display.active():
+        rich_display.spinner_run(stop, label)
+        return
     chars = config.SPINNER
     i = 0
     while not stop():

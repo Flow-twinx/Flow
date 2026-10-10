@@ -77,6 +77,11 @@ def _send_control(action, label, payload=None):
 
 
 def _spinner(stop):
+    from backend import rich_display
+
+    if rich_display.active():
+        rich_display.spinner_run(stop, "Checking connection")
+        return
     chars = config.SPINNER
     i = 0
     while not stop():
@@ -176,8 +181,12 @@ def _resume(args):
 
 
 def _full_view():
-    """Full-screen now-playing card: clear, logo + a live progress readout
-    that refreshes once a second (Ctrl-C to exit)."""
+    """Full-screen now-playing view; follows the configured display mode
+    (rich live panel, or the bordered progress card). Ctrl-C to exit."""
+    if config.Display == "rich":
+        _full_view_rich()
+        return
+
     from backend import status as _status
 
     def _tty_width(default=96):
@@ -254,6 +263,61 @@ def _full_view():
             sys.stdout.flush()
             time.sleep(1)
     except KeyboardInterrupt:
+        tui_shell.clear_screen()
+        print()
+
+
+def _full_view_rich():
+    """`--full` in rich mode: a live rich panel fed from status.json."""
+    from backend import library, rich_display
+    from backend import status as _status
+
+    def _meta(data):
+        vid = _status._vid_from_thumb(data.get("thumbnail", ""))
+        artist = album = ""
+        if vid:
+            entry = library.get(vid) or {}
+            artist = entry.get("artist") or ""
+            album = entry.get("album") or ""
+        return artist, album
+
+    panel = rich_display.NowPlaying("", duration=0)
+    if not sys.stdout.isatty():
+        data = _status._read()
+        artist, album = _meta(data)
+        playing = bool(data.get("playing")) and _status._fresh(data)
+        panel.set_track(
+            data.get("title") or "—",
+            artist,
+            album,
+            int(data.get("duration", 0)),
+            status="playing" if playing else "not playing",
+        )
+        panel.console.print(panel.render(int(data.get("elapsed", 0)), not playing))
+        return
+
+    tui_shell.clear_screen()
+    panel.start()
+    last = None
+    try:
+        while True:
+            data = _status._read()
+            playing = bool(data.get("playing")) and _status._fresh(data)
+            title = data.get("title") or "—"
+            dur = int(data.get("duration", 0))
+            elapsed = int(data.get("elapsed", 0))
+            artist, album = _meta(data)
+            status_text = "playing" if playing else "not playing"
+            key = (title, artist, album, dur, status_text)
+            if key != last:
+                panel.set_track(title, artist, album, dur, status=status_text)
+                last = key
+            panel.update(elapsed, paused=not playing)
+            time.sleep(1)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        panel.stop()
         tui_shell.clear_screen()
         print()
 

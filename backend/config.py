@@ -1396,8 +1396,12 @@ def _apply_bar_spacing_io(v):
 
 
 def _interactive_rows():
-    """One row per editable setting: key, label, current, kind, spec, apply."""
-    return [
+    """One row per editable setting: key, label, current, kind, spec, apply.
+
+    Rich-only settings (progress columns) are hidden unless the rich display
+    is active, so the list only offers what the current mode actually uses.
+    """
+    rows = [
         ("display", "Display mode", lambda: Display, "select",
          ["none", "bars", "lyrics", "progress", "rich"],
          lambda v: _apply_display(str(v))),
@@ -1440,6 +1444,9 @@ def _interactive_rows():
         ("max_radio", "Max radio tracks (1-50)", lambda: MAX_RESULTS_RADIO, "text", None,
          lambda v: _apply_int("MAX_RESULTS_RADIO", v, 1, 50, "Max radio tracks changed")),
     ]
+    if Display != "rich":
+        rows = [r for r in rows if r[0] != "progress_columns"]
+    return rows
 
 
 def _interactive_config():

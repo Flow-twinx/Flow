@@ -4,7 +4,7 @@ import sys
 
 import yt_dlp
 
-from backend import config, library, sponsor
+from backend import config, library, rich_display, sponsor
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +104,9 @@ def progress_hook(d):
     if total <= 0:
         return
     pct = got / total * 100
+    if rich_display.active():
+        rich_display.download_update(got, total)
+        return
     title = (d.get("info_dict") or {}).get("title", "") or ""
     if len(title) > 26:
         title = title[:25] + "…"
@@ -118,6 +121,7 @@ def download_url(url, outdir, fmt=None, progress=False):
     opts = {**ydl_opts_dwn, "outtmpl": f"{outdir}/%(id)s.%(ext)s"}
     if progress and sys.stdout.isatty():
         opts["progress_hooks"] = [progress_hook]
+        rich_display.download_start()
     pps = sponsor.download_postprocessors()
     if fmt and fmt != "webm":
         pps = pps + [{"key": "FFmpegExtractAudio", "preferredcodec": fmt}]
@@ -131,9 +135,11 @@ def download_url(url, outdir, fmt=None, progress=False):
                 stem = pathlib.Path(filename).stem
                 filename = str(pathlib.Path(outdir) / f"{stem}.{fmt}")
     except Exception as exc:
+        rich_display.download_stop()
         logger.warning("Download failed for %s: %s", url, exc)
         config.down_notify(url, error=True)
         raise
+    rich_display.download_stop()
     if opts.get("progress_hooks"):
         sys.stdout.write("\r" + " " * 60 + "\r")
         sys.stdout.flush()

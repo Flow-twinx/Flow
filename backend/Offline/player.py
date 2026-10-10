@@ -235,7 +235,10 @@ def _attach_vlc_events():
             pass
 
 
-def _display_loop(player, title=None, args=None, next_title=None, stop_check=None, duration=0):
+def _display_loop(
+    player, title=None, args=None, next_title=None, stop_check=None, duration=0,
+    artist="", album="",
+):
     global _paused
     display = config.Display
     if display == "bars" and (curses is None or not platform.is_linux()):
@@ -270,7 +273,8 @@ def _display_loop(player, title=None, args=None, next_title=None, stop_check=Non
         shuffle = bool(getattr(args, "shuffle", False))
         repeat = bool(getattr(args, "repeat", False))
         visualizer.set_status(
-            title, shuffle=shuffle, repeat=repeat, next_title=next_title
+            title, shuffle=shuffle, repeat=repeat, next_title=next_title,
+            artist=artist, album=album,
         )
 
     if display == "bars":
@@ -290,7 +294,9 @@ def _display_loop(player, title=None, args=None, next_title=None, stop_check=Non
     paused_printed = False
     rich_disp = None
     if display == "rich":
-        rich_disp = rich_display.NowPlaying(title or "", duration=duration)
+        rich_disp = rich_display.NowPlaying(
+            title or "", artist=artist, album=album, duration=duration
+        )
         rich_disp.start()
     try:
         while player.get_state() not in (vlc.State.Ended, vlc.State.Error):
@@ -410,14 +416,6 @@ def play_file(filepath, title, args=None, flags=None, next_title=None, nav=None)
         status.update(title, duration, thumbnail=thumb)
         dur_min, dur_sec = divmod(int(duration), 60)
         flags_str = _flags_str(args)
-        if config.Display != "bars":
-            i(f"\nPlaying : {_truncate_title(title)}")
-            m(
-                f"    [{dur_min}:{dur_sec:02d}]  {flags_str}"
-                if flags_str
-                else f"    [{dur_min}:{dur_sec:02d}]"
-            )
-
         video_id = filepath.stem
         artist = ""
         album = ""
@@ -425,6 +423,17 @@ def play_file(filepath, title, args=None, flags=None, next_title=None, nav=None)
         if lib_entry:
             artist = lib_entry.get("artist") or ""
             album = lib_entry.get("album") or ""
+        if config.Display != "bars":
+            i(f"\nPlaying : {_truncate_title(title)}")
+            if artist:
+                m(f"    {artist}")
+            if album:
+                m(f"    {album}")
+            m(
+                f"    [{dur_min}:{dur_sec:02d}]  {flags_str}"
+                if flags_str
+                else f"    [{dur_min}:{dur_sec:02d}]"
+            )
         history.record_play(
             video_id, title, artist, mode="offline", duration=int(duration)
         )
@@ -462,6 +471,8 @@ def play_file(filepath, title, args=None, flags=None, next_title=None, nav=None)
                 next_title=next_title,
                 stop_check=stop_check,
                 duration=duration,
+                artist=artist,
+                album=album,
             )
         except KeyboardInterrupt:
             _player.stop()

@@ -297,7 +297,8 @@ def _display_loop(
         shuffle = bool(getattr(args, "shuffle", False))
         repeat = bool(getattr(args, "repeat", False))
         visualizer.set_status(
-            title, shuffle=shuffle, repeat=repeat, next_title=next_title
+            title, shuffle=shuffle, repeat=repeat, next_title=next_title,
+            artist=artist, album=album,
         )
 
     fetched_lyrics = None
@@ -456,13 +457,6 @@ def play_url(
         status.update(title, duration, thumbnail=thumbnail)
         dur_min, dur_sec = divmod(int(duration), 60)
         flags = _flags_str(args)
-        i(f"\n[⥤ Now : {_truncate_title(title)}]")
-        m(
-            f"    [{dur_min}:{dur_sec:02d}]  {flags}"
-            if flags
-            else f"    [{dur_min}:{dur_sec:02d}]"
-        )
-
         artist = ""
         album = ""
         if entry:
@@ -470,6 +464,17 @@ def play_url(
             if primary:
                 artist = primary[0].get("name", "") or ""
             album = (entry.get("album") or {}).get("name") or ""
+        if config.Display != "bars":
+            i(f"\n[⥤ Now : {_truncate_title(title)}]")
+            if artist:
+                m(f"    {artist}")
+            if album:
+                m(f"    {album}")
+            m(
+                f"    [{dur_min}:{dur_sec:02d}]  {flags}"
+                if flags
+                else f"    [{dur_min}:{dur_sec:02d}]"
+            )
         # JioSaavn tracks have no YouTube id; namespace the song id so it can
         # never collide with a real video id in the library.
         savan_id = (entry or {}).get("id") or ""
@@ -574,13 +579,6 @@ def play_entry(entry, title, args=None, flags=None, next_title=None, nav=None):
         status.update(title, duration, thumbnail=thumb)
         dur_min, dur_sec = divmod(int(duration), 60)
         fstr = _flags_str(args)
-        i(f"\n[⥤ Now : {_truncate_title(title)}]")
-        m(
-            f"    [{dur_min}:{dur_sec:02d}]  {fstr}"
-            if fstr
-            else f"    [{dur_min}:{dur_sec:02d}]"
-        )
-
         artist = ""
         album = ""
         if video_id:
@@ -592,6 +590,17 @@ def play_entry(entry, title, args=None, flags=None, next_title=None, nav=None):
             artist = entry.get("artist") or ""
         if not album:
             album = entry.get("album") or ""
+        if config.Display != "bars":
+            i(f"\n[⥤ Now : {_truncate_title(title)}]")
+            if artist:
+                m(f"    {artist}")
+            if album:
+                m(f"    {album}")
+            m(
+                f"    [{dur_min}:{dur_sec:02d}]  {fstr}"
+                if fstr
+                else f"    [{dur_min}:{dur_sec:02d}]"
+            )
         history.record_play(
             video_id or "", title, artist, mode="online", duration=duration
         )
