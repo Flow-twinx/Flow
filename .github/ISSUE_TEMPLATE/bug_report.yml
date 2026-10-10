@@ -1,0 +1,95 @@
+name: Bug report
+description: Something in Flow is broken or behaves unexpectedly
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. Please fill in as much as you can.
+        For security problems, do not use this form. See the security policy instead.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the problem and what you expected to happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The exact commands or clicks that trigger the problem.
+      placeholder: |
+        1. Run `flow -pl "..."`
+        2. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: interface
+    attributes:
+      label: Interface
+      description: Where did you see the problem?
+      options:
+        - flow (interactive shell or flags)
+        - flow-tui
+        - flow-web
+        - flow-min
+        - A plugin
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - Online
+        - Offline
+        - Both
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Flow version
+      description: For example `0.8.4`. Run `pip show flow-twinx`, or give the commit if you run from source.
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: e.g. Arch Linux, Ubuntu 24.04, macOS 15
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      description: Output of `python --version`.
+    validations:
+      required: true
+  - type: textarea
+    id: check
+    attributes:
+      label: Output of `flow --check`
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Run `config dev true` inside Flow to get more detail. Paste any error output here.
+      render: shell
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and did not find this one.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

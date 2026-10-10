@@ -1,0 +1,45 @@
+name: Feature request
+description: Suggest an idea or an improvement for Flow
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe what you want to do and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: What would you like to see?
+      description: Describe the change you have in mind. Sketches of commands, flags or screens are welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Other ways to solve it, including a plugin or a script around `flow-min`.
+  - type: dropdown
+    id: interface
+    attributes:
+      label: Which interface is this for?
+      multiple: true
+      options:
+        - flow (interactive shell or flags)
+        - flow-tui
+        - flow-web
+        - flow-min
+        - Plugin API
+        - All of them
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and did not find this request.
+          required: true
+        - label: I would be willing to help build this.
+          required: false

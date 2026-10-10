@@ -7,6 +7,7 @@ import time
 
 from backend import config
 from backend import ipc
+from backend import platform
 
 BUS_NAME = "org.mpris.MediaPlayer2.flow"
 OBJECT_PATH = "/org/mpris/MediaPlayer2"
@@ -732,7 +733,11 @@ class _StubBackend:
 
 
 def _build_backend():
-    if _DBUS_OK:
+    if platform.is_windows():
+        # D-Bus/MPRIS is a Linux desktop integration; dbus_fast.aio
+        # cannot import on Windows (no socket.CMSG_LEN).
+        backend = _StubBackend()
+    elif _DBUS_OK:
         backend = _GlibBackend()
     elif _FAST_OK:
         backend = _FastBackend()

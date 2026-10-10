@@ -14,6 +14,7 @@ dependencies = [
     "psutil>=7.2.2",
     "python-vlc",
     "questionary",
+    "rich>=13.7.0",
     "sounddevice",
     "textual>=8.2.8",
     "tile-twinx>=1.0.1",

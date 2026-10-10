@@ -13,6 +13,7 @@ from backend import (
     lyrics,
     mpris,
     platform,
+    rich_display,
     sponsor,
     status,
     visualizer,
@@ -266,7 +267,7 @@ def _display_loop(
     display = config.Display
     if display == "bars" and (curses is None or not platform.is_linux()):
         display = "none"
-    if display in ("bars", "progress") and not (
+    if display in ("bars", "progress", "rich") and not (
         sys.stdin.isatty() and sys.stdout.isatty()
     ):
         display = "none"
@@ -328,6 +329,12 @@ def _display_loop(
 
     last_lyric_line = None
     paused_printed = False
+    rich_disp = None
+    if display == "rich":
+        rich_disp = rich_display.NowPlaying(
+            title, artist=artist, album=album, duration=duration
+        )
+        rich_disp.start()
     try:
         while player.get_state() not in (vlc.State.Ended, vlc.State.Error):
             if stop_check and stop_check():
@@ -348,6 +355,11 @@ def _display_loop(
                             stdscr.refresh()
                         except curses.error:
                             pass
+                    elif display == "rich":
+                        if rich_disp:
+                            rich_disp.update(
+                                max(0.0, player.get_time() / 1000.0), paused=True
+                            )
                     else:
                         sys.stdout.write(f"\r  {T}[Paused]{R}  ")
                         sys.stdout.flush()
@@ -366,6 +378,9 @@ def _display_loop(
             _tick_position(player, elapsed)
             if display == "bars":
                 visualizer.draw()
+            elif display == "rich":
+                if rich_disp:
+                    rich_disp.update(elapsed, _paused)
             elif display == "progress":
                 config.render_progress(elapsed, duration)
             elif display == "lyrics" and fetched_lyrics:
@@ -382,6 +397,8 @@ def _display_loop(
             except OSError:
                 pass
     finally:
+        if rich_disp is not None:
+            rich_disp.stop()
         if display == "bars":
             visualizer.stop()
             curses.nocbreak()

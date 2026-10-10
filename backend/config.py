@@ -63,56 +63,111 @@ def merge_flags(extra: list[str], args) -> tuple[list[str], object]:
     return rest, args
 
 
-RED = "\033[0;31m"
-GREEN = "\033[0;32m"
-BROWN = "\033[0;33m"
-BLUE = "\033[0;34m"
-PURPLE = "\033[0;35m"
-CYAN = "\033[0;36m"
-GREY = "\033[90m"
-YELLOW = "\033[1;33m"
-WHITE = "\033[1;37m"
-MAROON = "\033[38;5;124m"
-OLIVE = "\033[38;5;100m"
-DARK_KHAKI = "\033[38;5;136m"
-GOLD = "\033[38;5;220m"
-TAN = "\033[38;5;215m"
-SALMON = "\033[38;5;209m"
-CORAL = "\033[38;5;203m"
-HOT_PINK = "\033[38;5;205m"
-VIOLET = "\033[38;5;141m"
-DEEP_PURPLE = "\033[38;5;129m"
-TEAL = "\033[38;5;30m"
-SKY_BLUE = "\033[38;5;117m"
-STEEL_BLUE = "\033[38;5;67m"
-NAVY = "\033[38;5;18m"
-INDIGO = "\033[38;5;54m"
-ORANGE = "\033[38;5;202m"
-PINK = "\033[38;5;205m"
-LIME = "\033[38;5;154m"
+try:
+    from rich.color import ANSI_COLOR_NAMES
+    from rich.console import Console as _RichConsole
+    from rich.style import Style as _RichStyle
+
+    _FORCE = _RichConsole(
+        force_terminal=True, color_system="truecolor", legacy_windows=False
+    )
+    _HAS_RICH = True
+except Exception:
+    ANSI_COLOR_NAMES = {}
+    _FORCE = None
+    _RichStyle = None
+    _HAS_RICH = False
+
+
+def _sgr(style):
+    """Render a rich style string to its ANSI SGR prefix."""
+    if not _HAS_RICH:
+        return ""
+    try:
+        with _FORCE.capture() as cap:
+            _FORCE.print("\u2593", style=str(style), end="")
+        out = cap.get()
+        if out.endswith("\x1b[0m"):
+            out = out[:-4]
+        if out.endswith("\u2593"):
+            out = out[:-1]
+        return out
+    except Exception:
+        return ""
+
+
+def _valid_style(value):
+    """True when `value` is a parseable rich style (named color, #hex, rgb(), ...)."""
+    if not _HAS_RICH:
+        return str(value).lower() in (
+            "red", "green", "yellow", "blue", "purple", "cyan",
+            "grey", "white", "black", "orange", "pink",
+        )
+    try:
+        _RichStyle.parse(str(value))
+        return True
+    except Exception:
+        return False
+
+
+RICH_COLORS = sorted(ANSI_COLOR_NAMES)
+
+RED = _sgr("red")
+GREEN = _sgr("green")
+BROWN = _sgr("dark_goldenrod")
+BLUE = _sgr("blue")
+PURPLE = _sgr("purple")
+CYAN = _sgr("cyan")
+GREY = _sgr("grey62")
+YELLOW = _sgr("bold yellow")
+WHITE = _sgr("bold white")
+MAROON = _sgr("red3")
+OLIVE = _sgr("yellow4")
+DARK_KHAKI = _sgr("dark_khaki")
+GOLD = _sgr("gold1")
+TAN = _sgr("tan")
+SALMON = _sgr("salmon1")
+CORAL = _sgr("orange_red1")
+HOT_PINK = _sgr("hot_pink")
+VIOLET = _sgr("violet")
+DEEP_PURPLE = _sgr("purple3")
+TEAL = _sgr("dark_cyan")
+SKY_BLUE = _sgr("light_sky_blue1")
+STEEL_BLUE = _sgr("steel_blue")
+NAVY = _sgr("navy_blue")
+INDIGO = _sgr("purple4")
+ORANGE = _sgr("orange1")
+PINK = _sgr("pink1")
+LIME = _sgr("spring_green3")
 Reset = "\033[0m"
-
-_COLORS = {
-    k.lower().replace("_", ""): v
-    for k, v in vars().items()
-    if isinstance(v, str) and v.startswith("\033") and k != "Reset"
-}
-
-_COLOR_NAMES = {v: k for k, v in _COLORS.items()}
 
 _TARGET_ALIASES = {
     "pri": "primary",
     "sec": "secondary",
     "ter": "tertiary",
     "spin": "spinner",
+    "richcols": "progress_columns",
+    "rich_columns": "progress_columns",
 }
-_TARGETS = {"primary", "secondary", "tertiary", "display"}
-_DISPLAY_MODES = {"none", "bars", "lyrics", "progress"}
+_TARGETS = {"primary", "secondary", "tertiary", "display", "progress_columns"}
+_DISPLAY_MODES = {"none", "bars", "lyrics", "progress", "rich"}
 _BAR_SPACING = {"min", "fit", "max"}
 
-Primary = CYAN
-Secondary = PURPLE
-Tertiary = BLUE
+# User-chosen rich styles for the primary/secondary/tertiary palette.
+_STYLE = {"primary": "cyan", "secondary": "purple", "tertiary": "blue"}
+
+
+def _render():
+    """Recompute Primary/Secondary/Tertiary ANSI from the chosen rich styles."""
+    global Primary, Secondary, Tertiary
+    Primary = _sgr(_STYLE["primary"]) or CYAN
+    Secondary = _sgr(_STYLE["secondary"]) or PURPLE
+    Tertiary = _sgr(_STYLE["tertiary"]) or BLUE
+
+
+Primary = _sgr("cyan")
+Secondary = _sgr("purple")
+Tertiary = _sgr("blue")
 Muted = GREY
 Display = "bars"
 BarWidth = 20
@@ -123,14 +178,20 @@ ProgChar = "\u2588"
 ProgCharEm = "\u2591"
 Sensitivity = 1.0
 SPINNER = "|/-\\"
+ProgressColumns = ["bar", "percentage", "time_remaining"]
+
+_RICH_COLUMN_NAMES = (
+    "bar", "download", "file_size", "m_of_n", "percentage", "spinner",
+    "task", "time_elapsed", "time_remaining", "total_size", "transfer_speed",
+)
 
 THEMES = {
     "ocean": ("cyan", "purple", "blue"),
-    "sunset": ("orange", "pink", "gold"),
-    "forest": ("green", "lime", "teal"),
-    "fire": ("red", "orange", "gold"),
-    "mono": ("grey", "white", "maroon"),
-    "royal": ("indigo", "violet", "skyblue"),
+    "sunset": ("orange1", "pink1", "gold1"),
+    "forest": ("green", "spring_green3", "dark_cyan"),
+    "fire": ("red", "orange1", "gold1"),
+    "mono": ("grey62", "white", "red3"),
+    "royal": ("purple4", "violet", "light_sky_blue1"),
 }
 
 ####### Be carefull this will make everything print on screen including links title view and all things ###
@@ -536,19 +597,31 @@ def _load_config():
         DOWN_ON_LIKE, \
         MAX_SEARCH_RESULTS, \
         MAX_RESULTS_RADIO, \
-        NOTIFY
+        NOTIFY, \
+        ProgressColumns
     if not CONFIG_FILE.exists():
         return
     try:
         data = json.loads(CONFIG_FILE.read_text())
-        if "primary" in data and data["primary"] in _COLORS:
-            Primary = _COLORS[data["primary"]]
-        if "secondary" in data and data["secondary"] in _COLORS:
-            Secondary = _COLORS[data["secondary"]]
-        if "tertiary" in data and data["tertiary"] in _COLORS:
-            Tertiary = _COLORS[data["tertiary"]]
+        if "primary" in data and _valid_style(data["primary"]):
+            _STYLE["primary"] = str(data["primary"])
+        if "secondary" in data and _valid_style(data["secondary"]):
+            _STYLE["secondary"] = str(data["secondary"])
+        if "tertiary" in data and _valid_style(data["tertiary"]):
+            _STYLE["tertiary"] = str(data["tertiary"])
+        _render()
         if "display" in data and data["display"] in _DISPLAY_MODES:
             Display = data["display"]
+        if "progress_columns" in data and isinstance(
+            data["progress_columns"], list
+        ):
+            cols = [
+                c
+                for c in data["progress_columns"]
+                if isinstance(c, str) and c in _RICH_COLUMN_NAMES
+            ]
+            if cols:
+                ProgressColumns = cols
         if (
             "bar_width" in data
             and isinstance(data["bar_width"], int)
@@ -637,10 +710,11 @@ def _load_config():
 def _save_config():
     CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
     data = {
-        "primary": _COLOR_NAMES.get(Primary, "cyan"),
-        "secondary": _COLOR_NAMES.get(Secondary, "purple"),
-        "tertiary": _COLOR_NAMES.get(Tertiary, "blue"),
+        "primary": _STYLE["primary"],
+        "secondary": _STYLE["secondary"],
+        "tertiary": _STYLE["tertiary"],
         "display": Display,
+        "progress_columns": ProgressColumns,
         "bar_width": BarWidth,
         "bar_height": BarHeight,
         "bar_spacing": BarSpacing,
@@ -793,16 +867,13 @@ _BAR_CHARS = {"dot": "\u25aa", "block": "\u2588", "circle": "\u2688"}
 
 
 def _apply_color(which, value):
-    global Primary, Secondary, Tertiary
-    color = _COLORS.get(value)
-    if color is None:
-        return f"Unknown color '{value}'. Use 'config -h' to see available colors."
-    if which == "primary":
-        Primary = _COLORS[value]
-    elif which == "secondary":
-        Secondary = _COLORS[value]
-    else:
-        Tertiary = _COLORS[value]
+    if not _valid_style(value):
+        return (
+            f"Unknown color '{value}'. Any rich style works: a named color, "
+            "#hex, rgb(r,g,b), bold/italic."
+        )
+    _STYLE[which] = str(value)
+    _render()
     _save_config()
     code = {"primary": Primary, "secondary": Secondary, "tertiary": Tertiary}[which]
     return f"{code}{which.capitalize()} color changed to {value}{Reset}"
@@ -811,10 +882,23 @@ def _apply_color(which, value):
 def _apply_display(value):
     global Display
     if value not in _DISPLAY_MODES:
-        return f"Unknown display mode '{value}'. Options: none, bars, lyrics, progress"
+        return f"Unknown display mode '{value}'. Options: none, bars, lyrics, progress, rich"
     Display = value
     _save_config()
     return f"{Tertiary}Display mode changed to {value}{Reset}"
+
+
+def _apply_progress_columns(value):
+    global ProgressColumns
+    parts = [p.strip().lower() for p in re.split(r"[,\s]+", str(value)) if p.strip()]
+    if not parts or any(p not in _RICH_COLUMN_NAMES for p in parts):
+        return (
+            f"Unknown progress column(s). Rich options: "
+            f"{', '.join(_RICH_COLUMN_NAMES)}"
+        )
+    ProgressColumns = parts
+    _save_config()
+    return f"{Tertiary}Rich progress columns set to {', '.join(parts)}{Reset}"
 
 
 def _apply_bar_width(v):
@@ -930,15 +1014,13 @@ def _apply_spinner(value):
 
 
 def _apply_theme(name):
-    global Primary, Secondary, Tertiary
     if name == "list":
         return f"{Muted}Themes: {', '.join(sorted(THEMES))}{Reset}"
     trio = THEMES.get(name.lower())
     if trio is None:
         return f"Unknown theme '{name}'. Themes: {', '.join(sorted(THEMES))}"
-    Primary = _COLORS[trio[0]]
-    Secondary = _COLORS[trio[1]]
-    Tertiary = _COLORS[trio[2]]
+    _STYLE["primary"], _STYLE["secondary"], _STYLE["tertiary"] = trio
+    _render()
     _save_config()
     return f"{Tertiary}Theme changed to '{name}'{Reset}"
 
@@ -961,6 +1043,7 @@ PLUGIN_SAFE_KEYS = {
     "theme",
     "spinner",
     "display",
+    "progress_columns",
     "barwidth",
     "barheight",
     "barspacing",
@@ -994,6 +1077,8 @@ def apply_config(key, value):
         return _apply_color("tertiary", value)
     if target == "display":
         return _apply_display(value)
+    if target == "progress_columns":
+        return _apply_progress_columns(value)
     if target in ("barwidth", "width"):
         return _apply_int("BarWidth", value, 4, 80, "Bar width changed")
     if target in ("barheight", "height"):
@@ -1046,11 +1131,7 @@ def apply_config(key, value):
 
 
 def _current_theme():
-    cur = (
-        _COLOR_NAMES.get(Primary),
-        _COLOR_NAMES.get(Secondary),
-        _COLOR_NAMES.get(Tertiary),
-    )
+    cur = (_STYLE["primary"], _STYLE["secondary"], _STYLE["tertiary"])
     for name, trio in THEMES.items():
         if tuple(trio) == cur:
             return name
@@ -1060,12 +1141,13 @@ def _current_theme():
 def config_get(key):
     target = _TARGET_ALIASES.get(key.lower(), key.lower())
     getters = {
-        "primary": lambda: _COLOR_NAMES.get(Primary),
-        "secondary": lambda: _COLOR_NAMES.get(Secondary),
-        "tertiary": lambda: _COLOR_NAMES.get(Tertiary),
+        "primary": lambda: _STYLE["primary"],
+        "secondary": lambda: _STYLE["secondary"],
+        "tertiary": lambda: _STYLE["tertiary"],
         "theme": _current_theme,
         "spinner": lambda: SPINNER,
         "display": lambda: Display,
+        "progress_columns": lambda: ProgressColumns,
         "barwidth": lambda: BarWidth,
         "barheight": lambda: BarHeight,
         "barspacing": lambda: BarSpacing,
@@ -1125,7 +1207,11 @@ def cmd_config(extra: list[str], args=None):
         print(f"  {Primary}primary{Reset}   (aliases: pri)")
         print(f"  {Secondary}secondary{Reset} (aliases: sec)")
         print(f"  {Tertiary}tertiary{Reset}  (aliases: ter)")
-        print(f"  {GREY}display{Reset}    (none, bars, lyrics)")
+        print(f"  {GREY}display{Reset}    (none, bars, lyrics, progress, rich)")
+        print(
+            f"  {GREY}progress_columns{Reset} (rich progress bar columns — "
+            f"{', '.join(_RICH_COLUMN_NAMES)}; aliases: richcols, rich_columns)"
+        )
         print(f"  {GREY}barwidth{Reset}   (4-80, current: {BarWidth})")
         print(f"  {GREY}barheight{Reset}  (10-90, current: {BarHeight})")
         print(f"  {GREY}barspacing{Reset} (0-4, min, fit, max — current: {BarSpacing})")
@@ -1158,9 +1244,9 @@ def cmd_config(extra: list[str], args=None):
         )
         print(f"  {GREY}max_search{Reset} (1-20, current: {MAX_SEARCH_RESULTS})")
         print(f"  {GREY}max_radio{Reset}  (1-50, current: {MAX_RESULTS_RADIO})")
-        print(f"\n{Tertiary}Available colors:{Reset}")
-        for name, code in _COLORS.items():
-            print(f"  {code}{name}{Reset}")
+        print(f"\n{Tertiary}Available colors (any rich style: named color, #hex, rgb(r,g,b), bold/italic):{Reset}")
+        for name in RICH_COLORS:
+            print(f"  {_sgr(name)}{name}{Reset}")
         print(f"\n{GREY}Config file: {CONFIG_FILE}{Reset}")
         return
     if not extra:
@@ -1183,6 +1269,8 @@ def cmd_config(extra: list[str], args=None):
         emit(_apply_color("tertiary", value))
     elif target == "display":
         emit(_apply_display(value))
+    elif target == "progress_columns":
+        emit(_apply_progress_columns(value))
     elif target in ("barwidth", "width"):
         print(_apply_int("BarWidth", value, 4, 80, "Bar width changed"))
     elif target in ("barheight", "height"):
@@ -1261,7 +1349,11 @@ def notify(title, body=""):
     try:
         if sys.platform == "darwin":
             subprocess.run(
-                ["osascript", "-e", f'display notification "{body}" with title "{title}"'],
+                [
+                    "osascript",
+                    "-e",
+                    f'display notification "{body}" with title "{title}"',
+                ],
                 check=False,
             )
         elif os.name != "nt":
@@ -1290,18 +1382,18 @@ def _interactive_config():
         )
         return
 
-    color_names = sorted(_COLORS.keys())
+    color_names = RICH_COLORS
     color_choices = [questionary.Choice(title=n, value=n) for n in color_names]
     py_style = Style(
         [
-            ("qmark", f"fg:{_cname(Tertiary)}"),
-            ("question", f"fg:{_cname(Tertiary)}"),
-            ("answer", f"fg:{_cname(Secondary)} bold"),
-            ("pointer", f"fg:{_cname(Primary)} bold"),
-            ("highlighted", f"fg:{_cname(Primary)} bold"),
-            ("selected", f"fg:{_cname(Primary)}"),
-            ("separator", f"fg:{_cname(Muted)}"),
-            ("instruction", f"fg:{_cname(Tertiary)}"),
+            ("qmark", f"fg:{_cname(_STYLE['tertiary'])}"),
+            ("question", f"fg:{_cname(_STYLE['tertiary'])}"),
+            ("answer", f"fg:{_cname(_STYLE['secondary'])} bold"),
+            ("pointer", f"fg:{_cname(_STYLE['primary'])} bold"),
+            ("highlighted", f"fg:{_cname(_STYLE['primary'])} bold"),
+            ("selected", f"fg:{_cname(_STYLE['primary'])}"),
+            ("separator", f"fg:{_cname('grey62')}"),
+            ("instruction", f"fg:{_cname(_STYLE['tertiary'])}"),
             ("text", ""),
         ]
     )
@@ -1311,29 +1403,37 @@ def _interactive_config():
             "type": "select",
             "name": "display",
             "message": "Display mode",
-            "choices": ["none", "bars", "lyrics", "progress"],
+            "choices": ["none", "bars", "lyrics", "progress", "rich"],
             "default": Display,
+        },
+        {
+            "type": "text",
+            "name": "progress_columns",
+            "message": "Rich progress columns (comma-separated: "
+            + ", ".join(_RICH_COLUMN_NAMES) + ")",
+            "default": ", ".join(ProgressColumns),
+            "when": lambda a: a["display"] == "rich",
         },
         {
             "type": "select",
             "name": "primary",
             "message": "Primary color",
             "choices": color_choices,
-            "default": _COLOR_NAMES.get(Primary, "cyan"),
+            "default": _STYLE["primary"],
         },
         {
             "type": "select",
             "name": "secondary",
             "message": "Secondary color",
             "choices": color_choices,
-            "default": _COLOR_NAMES.get(Secondary, "purple"),
+            "default": _STYLE["secondary"],
         },
         {
             "type": "select",
             "name": "tertiary",
             "message": "Tertiary color",
             "choices": color_choices,
-            "default": _COLOR_NAMES.get(Tertiary, "blue"),
+            "default": _STYLE["tertiary"],
         },
         {
             "type": "select",
@@ -1474,6 +1574,11 @@ def _interactive_config():
                         print(_apply_sensitivity(v))
                 except ValueError:
                     pass
+        if answers.get("display") == "rich":
+            if answers.get("progress_columns", "").strip():
+                msg = _apply_progress_columns(answers["progress_columns"])
+                if not msg.startswith("Unknown"):
+                    print(msg)
         if answers.get("display") == "progress":
             if "prog_char" in answers:
                 print(_apply_prog_char(answers["prog_char"]))
@@ -1545,11 +1650,18 @@ def _interactive_config():
         print(f"\n{GREY}Config saved.{Reset}")
 
 
-def _cname(ansi_code):
-    name = _COLOR_NAMES.get(ansi_code, "white")
-    if name == "deeppurple":  # not a valid prompt_toolkit color name
-        return "darkmagenta"
-    return name
+def _cname(style):
+    """Last color word of a style, as a prompt_toolkit-friendly hex or name."""
+    name = str(style).rsplit(" ", 1)[-1]
+    try:
+        from rich.color import Color
+
+        rgb = Color.parse(name).get_truecolor()
+        if rgb is not None:
+            return rgb.hex
+    except Exception:
+        pass
+    return name or "white"
 
 
 def _BC_NAME(char):

@@ -83,6 +83,10 @@ def restore_config_globals():
     config.Primary = config.CYAN
     config.Secondary = config.PURPLE
     config.Tertiary = config.BLUE
+    config._STYLE["primary"] = "cyan"
+    config._STYLE["secondary"] = "purple"
+    config._STYLE["tertiary"] = "blue"
+    config.ProgressColumns = ["bar", "percentage", "time_remaining"]
     config.FORMAT = "webm"
     config.MAX_SEARCH_RESULTS = 5
     config.MAX_RESULTS_RADIO = 35
@@ -96,14 +100,22 @@ def _fake_interactive(monkeypatch, tmp_path, answers_seq):
 
     answers = iter(answers_seq)
     asked = []
+    collected = {}
 
     class _FakePrompt:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
 
         def unsafe_ask(self):
-            asked.append(self.kwargs.get("name"))
-            return next(answers)
+            when = self.kwargs.get("when")
+            if when is not None and not when(collected):
+                return None
+            name = self.kwargs.get("name")
+            value = next(answers)
+            if name is not None:
+                collected[name] = value
+            asked.append(name)
+            return value
 
     monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "config.json")
     monkeypatch.setattr(
@@ -190,6 +202,63 @@ def test_display_mode_accepts_progress():
     assert "progress" in config._DISPLAY_MODES
     msg = config._apply_display("progress")
     assert "changed to progress" in msg
+
+
+def test_display_mode_accepts_rich():
+    assert "rich" in config._DISPLAY_MODES
+    msg = config._apply_display("rich")
+    assert "changed to rich" in msg
+
+
+def test_interactive_config_asks_rich_columns_for_rich(
+    monkeypatch, tmp_path, restore_config_globals
+):
+    asked = _fake_interactive(
+        monkeypatch,
+        tmp_path,
+        [
+            "rich", "bar, time_remaining", "cyan", "purple", "blue", "webm",
+            True, True, True, "5", "35",
+        ],
+    )
+    # display, progress_columns, 3 colors, format, 3 confirms,
+    # max_search, max_radio — the prog_char questions must NOT fire.
+    assert len(asked) == 11
+    assert config.Display == "rich"
+    assert config.ProgressColumns == ["bar", "time_remaining"]
+
+
+def test_progress_columns_accept_rich_options():
+    assert all(c in config._RICH_COLUMN_NAMES for c in config.ProgressColumns)
+    msg = config._apply_progress_columns("bar,percentage")
+    assert "set to" in msg
+    assert config.ProgressColumns == ["bar", "percentage"]
+    other = config._apply_progress_columns("spinner time_remaining")
+    assert "set to" in other
+    bad = config._apply_progress_columns("bogus")
+    assert "Unknown" in bad
+    assert "bar" in bad and "spinner" in bad
+
+
+def test_rich_color_styles_accepted():
+    msg = config._apply_color("primary", "#ff8800")
+    assert "changed to" in msg
+    assert config._STYLE["primary"] == "#ff8800"
+    bad = config._apply_color("secondary", "not_a_color")
+    assert "Unknown" in bad
+
+
+def test_rich_display_panel_renders(capsys, restore_config_globals):
+    import backend.rich_display as rich_display
+
+    disp = rich_display.NowPlaying("Some Track", artist="Artist", duration=120)
+    disp.start()
+    disp.update(30.0, paused=True)
+    disp.stop()
+    out = capsys.readouterr().out
+    assert "Some Track" in out
+    assert "Artist" in out
+    assert "[Paused]" in out
 
 
 def test_render_progress_writes_live_line(capsys):
