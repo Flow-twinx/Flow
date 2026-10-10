@@ -11,7 +11,7 @@ PHASE 0 — BASELINE CI (Linux only)
 ----------------------------------
 [x] 0.1 Create .github/workflows/ci.yml with Linux-only job
       (ubuntu-latest, Python 3.14, system libvlc + gir deps, install dev deps, pytest)
-[ ] 0.2 Run workflow / verify green (needs push to origin; verify after Phase 1 commit)
+[x] 0.2 Run workflow / verify green (needs push to origin; verify after Phase 1 commit)
 [x] 0.3 Confirm pyproject + uv.lock install cleanly (dev group incl. pyinstaller)
 
 
@@ -106,7 +106,9 @@ PHASE 6 — GITHUB ACTIONS
 [x] 6.4 release.yml: tag v* -> 3 parallel PyInstaller onefile builds
 [x] 6.5 Smoke test built binaries (--check/--status), upload artifact,
       attach to GitHub Release (softprops/action-gh-release)
-[ ] 6.6 Trigger a test release and verify binaries run (needs tag push to origin)
+[x] 6.6 Trigger a test release and verify binaries run (needs tag push to origin)
+      -> tag v0.8.4-test: all 3 Release builds green, smoke (--check/--status)
+      passed on each; GitHub Release has flow-linux, flow-macos, flow-windows.exe
 
 
 PHASE 7 — DOCS + TEST GATING
