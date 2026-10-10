@@ -64,6 +64,8 @@ def test_macos_homebrew_fallback_uses_dyld(monkeypatch, tmp_path):
         p = str(p)
         if p.startswith("/opt/homebrew"):
             p = p.replace("/opt/homebrew", str(tmp_path))
+        elif p.startswith("/Applications"):
+            p = p.replace("/Applications", str(tmp_path / "extra"))
         return real_path(p)
 
     monkeypatch.setattr(platform, "Path", fake_path)
