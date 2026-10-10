@@ -19,6 +19,17 @@ def is_windows() -> bool:
     return os.name == "nt"
 
 
+def widen_stdio() -> None:
+    """Force UTF-8 on stdout/stderr so cp1252 pipes survive box-drawing output."""
+    for stream in (sys.stdout, sys.stderr):
+        if stream is None:
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
 def can_fork() -> bool:
     return hasattr(os, "fork")
 

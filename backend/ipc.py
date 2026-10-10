@@ -40,15 +40,15 @@ def serve(dispatch, kind: str = "vlc") -> int | None:
     """Install control handlers in this process; returns a socket port off Linux."""
     global _dispatch, _server_port
     _dispatch = dispatch
+    for action in _SIGNAL_ATTR:
+        sig = signal_for(action)
+        if sig is None:
+            continue
+        try:
+            _signal.signal(sig, lambda s, f, a=action: _call(a, None))
+        except (ValueError, OSError, RuntimeError):
+            pass
     if platform.is_linux():
-        for action in _SIGNAL_ATTR:
-            sig = signal_for(action)
-            if sig is None:
-                continue
-            try:
-                _signal.signal(sig, lambda s, f, a=action: _call(a, None))
-            except (ValueError, OSError, RuntimeError):
-                pass
         return None
     if _server_port is None:
         _server_port = _start_server()

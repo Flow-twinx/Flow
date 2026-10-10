@@ -309,15 +309,24 @@ def test_control_without_a_player_fails(capfd):
 
 
 def test_seek_writes_the_delta_before_signalling(capfd):
-    registry.register("vlc", os.getpid())
-    start()
-    core.seek(30)
-    assert "ok  seek forward 30s" in read(capfd)[0]
-    assert config.read_seek() == 30000
-    core.seek(10, back=True)
-    assert "ok  seek back 10s" in read(capfd)[0]
-    assert config.read_seek() == -10000
-    config.clear_seek()
+    from backend import ipc as _ipc
+
+    # Linux signals the player; macOS/Windows have no seek signal, so deliver
+    # over the same localhost control socket a real player would use.
+    port = None if _ipc.signal_for("seek_fwd") is not None else _ipc._start_server()
+    registry.register("vlc", os.getpid(), ctl_port=port)
+    try:
+        start()
+        core.seek(30)
+        assert "ok  seek forward 30s" in read(capfd)[0]
+        assert config.read_seek() == 30000
+        core.seek(10, back=True)
+        assert "ok  seek back 10s" in read(capfd)[0]
+        assert config.read_seek() == -10000
+        config.clear_seek()
+    finally:
+        registry.clear()
+        config.clear_seek()
 
 
 def test_list_songs_is_sorted_and_filterable(capfd):

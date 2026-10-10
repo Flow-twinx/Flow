@@ -99,6 +99,7 @@ def _vid_from_thumb(thumb: str):
     if not thumb:
         return None
     try:
+        thumb = thumb.replace("\\", "/")  # Windows paths use backslashes
         for pat in ("/vi_webp/", "/vi/", ".cache/"):
             if pat in thumb:
                 return thumb.split(pat)[1].split("/")[0].split(".")[0] or None

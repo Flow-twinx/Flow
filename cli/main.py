@@ -298,6 +298,7 @@ def _act_current(action):
 
 
 def main():
+    platform.widen_stdio()
     parser = argparse.ArgumentParser(
         description="Flow Music Player",
         epilog=(

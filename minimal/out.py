@@ -15,7 +15,7 @@ def init(as_json=False):
     _json = bool(as_json)
     sys.stdout.flush()
     previous = _stdout
-    _stdout = os.fdopen(os.dup(1), "w", encoding="utf-8")
+    _stdout = os.fdopen(os.dup(1), "w", encoding="utf-8", newline="\n")
     if previous is not None:
         previous.close()
 
