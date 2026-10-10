@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
 
@@ -35,8 +35,28 @@ jobs:
             libdbus-1-dev \
             libportaudio2
 
+      - name: Install VLC (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install --cask vlc
+          echo "VLC_PLUGIN_PATH=/Applications/VLC.app/Contents/MacOS/plugins" >> "$GITHUB_ENV"
+
+      - name: Install VLC (Windows, portable)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vlcDir = "$env:RUNNER_TEMP\vlc"
+          Invoke-WebRequest -Uri "https://get.videolan.org/vlc/3.0.21/win64/vlc-3.0.21-win64.zip" -OutFile "$env:RUNNER_TEMP\vlc.zip"
+          Expand-Archive -Path "$env:RUNNER_TEMP\vlc.zip" -DestinationPath $vlcDir -Force
+          $vlcRoot = (Get-ChildItem $vlcDir -Directory | Select-Object -First 1).FullName
+          "PYTHON_VLC_LIB_PATH=$vlcRoot\libvlc.dll" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VLC_PLUGIN_PATH=$vlcRoot\plugins" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Sync project
         run: uv sync --group dev
+
+      - name: Smoke test (libvlc + a real Instance)
+        run: uv run python -c "import vlc; vlc.Instance('--no-video --quiet'); print('libvlc:', vlc.libvlc_get_version())"
 
       - name: Run tests
         run: uv run pytest -q

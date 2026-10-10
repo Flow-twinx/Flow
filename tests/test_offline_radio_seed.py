@@ -14,6 +14,7 @@ Uses the scratch `HOME` from `conftest.py`; the library itself is faked so the
 assertions are about ordering and argument handling, not disk scanning.
 """
 
+import os
 import pathlib
 
 import pytest
@@ -88,6 +89,7 @@ def test_an_unknown_song_name_is_reported_not_ignored():
     assert offline._radio_queue("no such song") is None
 
 
+@pytest.mark.skipif(os.name == "nt", reason="pty is POSIX-only")
 def test_the_queue_is_published_for_the_next_index(monkeypatch):
     """`radio <name>` publishes its queue the way online mode publishes tracks."""
     import os

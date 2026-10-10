@@ -5,8 +5,6 @@ import sys
 import threading
 import time
 
-import vlc
-
 from backend import (
     config,
     history,
@@ -18,6 +16,9 @@ from backend import (
     status,
     visualizer,
 )
+
+platform.bootstrap_vlc()
+import vlc
 
 try:
     import curses

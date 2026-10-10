@@ -9,6 +9,9 @@ from pathlib import Path
 
 import psutil
 
+from backend.platform import bootstrap_vlc
+
+bootstrap_vlc()
 from backend import platform
 
 WEB_PID = Path.home() / ".flow/web.pid"

@@ -10,11 +10,15 @@ Uses the scratch `HOME` from `conftest.py` like the rest of the suite.
 """
 
 import os
+
+import pytest
+
+if os.name == "nt":
+    pytest.skip("pty/termios are POSIX-only", allow_module_level=True)
+
 import pty
 import signal
 import termios
-
-import pytest
 
 from cli import tui
 

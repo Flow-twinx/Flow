@@ -26,6 +26,9 @@ from textual.widgets import (
     Static,
 )
 
+from backend.platform import bootstrap_vlc
+
+bootstrap_vlc()
 from backend import config, history, ipc, library, mpris, sponsor, status
 from backend.Offline import file as offline_file
 from backend.Online import youtube

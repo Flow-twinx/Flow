@@ -3,6 +3,9 @@
 import argparse
 import sys
 
+from backend.platform import bootstrap_vlc
+
+bootstrap_vlc()
 from backend import history as history_mod
 
 from . import core, extras, local, out, stats

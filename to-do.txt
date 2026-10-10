@@ -83,15 +83,19 @@ PHASE 5 — PACKAGING (standalone binaries)
 [ ] 5.2 packaging/flow.macos.spec (find_lib + VLC_PLUGIN_PATH bootstrap)
 [ ] 5.3 packaging/flow.windows.spec (find_lib + VLC_PLUGIN_PATH bootstrap)
 [ ] 5.4 Conditional hiddenimports per OS (dbus/gi linux-only)
-[ ] 5.5 Runtime VLC_PLUGIN_PATH bootstrap in cli/main.py for macOS/Windows
+[x] 5.5 Runtime VLC bootstrap (backend/platform.py bootstrap_vlc; called before
+      `import vlc` in players + cli/tui/web/minimal entry points;
+      tests/test_vlc_bootstrap.py)
 [ ] 5.6 Build binary locally on Linux, smoke test
 
 
 PHASE 6 — GITHUB ACTIONS
 ------------------------
-[ ] 6.1 ci.yml: matrix ubuntu/macos/windows + Python 3.14
-[ ] 6.2 Per-OS system deps: apt vlc / brew vlc / portable VLC zip + VLC_PLUGIN_PATH
-[ ] 6.3 Headless smoke test per OS (offline playback fixture, TUI boots, control round-trip)
+[x] 6.1 ci.yml: matrix ubuntu/macos/windows + Python 3.14 (verify on first push)
+[x] 6.2 Per-OS deps: apt vlc / brew --cask vlc / portable VLC zip
+      (+ PYTHON_VLC_LIB_PATH + VLC_PLUGIN_PATH on Windows, VLC_PLUGIN_PATH on macOS)
+[x] 6.3 Smoke step per OS: import vlc + vlc.Instance() + libvlc_get_version()
+      (real playback smoke deferred until binaries in 6.4-6.6)
 [ ] 6.4 release.yml: tag v* -> 3 parallel PyInstaller onefile builds
 [ ] 6.5 Smoke test built binaries, upload artifacts, attach to GitHub Release
 [ ] 6.6 Trigger a test release and verify binaries run
@@ -100,6 +104,11 @@ PHASE 6 — GITHUB ACTIONS
 PHASE 7 — DOCS + TEST GATING
 ----------------------------
 [ ] 7.1 docs/user/installation.md: per-OS VLC install + VLC_PLUGIN_PATH instructions
-[ ] 7.2 Gate test_daemon_rpc.py, test_registry.py with skipif(win32)
+[x] 7.2 Gate Windows-incompatible tests: daemon E2E skipif + os.name == "nt",
+      shell_quit_key module-level skip, offline radio pty test skip;
+      test_registry + daemon dispatch made portable (Python sleeper) instead
+      of skipped, so they still run on Windows
 [ ] 7.3 Add Windows control-IPC test exercising Phase 2
+      (test_ipc_control.test_socket_control_round_trip covers the TCP path on
+      all OSes; explicit win-flag assertion still pending)
 [ ] 7.4 Final pass: remove stale flow-min entrypoint refs if appropriate (minimal/ gone)
