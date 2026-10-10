@@ -45,7 +45,14 @@ def _progress():
         "total_size": TotalFileSizeColumn,
         "transfer_speed": TransferSpeedColumn,
     }
-    picked = [registry[name]() for name in config.ProgressColumns if name in registry]
+    picked = []
+    seen = set()
+    for name in config.ProgressColumns:
+        cls = registry.get(name)
+        if cls is None or cls in seen:
+            continue
+        seen.add(cls)
+        picked.append(cls())
     return Progress(*picked, auto_refresh=False)
 
 
@@ -102,7 +109,16 @@ class NowPlaying:
             subtitle=sub or None,
             border_style="yellow" if paused else "cyan",
             padding=(0, 1),
+            width=self._panel_width(),
         )
+
+    def _panel_width(self):
+        """A small panel: about 40% of the terminal, within a readable range."""
+        try:
+            cols = self.console.width or 80
+        except Exception:
+            cols = 80
+        return max(30, min(int(cols * 0.4), 80))
 
     def start(self):
         try:

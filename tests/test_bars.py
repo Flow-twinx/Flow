@@ -273,6 +273,27 @@ def test_youtube_progress_hook_ignores_other_statuses(capsys):
     assert capsys.readouterr().out == ""
 
 
+def test_rich_progress_columns_dedupe(restore_config_globals):
+    import backend.rich_display as rich_display
+
+    config.ProgressColumns = ["bar", "task", "percentage"]
+    columns = rich_display._progress().columns
+    names = [type(c).__name__ for c in columns]
+    assert names.count("TaskProgressColumn") == 1
+    assert "BarColumn" in names
+
+
+def test_rich_panel_width_is_small(restore_config_globals):
+    import backend.rich_display as rich_display
+    from rich.console import Console
+
+    disp = rich_display.NowPlaying("Track", duration=60)
+    disp.console = Console(width=100)
+    assert 30 <= disp._panel_width() <= 80
+    disp.console = Console(width=80)
+    assert disp._panel_width() == 32
+
+
 def test_rich_display_active_gates_on_display(monkeypatch, restore_config_globals):
     import backend.rich_display as rich_display
     import sys
@@ -298,7 +319,7 @@ def test_rich_panel_renders_track_metadata(capsys, restore_config_globals):
     assert "Second" in out
     assert "Artist" in out
     assert "Album" in out
-    assert "playing" in out
+    assert "playin" in out  # subtitle truncates at the small width
 
 
 def test_connection_spinner_delegates_to_rich(monkeypatch, restore_config_globals):
