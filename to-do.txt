@@ -20,7 +20,8 @@ PHASE 1 — INSTALLABLE EVERYWHERE (pyproject.toml)
 [x] 1.1 dbus-python -> marker: dbus-python>=1.4.0 ; sys_platform == "linux"
 [x] 1.2 pygobject   -> marker: pygobject>=3.58.0   ; sys_platform == "linux"
 [x] 1.3 Keep dbus-fast unconditional
-[ ] 1.4 Verify pip install -e . on macOS and Windows (imports of flow/flow-tui/flow-web)
+[x] 1.4 Verify pip install -e . on macOS and Windows (imports of flow/flow-tui/flow-web)
+      -> covered by CI matrix (6.1): uv sync + smoke step imports cli/minimal/tui/web
 [x] 1.5 uv.lock in sync (uv lock --check passes after pull from main)
 
 NOTE (post-pull, v0.8.4): minimal/ (flow-min) is live source again and IS in scope.
