@@ -80,19 +80,19 @@ def spawn_detached(argv: list, **kwargs) -> subprocess.Popen:
 def bootstrap_vlc() -> None:
     """Point python-vlc at a system VLC install before ``import vlc`` runs.
 
-    python-vlc resolves the library at import time (``find_lib()``) and exits
-    the process when PYTHON_VLC_LIB_PATH is unusable, so a path is only
-    exported after being verified on disk. Linux is left alone — apt/brew
-    already place libvlc where python-vlc's default search looks.
+    Linux is left alone (apt/brew already place libvlc where python-vlc's
+    default search looks). On Windows the exact libvlc.dll is exported as
+    PYTHON_VLC_LIB_PATH. On macOS that variable is *never* set: python-vlc's
+    darwin branch has to preload libvlccore before libvlc, and pinning the lib
+    path skips that and fails to load. macOS only gets a plugin path (and, for
+    a Homebrew install, DYLD_LIBRARY_PATH).
     """
     if is_linux() or os.environ.get("PYTHON_VLC_LIB_PATH"):
         return
-    lib = None
     plugins = None
     if is_macos():
         base = Path("/Applications/VLC.app/Contents/MacOS")
         if (base / "lib/libvlccore.dylib").exists():
-            lib = base / "lib/libvlc.dylib"
             plugins = next(
                 (base / p for p in ("plugins", "modules") if (base / p).is_dir()),
                 None,
@@ -100,7 +100,10 @@ def bootstrap_vlc() -> None:
         else:
             for root in ("/opt/homebrew/lib", "/usr/local/lib"):
                 if (Path(root) / "libvlc.dylib").exists():
-                    lib = Path(root) / "libvlc.dylib"
+                    dyld = os.environ.get("DYLD_LIBRARY_PATH", "")
+                    os.environ["DYLD_LIBRARY_PATH"] = (
+                        str(root) + (os.pathsep + dyld if dyld else "")
+                    )
                     plugins = Path(root) / "vlc/plugins"
                     break
     elif is_windows():
@@ -111,10 +114,8 @@ def bootstrap_vlc() -> None:
                 dirs.append(Path(root) / "VideoLAN" / "VLC")
         for d in dirs:
             if (d / "libvlc.dll").exists():
-                lib = d / "libvlc.dll"
+                os.environ.setdefault("PYTHON_VLC_LIB_PATH", str(d / "libvlc.dll"))
                 plugins = d / "plugins"
                 break
-    if lib is not None and lib.exists():
-        os.environ.setdefault("PYTHON_VLC_LIB_PATH", str(lib))
     if plugins is not None and plugins.is_dir():
         os.environ.setdefault("PYTHON_VLC_MODULE_PATH", str(plugins))

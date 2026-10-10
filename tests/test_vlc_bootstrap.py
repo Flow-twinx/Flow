@@ -47,8 +47,32 @@ def test_macos_locates_the_app_bundle(monkeypatch, tmp_path):
     monkeypatch.setattr(platform, "is_macos", lambda: True)
     monkeypatch.setattr(platform, "is_windows", lambda: False)
     platform.bootstrap_vlc()
-    assert os.environ["PYTHON_VLC_LIB_PATH"].endswith("libvlc.dylib")
+    # Never pin the lib path on macOS: python-vlc must preload libvlccore.
+    assert "PYTHON_VLC_LIB_PATH" not in os.environ
     assert os.environ["PYTHON_VLC_MODULE_PATH"].endswith("plugins")
+
+
+def test_macos_homebrew_fallback_uses_dyld(monkeypatch, tmp_path):
+    _clear(monkeypatch)
+    monkeypatch.delenv("DYLD_LIBRARY_PATH", raising=False)
+    libdir = tmp_path / "lib"
+    (libdir / "vlc" / "plugins").mkdir(parents=True)
+    (libdir / "libvlc.dylib").write_bytes(b"x")
+    real_path = pathlib.Path
+
+    def fake_path(p):
+        p = str(p)
+        if p.startswith("/opt/homebrew"):
+            p = p.replace("/opt/homebrew", str(tmp_path))
+        return real_path(p)
+
+    monkeypatch.setattr(platform, "Path", fake_path)
+    monkeypatch.setattr(platform, "is_linux", lambda: False)
+    monkeypatch.setattr(platform, "is_macos", lambda: True)
+    monkeypatch.setattr(platform, "is_windows", lambda: False)
+    platform.bootstrap_vlc()
+    assert "PYTHON_VLC_LIB_PATH" not in os.environ
+    assert os.environ["DYLD_LIBRARY_PATH"].startswith("/opt/homebrew/lib")
 
 
 def test_windows_locates_installed_vlc(monkeypatch, tmp_path):
