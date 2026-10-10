@@ -79,14 +79,20 @@ PHASE 4 — LINUX EXTRAS DISABLE
 
 PHASE 5 — PACKAGING (standalone binaries)
 -----------------------------------------
-[ ] 5.1 packaging/flow.linux.spec (move + keep "drop bundled libvlc" logic)
-[ ] 5.2 packaging/flow.macos.spec (find_lib + VLC_PLUGIN_PATH bootstrap)
-[ ] 5.3 packaging/flow.windows.spec (find_lib + VLC_PLUGIN_PATH bootstrap)
-[ ] 5.4 Conditional hiddenimports per OS (dbus/gi linux-only)
+[x] 5.1 packaging/flow.linux.spec (moved from flow.spec; keeps the
+      drop-bundled-libvlc logic; verified build locally — see 5.6)
+[x] 5.2 packaging/flow.macos.spec (bootstrap_vlc + runtime VLC_PLUGIN_PATH;
+      external VLC.app/brew; dylibs never bundled)
+[x] 5.3 packaging/flow.windows.spec (bootstrap_vlc + PYTHON_VLC_LIB_PATH/
+      VLC_PLUGIN_PATH; external portable/installed VLC)
+[x] 5.4 Conditional hiddenimports per OS (dbus/gi linux-only; dbus_fast kept)
 [x] 5.5 Runtime VLC bootstrap (backend/platform.py bootstrap_vlc; called before
       `import vlc` in players + cli/tui/web/minimal entry points;
       tests/test_vlc_bootstrap.py)
-[ ] 5.6 Build binary locally on Linux, smoke test
+[x] 5.6 Built Linux binary locally (dist/flow), smoke tested:
+      --check/--status/--help all clean, vlc row passed
+Decision: single `flow` onefile per OS (flow-min/tui/web stay python-install
+only). Old root flow.spec deleted in favour of packaging/*.spec.
 
 
 PHASE 6 — GITHUB ACTIONS
@@ -96,19 +102,21 @@ PHASE 6 — GITHUB ACTIONS
       (+ PYTHON_VLC_LIB_PATH + VLC_PLUGIN_PATH on Windows, VLC_PLUGIN_PATH on macOS)
 [x] 6.3 Smoke step per OS: import vlc + vlc.Instance() + libvlc_get_version()
       (real playback smoke deferred until binaries in 6.4-6.6)
-[ ] 6.4 release.yml: tag v* -> 3 parallel PyInstaller onefile builds
-[ ] 6.5 Smoke test built binaries, upload artifacts, attach to GitHub Release
-[ ] 6.6 Trigger a test release and verify binaries run
+[x] 6.4 release.yml: tag v* -> 3 parallel PyInstaller onefile builds
+[x] 6.5 Smoke test built binaries (--check/--status), upload artifact,
+      attach to GitHub Release (softprops/action-gh-release)
+[ ] 6.6 Trigger a test release and verify binaries run (needs tag push to origin)
 
 
 PHASE 7 — DOCS + TEST GATING
 ----------------------------
-[ ] 7.1 docs/user/installation.md: per-OS VLC install + VLC_PLUGIN_PATH instructions
+[x] 7.1 docs/user/installation.md: per-OS VLC install sections (apt / brew
+      --cask / Windows installer + portable zip + env vars)
 [x] 7.2 Gate Windows-incompatible tests: daemon E2E skipif + os.name == "nt",
       shell_quit_key module-level skip, offline radio pty test skip;
       test_registry + daemon dispatch made portable (Python sleeper) instead
       of skipped, so they still run on Windows
-[ ] 7.3 Add Windows control-IPC test exercising Phase 2
-      (test_ipc_control.test_socket_control_round_trip covers the TCP path on
-      all OSes; explicit win-flag assertion still pending)
-[ ] 7.4 Final pass: remove stale flow-min entrypoint refs if appropriate (minimal/ gone)
+[x] 7.3 Windows control-IPC test added (test_ipc_control: socket round-trip is
+      the cross-OS TCP path; new test asserts Windows has no signal fallback)
+[x] 7.4 Final pass: no stale flow-min refs — minimal/ is live source and the
+      `flow-min` script points at minimal.main:main (pyproject confirmed)

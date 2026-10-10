@@ -1,16 +1,25 @@
 # -*- mode: python ; coding: utf-8 -*-
+# Windows onefile build: `pyinstaller packaging/flow.windows.spec`
+#
+# VLC is an external install on Windows (the portable zip or an installer).
+# python-vlc resolves libvlc.dll at import time; `flow` calls
+# backend.platform.bootstrap_vlc() before importing vlc, which honours
+# PYTHON_VLC_LIB_PATH and exports VLC_PLUGIN_PATH, falling back to common
+# install locations. The onefile must NOT bundle libvlc.
 
 import os
 
+_SPEC_DIR = os.path.dirname(os.path.abspath(SPECPATH))
+_ROOT = os.path.dirname(_SPEC_DIR) if os.path.basename(_SPEC_DIR) == "packaging" else _SPEC_DIR
+
 a = Analysis(
-    ["cli/main.py"],
-    pathex=[SPECPATH],
+    [os.path.join(_ROOT, "cli/main.py")],
+    pathex=[_ROOT],
     binaries=[],
     datas=[
-        ("web/templates", "web/templates"),
-        ("backend/Hyprland/island.qml", "backend/Hyprland"),
-        ("backend/plugin_api/flow_api.py", "backend/plugin_api"),
-        ("pyproject.toml", "."),
+        (os.path.join(_ROOT, "web/templates"), "web/templates"),
+        (os.path.join(_ROOT, "backend/plugin_api/flow_api.py"), "backend/plugin_api"),
+        (os.path.join(_ROOT, "pyproject.toml"), "."),
     ],
     hiddenimports=[
         "vlc",
@@ -34,13 +43,6 @@ a = Analysis(
         "web",
         "web.app",
         "web.devlog",
-        "dbus",
-        "dbus.mainloop",
-        "dbus.mainloop.glib",
-        "dbus.service",
-        "gi",
-        "gi.repository",
-        "gi.repository.GLib",
         "dbus_fast",
     ],
     hookspath=[],
@@ -51,18 +53,13 @@ a = Analysis(
     optimize=0,
 )
 
-# python-vlc loads libvlc with ctypes and needs the *system* libvlc plus its
-# plugin directory. PyInstaller picks libvlc.so.5/libvlccore.so.9 up from the
-# ctypes.CDLL() literals in vlc.py, and inside the onefile bundle they are
-# loaded from _MEIPASS -- so libvlccore searches for its plugins next to itself
-# instead of /usr/lib/vlc/plugins, finds none, and libvlc_new() returns NULL
-# (Instance() becomes None -> "'NoneType' object has no attribute
-# 'media_player_new'"). Drop the bundled copies and let ctypes resolve the
-# system library through ldconfig.
-_VLC_BUNDLED = {"libvlc.so.5", "libvlccore.so.9"}
+# If PyInstaller ever picks libvlc.dll up (it is only referenced via
+# ctypes at runtime, so normally it will not), drop it so the runtime
+# bootstrap keeps working against the external VLC install.
+_VLC_BUNDLED = {"libvlc.dll", "libvlccore.dll"}
 _dropped = [b for b in a.binaries if os.path.basename(b[0]) not in _VLC_BUNDLED]
 if len(_dropped) != len(a.binaries):
-    print("[flow.spec] dropping bundled VLC libs: libvlc/libvlccore must come from the system")
+    print("[flow.windows.spec] dropping bundled VLC libs: libvlc must come from the VLC install")
 a.binaries = _dropped
 
 pyz = PYZ(a.pure)

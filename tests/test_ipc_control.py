@@ -49,3 +49,16 @@ def test_signal_control_round_trip_on_posix():
 def test_send_is_false_for_unknown_entry():
     assert ipc.send(None, "pause") is False
     assert ipc.send({}, "pause") is False
+
+
+def test_windows_control_is_socket_only():
+    """On Windows there are no control signals: only the ctl_port socket works."""
+    if os.name != "nt":
+        return
+    assert ipc.signal_for("pause") is None
+    ipc._dispatch = lambda action, payload=None: None
+    registry.register("vlc", os.getpid())  # no ctl_port -> no signal path
+    try:
+        assert ipc.send_to("vlc", "pause") is False
+    finally:
+        registry.clear()
