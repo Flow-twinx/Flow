@@ -1369,8 +1369,80 @@ def down_notify(song_name, error=False):
         notify("Downloaded Song", f"song: {song_name}")
 
 
+def _apply_bool(attr, ok_msg, v):
+    globals()[attr] = bool(v)
+    _save_config()
+    return f"{Tertiary}{ok_msg} {v}{Reset}"
+
+
+def _apply_sensitivity_io(v):
+    try:
+        val = float(v)
+    except ValueError:
+        return "sensitivity must be a number (0.5-5.0)"
+    if not (0.5 <= val <= 5.0):
+        return "sensitivity must be between 0.5 and 5.0"
+    return _apply_sensitivity(val)
+
+
+def _apply_bar_spacing_io(v):
+    s = str(v).strip().lower()
+    if s in _BAR_SPACING:
+        return _apply_bar_spacing(s)
+    try:
+        return _apply_bar_spacing(int(s))
+    except ValueError:
+        return "bar_spacing must be min/fit/max or 0-4"
+
+
+def _interactive_rows():
+    """One row per editable setting: key, label, current, kind, spec, apply."""
+    return [
+        ("display", "Display mode", lambda: Display, "select",
+         ["none", "bars", "lyrics", "progress", "rich"],
+         lambda v: _apply_display(str(v))),
+        ("primary", "Primary color", lambda: _STYLE["primary"], "select",
+         RICH_COLORS, lambda v: _apply_color("primary", str(v))),
+        ("secondary", "Secondary color", lambda: _STYLE["secondary"], "select",
+         RICH_COLORS, lambda v: _apply_color("secondary", str(v))),
+        ("tertiary", "Tertiary color", lambda: _STYLE["tertiary"], "select",
+         RICH_COLORS, lambda v: _apply_color("tertiary", str(v))),
+        ("theme", "Color theme", _current_theme, "select",
+         sorted(THEMES), lambda v: _apply_theme(str(v))),
+        ("spinner", "Spinner", lambda: SPINNER, "text", None,
+         lambda v: _apply_spinner(str(v))),
+        ("progress_columns", "Rich progress columns", lambda: ", ".join(ProgressColumns), "text", None,
+         lambda v: _apply_progress_columns(str(v))),
+        ("format", "Default download format", lambda: FORMAT, "select",
+         sorted(_VALID_FORMATS), lambda v: _apply_format(str(v))),
+        ("bar_width", "Bar width (4-80)", lambda: BarWidth, "text", None,
+         lambda v: _apply_int("BarWidth", v, 4, 80, "Bar width changed")),
+        ("bar_height", "Bar height (10-90)", lambda: BarHeight, "text", None,
+         lambda v: _apply_int("BarHeight", v, 10, 90, "Bar height changed")),
+        ("bar_spacing", "Bar spacing", lambda: BarSpacing, "select",
+         ["min", "fit", "max", "0", "1", "2", "3", "4"], _apply_bar_spacing_io),
+        ("bar_char", "Bar char", lambda: _BC_NAME(BarChar), "text", None,
+         _apply_bar_char),
+        ("prog_char", "Progress bar fill char", lambda: _BC_NAME(ProgChar), "text", None,
+         _apply_prog_char),
+        ("prog_char_em", "Progress bar empty char", lambda: _BC_NAME(ProgCharEm), "text", None,
+         _apply_prog_char_em),
+        ("sensitivity", "Sensitivity (0.5-5.0)", lambda: Sensitivity, "text", None,
+         _apply_sensitivity_io),
+        ("ad_skip", "Ad skip", lambda: AD_SKIP, "confirm", None,
+         lambda v: _apply_bool("AD_SKIP", "Ad skip set to", v)),
+        ("down_on_like", "Auto-download on like", lambda: DOWN_ON_LIKE, "confirm", None,
+         lambda v: _apply_bool("DOWN_ON_LIKE", "Auto-download on like set to", v)),
+        ("notify", "Desktop notifications", lambda: NOTIFY, "confirm", None,
+         lambda v: _apply_bool("NOTIFY", "Desktop notifications set to", v)),
+        ("max_search", "Max search results (1-20)", lambda: MAX_SEARCH_RESULTS, "text", None,
+         lambda v: _apply_int("MAX_SEARCH_RESULTS", v, 1, 20, "Max search results changed")),
+        ("max_radio", "Max radio tracks (1-50)", lambda: MAX_RESULTS_RADIO, "text", None,
+         lambda v: _apply_int("MAX_RESULTS_RADIO", v, 1, 50, "Max radio tracks changed")),
+    ]
+
+
 def _interactive_config():
-    global AD_SKIP, DOWN_ON_LIKE
     try:
         import questionary
         from questionary import Style
@@ -1382,8 +1454,6 @@ def _interactive_config():
         )
         return
 
-    color_names = RICH_COLORS
-    color_choices = [questionary.Choice(title=n, value=n) for n in color_names]
     py_style = Style(
         [
             ("qmark", f"fg:{_cname(_STYLE['tertiary'])}"),
@@ -1398,256 +1468,53 @@ def _interactive_config():
         ]
     )
 
-    questions = [
+    rows = _interactive_rows()
+    screen = [
         {
             "type": "select",
-            "name": "display",
-            "message": "Display mode",
-            "choices": ["none", "bars", "lyrics", "progress", "rich"],
-            "default": Display,
-        },
-        {
-            "type": "text",
-            "name": "progress_columns",
-            "message": "Rich progress columns (comma-separated: "
-            + ", ".join(_RICH_COLUMN_NAMES) + ")",
-            "default": ", ".join(ProgressColumns),
-            "when": lambda a: a["display"] == "rich",
-        },
-        {
-            "type": "select",
-            "name": "primary",
-            "message": "Primary color",
-            "choices": color_choices,
-            "default": _STYLE["primary"],
-        },
-        {
-            "type": "select",
-            "name": "secondary",
-            "message": "Secondary color",
-            "choices": color_choices,
-            "default": _STYLE["secondary"],
-        },
-        {
-            "type": "select",
-            "name": "tertiary",
-            "message": "Tertiary color",
-            "choices": color_choices,
-            "default": _STYLE["tertiary"],
-        },
-        {
-            "type": "select",
-            "name": "format",
-            "message": "Default download format",
-            "choices": sorted(_VALID_FORMATS),
-            "default": FORMAT if FORMAT in _VALID_FORMATS else "webm",
-        },
-        {
-            "type": "text",
-            "name": "bar_width",
-            "message": "Bar width (4-80)",
-            "default": str(BarWidth),
-            "when": lambda a: a["display"] == "bars",
-        },
-        {
-            "type": "text",
-            "name": "bar_height",
-            "message": "Bar height (10-90)",
-            "default": str(BarHeight),
-            "when": lambda a: a["display"] == "bars",
-        },
-        {
-            "type": "select",
-            "name": "bar_spacing",
-            "message": "Bar spacing",
-            "choices": ["min", "fit", "max", "0", "1", "2", "3", "4"],
-            "default": str(BarSpacing),
-            "when": lambda a: a["display"] == "bars",
-        },
-        {
-            "type": "text",
-            "name": "bar_char",
-            "message": "Bar char (dot/block/circle or single char)",
-            "default": _BC_NAME(BarChar),
-            "when": lambda a: a["display"] == "bars",
-        },
-        {
-            "type": "text",
-            "name": "prog_char",
-            "message": "Progress bar fill char (dot/block/circle or single char)",
-            "default": _BC_NAME(ProgChar),
-            "when": lambda a: a["display"] == "progress",
-        },
-        {
-            "type": "text",
-            "name": "prog_char_em",
-            "message": "Progress bar empty char (dot/block/circle or single char)",
-            "default": _BC_NAME(ProgCharEm),
-            "when": lambda a: a["display"] == "progress",
-        },
-        {
-            "type": "text",
-            "name": "sensitivity",
-            "message": "Sensitivity (0.5-5.0)",
-            "default": str(Sensitivity),
-            "when": lambda a: a["display"] == "bars",
-        },
-        {
-            "type": "confirm",
-            "name": "ad_skip",
-            "message": "Sponsor segment skipping (ad skip)",
-            "default": AD_SKIP,
-        },
-        {
-            "type": "confirm",
-            "name": "down_on_like",
-            "message": "Auto-download when liking online",
-            "default": DOWN_ON_LIKE,
-        },
-        {
-            "type": "confirm",
-            "name": "notify",
-            "message": "Desktop notifications",
-            "default": NOTIFY,
-        },
-        {
-            "type": "text",
-            "name": "max_search",
-            "message": "Max search results (1-20)",
-            "default": str(MAX_SEARCH_RESULTS),
-        },
-        {
-            "type": "text",
-            "name": "max_radio",
-            "message": "Max radio tracks (1-50)",
-            "default": str(MAX_RESULTS_RADIO),
-        },
+            "name": "setting",
+            "message": "Which setting?",
+            "choices": [
+                questionary.Choice(
+                    title=f"{label}  (current: {current()})", value=key
+                )
+                for key, label, current, *_ in rows
+            ],
+        }
     ]
-
-    from questionary.prompts import AVAILABLE_PROMPTS
-
-    answers = {}
-    interrupted = False
-
-    def _apply_collected():
-        global AD_SKIP, DOWN_ON_LIKE
-
-        if "display" in answers:
-            print(_apply_display(answers["display"]))
-        if "primary" in answers:
-            print(_apply_color("primary", answers["primary"]))
-        if "secondary" in answers:
-            print(_apply_color("secondary", answers["secondary"]))
-        if "tertiary" in answers:
-            print(_apply_color("tertiary", answers["tertiary"]))
-
-        if answers.get("display") == "bars":
-            if answers.get("bar_width", "").strip():
-                try:
-                    v = int(answers["bar_width"])
-                    if 4 <= v <= 80:
-                        print(_apply_bar_width(v))
-                except ValueError:
-                    pass
-            if answers.get("bar_height", "").strip():
-                try:
-                    v = int(answers["bar_height"])
-                    if 10 <= v <= 90:
-                        print(_apply_bar_height(v))
-                except ValueError:
-                    pass
-            if "bar_spacing" in answers:
-                try:
-                    val = answers["bar_spacing"]
-                    if str(val) in _BAR_SPACING:
-                        print(_apply_bar_spacing(val))
-                    else:
-                        print(_apply_bar_spacing(int(val)))
-                except ValueError:
-                    pass
-            if "bar_char" in answers:
-                print(_apply_bar_char(answers["bar_char"]))
-            if answers.get("sensitivity", "").strip():
-                try:
-                    v = float(answers["sensitivity"])
-                    if 0.5 <= v <= 5.0:
-                        print(_apply_sensitivity(v))
-                except ValueError:
-                    pass
-        if answers.get("display") == "rich":
-            if answers.get("progress_columns", "").strip():
-                msg = _apply_progress_columns(answers["progress_columns"])
-                if not msg.startswith("Unknown"):
-                    print(msg)
-        if answers.get("display") == "progress":
-            if "prog_char" in answers:
-                print(_apply_prog_char(answers["prog_char"]))
-            if "prog_char_em" in answers:
-                print(_apply_prog_char_em(answers["prog_char_em"]))
-
-        if "format" in answers:
-            print(_apply_format(answers["format"]))
-        if "max_search" in answers:
-            print(
-                _apply_int(
-                    "MAX_SEARCH_RESULTS",
-                    answers["max_search"],
-                    1,
-                    20,
-                    "Max search results changed",
-                )
-            )
-        if "max_radio" in answers:
-            print(
-                _apply_int(
-                    "MAX_RESULTS_RADIO",
-                    answers["max_radio"],
-                    1,
-                    50,
-                    "Max radio tracks changed",
-                )
-            )
-        if "ad_skip" in answers:
-            AD_SKIP = answers["ad_skip"]
-            print(f"{Tertiary}Ad skip set to {AD_SKIP}{Reset}")
-        if "down_on_like" in answers:
-            DOWN_ON_LIKE = answers["down_on_like"]
-            print(f"{Tertiary}Auto-download on like set to {DOWN_ON_LIKE}{Reset}")
-        if "notify" in answers:
-            NOTIFY = answers["notify"]
-            print(f"{Tertiary}Desktop notifications set to {NOTIFY}{Reset}")
-
     try:
-        for question in questions:
-            cfg = dict(question)
-            when = cfg.get("when")
-            if when and not when(answers):
-                continue
-            kwargs = {k: v for k, v in cfg.items() if k not in ("type", "name", "when")}
-            kwargs["style"] = py_style
-            try:
-                answer = AVAILABLE_PROMPTS[cfg["type"]](**kwargs).unsafe_ask()
-            except KeyboardInterrupt, EOFError:
-                interrupted = True
-                break
-            answers[cfg["name"]] = answer
-    except KeyboardInterrupt:
-        interrupted = True
-
+        answers = questionary.prompt(screen, style=py_style)
+    except (KeyboardInterrupt, EOFError):
+        answers = None
     if not answers:
-        print(f"\n{GREY}Config setup cancelled. Nothing to save.{Reset}")
+        print(f"\n{GREY}Config cancelled. Nothing changed.{Reset}")
         return
 
-    if interrupted:
-        print(f"\n{GREY}Interrupted — saving the answers you already gave...{Reset}")
-    _apply_collected()
-    _save_config()
-    if interrupted:
-        print(
-            f"\n{GREY}Config saved (partial — {len(answers)} setting(s) applied).{Reset}"
-        )
+    key = answers["setting"]
+    row = next((r for r in rows if r[0] == key), None)
+    if row is None:
+        return
+    _, label, current, kind, spec, apply = row
+    question = {"type": kind, "name": "value", "message": label}
+    if kind == "select":
+        question["choices"] = spec or []
+        cur = current()
+        if cur in (spec or []):
+            question["default"] = cur
+    elif kind == "confirm":
+        question["default"] = bool(current())
     else:
-        print(f"\n{GREY}Config saved.{Reset}")
+        question["default"] = str(current())
+    try:
+        edit = questionary.prompt([question], style=py_style)
+    except (KeyboardInterrupt, EOFError):
+        edit = None
+    if not edit or edit.get("value") is None:
+        print(f"\n{GREY}{label} unchanged.{Reset}")
+        return
+    msg = apply(edit["value"])
+    if msg:
+        print(msg)
 
 
 def _cname(style):

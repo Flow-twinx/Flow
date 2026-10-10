@@ -106,7 +106,7 @@ def _fake_interactive(monkeypatch, tmp_path, answers_seq):
         def __init__(self, **kwargs):
             self.kwargs = kwargs
 
-        def unsafe_ask(self):
+        def unsafe_ask(self, patch_stdout=None):
             when = self.kwargs.get("when")
             if when is not None and not when(collected):
                 return None
@@ -127,75 +127,68 @@ def _fake_interactive(monkeypatch, tmp_path, answers_seq):
     return asked
 
 
-def test_interactive_config_offers_prog_chars_for_progress(
+def test_interactive_config_picks_one_setting(
     monkeypatch, tmp_path, capsys, restore_config_globals
 ):
-    asked = _fake_interactive(
-        monkeypatch,
-        tmp_path,
-        [
-            "progress", "cyan", "purple", "blue", "webm",
-            "|", "-",
-            True, True, True, "5", "35",
-        ],
-    )
-    # display, 3 colors, format, prog_char, prog_char_em, 3 confirms,
-    # max_search, max_radio — the visualizer questions (width/height/
-    # spacing/char/sensitivity) must NOT fire for progress.
-    assert len(asked) == 12
-    out = _clean(capsys.readouterr().out)
-    assert "Progress char changed to |" in out
-    assert "Progress empty char changed to -" in out
-    assert "Bar width" not in out
-    assert "Bar char changed" not in out
-    assert "Bar height" not in out
-    assert "Bar spacing" not in out
-    assert "Sensitivity" not in out
-    assert config.Display == "progress"
-    assert config.ProgChar == "|"
-    assert config.ProgCharEm == "-"
-
-
-def test_interactive_config_hides_bar_chars_for_lyrics(
-    monkeypatch, tmp_path, restore_config_globals
-):
-    asked = _fake_interactive(
-        monkeypatch,
-        tmp_path,
-        [
-            "lyrics", "cyan", "purple", "blue", "webm",
-            True, True, True, "5", "35",
-        ],
-    )
-    # display, 3 colors, format, 3 confirms, max_search, max_radio
-    assert len(asked) == 10
-    assert config.Display == "lyrics"
-
-
-def test_interactive_config_keeps_visualizer_options_for_bars(
-    monkeypatch, tmp_path, capsys, restore_config_globals
-):
-    asked = _fake_interactive(
-        monkeypatch,
-        tmp_path,
-        [
-            "bars", "cyan", "purple", "blue", "webm",
-            "30", "40", "1", "|", "1.0",
-            True, True, True, "5", "35",
-        ],
-    )
-    assert len(asked) == 15
+    asked = _fake_interactive(monkeypatch, tmp_path, ["bar_width", "30"])
+    assert len(asked) == 2  # one pick + one value edit
     out = _clean(capsys.readouterr().out)
     assert "Bar width changed to 30" in out
-    assert "Bar height changed to 40" in out
-    assert "Bar spacing changed to 1" in out
-    assert "Bar char changed to |" in out
-    assert "Sensitivity changed to 1.0" in out
-    assert "Progress char" not in out
     assert config.BarWidth == 30
-    assert config.BarHeight == 40
-    assert config.BarSpacing == 1
-    assert config.BarChar == "|"
+    # nothing else was edited
+    assert config.Display == "bars"
+    assert config.ProgChar == "\u2588"
+    assert config.ProgCharEm == "\u2591"
+
+
+def test_interactive_config_picks_display(
+    monkeypatch, tmp_path, capsys, restore_config_globals
+):
+    _fake_interactive(monkeypatch, tmp_path, ["display", "rich"])
+    out = _clean(capsys.readouterr().out)
+    assert "Display mode changed to rich" in out
+    assert config.Display == "rich"
+
+
+def test_interactive_config_picks_prog_char(
+    monkeypatch, tmp_path, capsys, restore_config_globals
+):
+    _fake_interactive(monkeypatch, tmp_path, ["prog_char", "|"])
+    out = _clean(capsys.readouterr().out)
+    assert "Progress char changed to |" in out
+    assert config.ProgChar == "|"
+
+
+def test_interactive_config_picks_theme(
+    monkeypatch, tmp_path, capsys, restore_config_globals
+):
+    _fake_interactive(monkeypatch, tmp_path, ["theme", "sunset"])
+    out = _clean(capsys.readouterr().out)
+    assert "Theme changed to 'sunset'" in out
+    assert config._STYLE["primary"] == "orange1"
+    assert config._STYLE["secondary"] == "pink1"
+
+
+def test_interactive_config_picks_confirm(
+    monkeypatch, tmp_path, capsys, restore_config_globals
+):
+    _fake_interactive(monkeypatch, tmp_path, ["notify", False])
+    out = _clean(capsys.readouterr().out)
+    assert "Desktop notifications set to False" in out
+    assert config.NOTIFY is False
+
+
+def test_interactive_config_lists_every_setting():
+    rows = config._interactive_rows()
+    keys = {r[0] for r in rows}
+    assert len(rows) == len(keys)  # no duplicate keys
+    for key in (
+        "display", "primary", "secondary", "tertiary", "theme", "spinner",
+        "progress_columns", "format", "bar_width", "bar_height", "bar_spacing",
+        "bar_char", "prog_char", "prog_char_em", "sensitivity", "ad_skip",
+        "down_on_like", "notify", "max_search", "max_radio",
+    ):
+        assert key in keys
 
 
 def test_display_mode_accepts_progress():
@@ -208,24 +201,6 @@ def test_display_mode_accepts_rich():
     assert "rich" in config._DISPLAY_MODES
     msg = config._apply_display("rich")
     assert "changed to rich" in msg
-
-
-def test_interactive_config_asks_rich_columns_for_rich(
-    monkeypatch, tmp_path, restore_config_globals
-):
-    asked = _fake_interactive(
-        monkeypatch,
-        tmp_path,
-        [
-            "rich", "bar, time_remaining", "cyan", "purple", "blue", "webm",
-            True, True, True, "5", "35",
-        ],
-    )
-    # display, progress_columns, 3 colors, format, 3 confirms,
-    # max_search, max_radio — the prog_char questions must NOT fire.
-    assert len(asked) == 11
-    assert config.Display == "rich"
-    assert config.ProgressColumns == ["bar", "time_remaining"]
 
 
 def test_progress_columns_accept_rich_options():
