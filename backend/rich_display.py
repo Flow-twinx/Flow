@@ -52,8 +52,32 @@ def _progress():
         if cls is None or cls in seen:
             continue
         seen.add(cls)
-        picked.append(cls())
+        if cls is SpinnerColumn:
+            picked.append(_spinner_column())
+        else:
+            picked.append(cls())
     return Progress(*picked, auto_refresh=False)
+
+
+def _spinner_name():
+    """A valid rich spinner name from config (falls back to 'dots')."""
+    try:
+        from rich.spinner import SPINNERS
+    except Exception:
+        return "dots"
+    name = config.RichSpinner
+    return name if name in SPINNERS else "dots"
+
+
+def _spinner_column():
+    """A SpinnerColumn for the configured spinner (rich version tolerant)."""
+    from rich.progress import SpinnerColumn
+
+    name = _spinner_name()
+    try:
+        return SpinnerColumn(spinner_name=name)
+    except TypeError:  # rich < 15 used `spinner=`
+        return SpinnerColumn(spinner=name)
 
 
 class NowPlaying:
@@ -150,7 +174,7 @@ def spinner_run(stop, label="Searching"):
 
     console = Console()
     try:
-        with console.status(f"[bold]{label}...[/]"):
+        with console.status(f"[bold]{label}...[/]", spinner=_spinner_name()):
             while not stop():
                 time.sleep(0.08)
     except Exception:

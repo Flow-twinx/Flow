@@ -81,6 +81,8 @@ def restore_config_globals():
     config.ProgCharEm = "\u2591"
     config.Sensitivity = 1.0
     config.SPINNER = "|/-\\"
+    config.RichSpinner = "dots"
+    config.ProgressType = "default"
     config.Primary = config.CYAN
     config.Secondary = config.PURPLE
     config.Tertiary = config.BLUE
@@ -186,18 +188,26 @@ def test_interactive_config_lists_every_setting(restore_config_globals):
     assert len(rows) == len(keys)  # no duplicate keys
     for key in (
         "display", "primary", "secondary", "tertiary", "theme", "spinner",
-        "progress_columns", "format", "bar_width", "bar_height", "bar_spacing",
-        "bar_char", "prog_char", "prog_char_em", "sensitivity", "ad_skip",
+        "progress_type", "progress_columns", "format", "sensitivity", "ad_skip",
         "down_on_like", "notify", "max_search", "max_radio",
     ):
         assert key in keys
+    # bar settings belong to the `bars`/plain-text displays, not rich
+    for key in (
+        "bar_width", "bar_height", "bar_spacing", "bar_char",
+        "prog_char", "prog_char_em",
+    ):
+        assert key not in keys
 
 
 def test_interactive_config_hides_rich_columns_outside_rich(restore_config_globals):
     config.Display = "bars"
     keys = {r[0] for r in config._interactive_rows()}
     assert "progress_columns" not in keys
+    assert "progress_type" not in keys
     assert "display" in keys
+    assert "bar_width" in keys
+    assert "spinner" in keys
 
 
 def test_display_mode_accepts_progress():
@@ -368,3 +378,102 @@ def test_download_hook_delegates_to_rich(monkeypatch, restore_config_globals):
         }
     )
     assert calls == [(5_000_000, 10_000_000)]
+
+
+def test_progress_type_applies_presets(restore_config_globals):
+    msg = config._apply_progress_type("default")
+    assert "changed to default" in msg
+    assert config.ProgressType == "default"
+    assert config.ProgressColumns == ["bar", "percentage", "time_remaining"]
+    config._apply_progress_type("download")
+    assert config.ProgressColumns == [
+        "download", "file_size", "total_size", "transfer_speed",
+    ]
+    msg = config._apply_progress_type("pulse")
+    assert "changed to pulse" in msg
+    assert config.ProgressColumns == ["spinner"]
+    config._apply_progress_type("default")
+
+
+def test_progress_type_rejects_unknown(restore_config_globals):
+    bad = config._apply_progress_type("bogus")
+    assert "Unknown progress type" in bad
+    assert config.ProgressType == "default"
+
+
+def test_progress_columns_edit_marks_custom(restore_config_globals):
+    config._apply_progress_type("download")
+    config._apply_progress_columns("bar,time_remaining")
+    assert config.ProgressType == "custom"
+    assert config.ProgressColumns == ["bar", "time_remaining"]
+
+
+def test_progress_type_custom_keeps_columns(restore_config_globals):
+    config._apply_progress_columns("bar,time_remaining")
+    msg = config._apply_progress_type("custom")
+    assert "custom" in msg
+    assert config.ProgressType == "custom"
+    assert config.ProgressColumns == ["bar", "time_remaining"]
+    config._apply_progress_type("default")
+
+
+def test_rich_spinner_applies_and_persists(restore_config_globals):
+    msg = config._apply_rich_spinner("dots5")
+    assert "dots5" in msg
+    assert config.RichSpinner == "dots5"
+    saved = json.loads(pathlib.Path(config.CONFIG_FILE).read_text())
+    assert saved["rich_spinner"] == "dots5"
+    config.RichSpinner = "bounce"
+    config._load_config()
+    assert config.RichSpinner == "dots5"  # loaded back from file
+    config._apply_rich_spinner("dots")
+
+
+def test_rich_spinner_rejects_empty(restore_config_globals):
+    bad = config._apply_rich_spinner("")
+    assert "Rich spinner must" in bad
+    assert config.RichSpinner == "dots"
+
+
+def test_interactive_config_picks_progress_type(
+    monkeypatch, tmp_path, capsys, restore_config_globals
+):
+    config.Display = "rich"
+    _fake_interactive(monkeypatch, tmp_path, ["progress_type", "download"])
+    assert config.ProgressType == "download"
+    assert config.ProgressColumns == [
+        "download", "file_size", "total_size", "transfer_speed",
+    ]
+
+
+def test_interactive_config_spinner_custom(
+    monkeypatch, tmp_path, capsys, restore_config_globals
+):
+    config.Display = "rich"
+    _fake_interactive(monkeypatch, tmp_path, ["spinner", "Custom…", "dots6"])
+    assert config.RichSpinner == "dots6"
+    out = _clean(capsys.readouterr().out)
+    assert "Rich spinner set to 'dots6'" in out
+
+
+def test_spinner_name_validates(restore_config_globals):
+    import backend.rich_display as rich_display
+
+    config.RichSpinner = "dots"
+    assert rich_display._spinner_name() == "dots"
+    config.RichSpinner = "bounce"
+    assert rich_display._spinner_name() == "bounce"
+    config.RichSpinner = "|/-\\"
+    assert rich_display._spinner_name() == "dots"  # custom chars fall back
+    config.RichSpinner = "dots"
+
+
+def test_rich_spinner_column_builds(restore_config_globals):
+    import backend.rich_display as rich_display
+
+    config.ProgressType = "pulse"
+    config.ProgressColumns = list(config._PROGRESS_TYPES["pulse"])
+    columns = rich_display._progress().columns
+    assert any(type(c).__name__ == "SpinnerColumn" for c in columns)
+    config.ProgressType = "default"
+    config.ProgressColumns = list(config._PROGRESS_TYPES["default"])

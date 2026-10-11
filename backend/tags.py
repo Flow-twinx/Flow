@@ -1,11 +1,3 @@
-"""One-word tags trimmed out of a track's YouTube metadata.
-
-A music video's title and description carry credits, hashtags, "(Official
-Video)" noise and film names. Everything except the language and the artist is
-dropped here, so the library keeps two clean single-word tags it can filter and
-play by.
-"""
-
 import re
 
 LANGUAGE_NAMES = {

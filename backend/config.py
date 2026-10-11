@@ -100,8 +100,17 @@ def _valid_style(value):
     """True when `value` is a parseable rich style (named color, #hex, rgb(), ...)."""
     if not _HAS_RICH:
         return str(value).lower() in (
-            "red", "green", "yellow", "blue", "purple", "cyan",
-            "grey", "white", "black", "orange", "pink",
+            "red",
+            "green",
+            "yellow",
+            "blue",
+            "purple",
+            "cyan",
+            "grey",
+            "white",
+            "black",
+            "orange",
+            "pink",
         )
     try:
         _RichStyle.parse(str(value))
@@ -148,12 +157,22 @@ _TARGET_ALIASES = {
     "spin": "spinner",
     "richcols": "progress_columns",
     "rich_columns": "progress_columns",
+    "progtype": "progress_type",
+    "richspin": "rich_spinner",
+    "rich_spin": "rich_spinner",
 }
-_TARGETS = {"primary", "secondary", "tertiary", "display", "progress_columns"}
+_TARGETS = {
+    "primary",
+    "secondary",
+    "tertiary",
+    "display",
+    "progress_columns",
+    "progress_type",
+    "rich_spinner",
+}
 _DISPLAY_MODES = {"none", "bars", "lyrics", "progress", "rich"}
 _BAR_SPACING = {"min", "fit", "max"}
 
-# User-chosen rich styles for the primary/secondary/tertiary palette.
 _STYLE = {"primary": "cyan", "secondary": "purple", "tertiary": "blue"}
 
 
@@ -178,11 +197,28 @@ ProgChar = "\u2588"
 ProgCharEm = "\u2591"
 Sensitivity = 1.0
 SPINNER = "|/-\\"
+RichSpinner = "dots"
+ProgressType = "default"
 ProgressColumns = ["bar", "percentage", "time_remaining"]
 
+_PROGRESS_TYPES = {
+    "default": ["bar", "percentage", "time_remaining"],
+    "download": ["download", "file_size", "total_size", "transfer_speed"],
+    "pulse": ["spinner"],
+}
+
 _RICH_COLUMN_NAMES = (
-    "bar", "download", "file_size", "m_of_n", "percentage", "spinner",
-    "task", "time_elapsed", "time_remaining", "total_size", "transfer_speed",
+    "bar",
+    "download",
+    "file_size",
+    "m_of_n",
+    "percentage",
+    "spinner",
+    "task",
+    "time_elapsed",
+    "time_remaining",
+    "total_size",
+    "transfer_speed",
 )
 
 THEMES = {
@@ -566,9 +602,9 @@ _TILE_CONTEXTS: dict = {}
 def _tile_context():
     """Tile's junk/artist rules plus flow's `~/.flow/ignore.txt` words (cached)."""
     from Tile import (
-        Context,
         DEFAULT_ARTIST_FILE,
         DEFAULT_IGNORE_FILE,
+        Context,
         get_context,
     )
 
@@ -627,6 +663,8 @@ def _load_config():
         ProgCharEm, \
         Sensitivity, \
         SPINNER, \
+        RichSpinner, \
+        ProgressType, \
         DEV_MODE, \
         FFMPEG, \
         _ffmpeg_configured, \
@@ -651,9 +689,7 @@ def _load_config():
         _render()
         if "display" in data and data["display"] in _DISPLAY_MODES:
             Display = data["display"]
-        if "progress_columns" in data and isinstance(
-            data["progress_columns"], list
-        ):
+        if "progress_columns" in data and isinstance(data["progress_columns"], list):
             cols = [
                 c
                 for c in data["progress_columns"]
@@ -661,6 +697,11 @@ def _load_config():
             ]
             if cols:
                 ProgressColumns = cols
+        if "progress_type" in data and data["progress_type"] in _PROGRESS_TYPES:
+            ProgressType = data["progress_type"]
+            ProgressColumns = list(_PROGRESS_TYPES[ProgressType])
+        elif "progress_type" in data and data["progress_type"] == "custom":
+            ProgressType = "custom"
         if (
             "bar_width" in data
             and isinstance(data["bar_width"], int)
@@ -711,6 +752,12 @@ def _load_config():
             and 2 <= len(data["spinner"]) <= 16
         ):
             SPINNER = data["spinner"]
+        if (
+            "rich_spinner" in data
+            and isinstance(data["rich_spinner"], str)
+            and data["rich_spinner"]
+        ):
+            RichSpinner = data["rich_spinner"][:16]
         if "dev" in data and isinstance(data["dev"], bool):
             DEV_MODE = data["dev"]
         if "ffmpeg" in data and isinstance(data["ffmpeg"], bool):
@@ -754,6 +801,7 @@ def _save_config():
         "tertiary": _STYLE["tertiary"],
         "display": Display,
         "progress_columns": ProgressColumns,
+        "progress_type": ProgressType,
         "bar_width": BarWidth,
         "bar_height": BarHeight,
         "bar_spacing": BarSpacing,
@@ -762,6 +810,7 @@ def _save_config():
         "prog_char_em": ProgCharEm,
         "sensitivity": Sensitivity,
         "spinner": SPINNER,
+        "rich_spinner": RichSpinner,
         "dev": DEV_MODE,
         "ffmpeg": FFMPEG,
         "ad_skip": AD_SKIP,
@@ -783,7 +832,7 @@ try:
 
     VERSION = _version("flow-twinx")
 except PackageNotFoundError:
-    VERSION = "0.5.1"
+    VERSION = "0.8.4"
 
 Mode = "Online"
 
@@ -928,14 +977,14 @@ def _apply_display(value):
 
 
 def _apply_progress_columns(value):
-    global ProgressColumns
+    global ProgressColumns, ProgressType
     parts = [p.strip().lower() for p in re.split(r"[,\s]+", str(value)) if p.strip()]
     if not parts or any(p not in _RICH_COLUMN_NAMES for p in parts):
         return (
-            f"Unknown progress column(s). Rich options: "
-            f"{', '.join(_RICH_COLUMN_NAMES)}"
+            f"Unknown progress column(s). Rich options: {', '.join(_RICH_COLUMN_NAMES)}"
         )
     ProgressColumns = parts
+    ProgressType = "custom"
     _save_config()
     return f"{Tertiary}Rich progress columns set to {', '.join(parts)}{Reset}"
 
@@ -984,8 +1033,6 @@ def _apply_prog_char_em(v):
     _save_config()
     return f"{Tertiary}Progress empty char changed to {ProgCharEm}{Reset}"
 
-
-import shutil
 
 MIN_BAR = 8
 
@@ -1052,6 +1099,50 @@ def _apply_spinner(value):
     return f"{Tertiary}Spinner set to '{value}'{Reset}"
 
 
+def rich_spinner_names():
+    """Every spinner name rich knows (the `python -m rich.spinner` list)."""
+    try:
+        from rich.spinner import SPINNERS
+
+        return sorted(SPINNERS)
+    except Exception:
+        return []
+
+
+def _spinner_choices():
+    """Rich spinner picker options: every name plus the custom escape hatch."""
+    return rich_spinner_names() + ["Custom…"]
+
+
+def _apply_rich_spinner(value):
+    global RichSpinner
+    name = str(value).strip()
+    if not (1 <= len(name) <= 16):
+        return "Rich spinner must be a name or 1-16 characters"
+    RichSpinner = name
+    _save_config()
+    return f"{Tertiary}Rich spinner set to '{name}'{Reset}"
+
+
+def _apply_progress_type(value):
+    global ProgressType, ProgressColumns
+    key = str(value).strip().lower()
+    if key == "custom":
+        ProgressType = "custom"
+        _save_config()
+        return f"{Tertiary}Progress type set to custom (edit the columns as you like){Reset}"
+    cols = _PROGRESS_TYPES.get(key)
+    if cols is None:
+        return (
+            f"Unknown progress type '{value}'. Options: "
+            f"{', '.join(sorted(_PROGRESS_TYPES))}, custom"
+        )
+    ProgressType = key
+    ProgressColumns = list(cols)
+    _save_config()
+    return f"{Tertiary}Progress type changed to {key} ({', '.join(cols)}){Reset}"
+
+
 def _apply_theme(name):
     if name == "list":
         return f"{Muted}Themes: {', '.join(sorted(THEMES))}{Reset}"
@@ -1081,8 +1172,10 @@ PLUGIN_SAFE_KEYS = {
     "tertiary",
     "theme",
     "spinner",
+    "rich_spinner",
     "display",
     "progress_columns",
+    "progress_type",
     "barwidth",
     "barheight",
     "barspacing",
@@ -1108,6 +1201,10 @@ def apply_config(key, value):
         return _apply_theme(value)
     if target == "spinner":
         return _apply_spinner(value)
+    if target == "rich_spinner":
+        return _apply_rich_spinner(value)
+    if target == "progress_type":
+        return _apply_progress_type(value)
     if target == "primary":
         return _apply_color("primary", value)
     if target == "secondary":
@@ -1185,8 +1282,10 @@ def config_get(key):
         "tertiary": lambda: _STYLE["tertiary"],
         "theme": _current_theme,
         "spinner": lambda: SPINNER,
+        "rich_spinner": lambda: RichSpinner,
         "display": lambda: Display,
         "progress_columns": lambda: ProgressColumns,
+        "progress_type": lambda: ProgressType,
         "barwidth": lambda: BarWidth,
         "barheight": lambda: BarHeight,
         "barspacing": lambda: BarSpacing,
@@ -1251,6 +1350,10 @@ def cmd_config(extra: list[str], args=None):
             f"  {GREY}progress_columns{Reset} (rich progress bar columns — "
             f"{', '.join(_RICH_COLUMN_NAMES)}; aliases: richcols, rich_columns)"
         )
+        print(
+            f"  {GREY}progress_type{Reset} (rich progress layout — default, download, "
+            f"pulse, custom; current: {ProgressType})"
+        )
         print(f"  {GREY}barwidth{Reset}   (4-80, current: {BarWidth})")
         print(f"  {GREY}barheight{Reset}  (10-90, current: {BarHeight})")
         print(f"  {GREY}barspacing{Reset} (0-4, min, fit, max — current: {BarSpacing})")
@@ -1267,7 +1370,11 @@ def cmd_config(extra: list[str], args=None):
         print(
             f"  {GREY}theme{Reset}      (ocean, sunset, forest, fire, mono, royal — or 'list')"
         )
-        print(f"  {GREY}spinner{Reset}     (2-16 chars, current: {SPINNER})")
+        print(
+            f"  {GREY}rich_spinner{Reset} (rich spinner — a name from `python -m "
+            f"rich.spinner`, or 1-16 custom chars; current: {RichSpinner})"
+        )
+        print(f"  {GREY}spinner{Reset}     (2-16 chars, plain-text spinner, current: {SPINNER})")
         print(f"  {GREY}format{Reset}     (opus, m4a, mp3, webm — current: {FORMAT})")
         print(
             f"  {GREY}ad_skip{Reset}     (true/false — SponsorBlock segment skipping, current: {AD_SKIP})"
@@ -1283,7 +1390,9 @@ def cmd_config(extra: list[str], args=None):
         )
         print(f"  {GREY}max_search{Reset} (1-20, current: {MAX_SEARCH_RESULTS})")
         print(f"  {GREY}max_radio{Reset}  (1-50, current: {MAX_RESULTS_RADIO})")
-        print(f"\n{Tertiary}Available colors (any rich style: named color, #hex, rgb(r,g,b), bold/italic):{Reset}")
+        print(
+            f"\n{Tertiary}Available colors (any rich style: named color, #hex, rgb(r,g,b), bold/italic):{Reset}"
+        )
         for name in RICH_COLORS:
             print(f"  {_sgr(name)}{name}{Reset}")
         print(f"\n{GREY}Config file: {CONFIG_FILE}{Reset}")
@@ -1310,6 +1419,10 @@ def cmd_config(extra: list[str], args=None):
         emit(_apply_display(value))
     elif target == "progress_columns":
         emit(_apply_progress_columns(value))
+    elif target == "progress_type":
+        emit(_apply_progress_type(value))
+    elif target in ("rich_spinner", "richspin", "rich_spin"):
+        emit(_apply_rich_spinner(value))
     elif target in ("barwidth", "width"):
         print(_apply_int("BarWidth", value, 4, 80, "Bar width changed"))
     elif target in ("barheight", "height"):
@@ -1435,56 +1548,207 @@ def _apply_bar_spacing_io(v):
 
 
 def _interactive_rows():
-    """One row per editable setting: key, label, current, kind, spec, apply.
-
-    Rich-only settings (progress columns) are hidden unless the rich display
-    is active, so the list only offers what the current mode actually uses.
-    """
+    if Display == "rich":
+        spinner_row = (
+            "spinner",
+            "Spinner",
+            lambda: RichSpinner,
+            "select",
+            _spinner_choices(),
+            lambda v: _apply_rich_spinner(v) if v != "Custom…" else None,
+        )
+    else:
+        spinner_row = (
+            "spinner",
+            "Spinner",
+            lambda: SPINNER,
+            "text",
+            None,
+            _apply_spinner,
+        )
     rows = [
-        ("display", "Display mode", lambda: Display, "select",
-         ["none", "bars", "lyrics", "progress", "rich"],
-         lambda v: _apply_display(str(v))),
-        ("primary", "Primary color", lambda: _STYLE["primary"], "select",
-         RICH_COLORS, lambda v: _apply_color("primary", str(v))),
-        ("secondary", "Secondary color", lambda: _STYLE["secondary"], "select",
-         RICH_COLORS, lambda v: _apply_color("secondary", str(v))),
-        ("tertiary", "Tertiary color", lambda: _STYLE["tertiary"], "select",
-         RICH_COLORS, lambda v: _apply_color("tertiary", str(v))),
-        ("theme", "Color theme", _current_theme, "select",
-         sorted(THEMES), lambda v: _apply_theme(str(v))),
-        ("spinner", "Spinner", lambda: SPINNER, "text", None,
-         lambda v: _apply_spinner(str(v))),
-        ("progress_columns", "Rich progress columns", lambda: ", ".join(ProgressColumns), "text", None,
-         lambda v: _apply_progress_columns(str(v))),
-        ("format", "Default download format", lambda: FORMAT, "select",
-         sorted(_VALID_FORMATS), lambda v: _apply_format(str(v))),
-        ("bar_width", "Bar width (4-80)", lambda: BarWidth, "text", None,
-         lambda v: _apply_int("BarWidth", v, 4, 80, "Bar width changed")),
-        ("bar_height", "Bar height (10-90)", lambda: BarHeight, "text", None,
-         lambda v: _apply_int("BarHeight", v, 10, 90, "Bar height changed")),
-        ("bar_spacing", "Bar spacing", lambda: BarSpacing, "select",
-         ["min", "fit", "max", "0", "1", "2", "3", "4"], _apply_bar_spacing_io),
-        ("bar_char", "Bar char", lambda: _BC_NAME(BarChar), "text", None,
-         _apply_bar_char),
-        ("prog_char", "Progress bar fill char", lambda: _BC_NAME(ProgChar), "text", None,
-         _apply_prog_char),
-        ("prog_char_em", "Progress bar empty char", lambda: _BC_NAME(ProgCharEm), "text", None,
-         _apply_prog_char_em),
-        ("sensitivity", "Sensitivity (0.5-5.0)", lambda: Sensitivity, "text", None,
-         _apply_sensitivity_io),
-        ("ad_skip", "Ad skip", lambda: AD_SKIP, "confirm", None,
-         lambda v: _apply_bool("AD_SKIP", "Ad skip set to", v)),
-        ("down_on_like", "Auto-download on like", lambda: DOWN_ON_LIKE, "confirm", None,
-         lambda v: _apply_bool("DOWN_ON_LIKE", "Auto-download on like set to", v)),
-        ("notify", "Desktop notifications", lambda: NOTIFY, "confirm", None,
-         lambda v: _apply_bool("NOTIFY", "Desktop notifications set to", v)),
-        ("max_search", "Max search results (1-20)", lambda: MAX_SEARCH_RESULTS, "text", None,
-         lambda v: _apply_int("MAX_SEARCH_RESULTS", v, 1, 20, "Max search results changed")),
-        ("max_radio", "Max radio tracks (1-50)", lambda: MAX_RESULTS_RADIO, "text", None,
-         lambda v: _apply_int("MAX_RESULTS_RADIO", v, 1, 50, "Max radio tracks changed")),
+        (
+            "display",
+            "Display mode",
+            lambda: Display,
+            "select",
+            ["none", "bars", "lyrics", "progress", "rich"],
+            lambda v: _apply_display(str(v)),
+        ),
+        (
+            "primary",
+            "Primary color",
+            lambda: _STYLE["primary"],
+            "select",
+            RICH_COLORS,
+            lambda v: _apply_color("primary", str(v)),
+        ),
+        (
+            "secondary",
+            "Secondary color",
+            lambda: _STYLE["secondary"],
+            "select",
+            RICH_COLORS,
+            lambda v: _apply_color("secondary", str(v)),
+        ),
+        (
+            "tertiary",
+            "Tertiary color",
+            lambda: _STYLE["tertiary"],
+            "select",
+            RICH_COLORS,
+            lambda v: _apply_color("tertiary", str(v)),
+        ),
+        (
+            "theme",
+            "Color theme",
+            _current_theme,
+            "select",
+            sorted(THEMES),
+            lambda v: _apply_theme(str(v)),
+        ),
+        spinner_row,
+        (
+            "progress_type",
+            "Progress type",
+            lambda: ProgressType,
+            "select",
+            sorted(_PROGRESS_TYPES) + ["custom"],
+            _apply_progress_type,
+        ),
+        (
+            "progress_columns",
+            "Rich progress columns",
+            lambda: ", ".join(ProgressColumns),
+            "text",
+            None,
+            lambda v: _apply_progress_columns(str(v)),
+        ),
+        (
+            "format",
+            "Default download format",
+            lambda: FORMAT,
+            "select",
+            sorted(_VALID_FORMATS),
+            lambda v: _apply_format(str(v)),
+        ),
+        (
+            "bar_width",
+            "Bar width (4-80)",
+            lambda: BarWidth,
+            "text",
+            None,
+            lambda v: _apply_int("BarWidth", v, 4, 80, "Bar width changed"),
+        ),
+        (
+            "bar_height",
+            "Bar height (10-90)",
+            lambda: BarHeight,
+            "text",
+            None,
+            lambda v: _apply_int("BarHeight", v, 10, 90, "Bar height changed"),
+        ),
+        (
+            "bar_spacing",
+            "Bar spacing",
+            lambda: BarSpacing,
+            "select",
+            ["min", "fit", "max", "0", "1", "2", "3", "4"],
+            _apply_bar_spacing_io,
+        ),
+        (
+            "bar_char",
+            "Bar char",
+            lambda: _BC_NAME(BarChar),
+            "text",
+            None,
+            _apply_bar_char,
+        ),
+        (
+            "prog_char",
+            "Progress bar fill char",
+            lambda: _BC_NAME(ProgChar),
+            "text",
+            None,
+            _apply_prog_char,
+        ),
+        (
+            "prog_char_em",
+            "Progress bar empty char",
+            lambda: _BC_NAME(ProgCharEm),
+            "text",
+            None,
+            _apply_prog_char_em,
+        ),
+        (
+            "sensitivity",
+            "Sensitivity (0.5-5.0)",
+            lambda: Sensitivity,
+            "text",
+            None,
+            _apply_sensitivity_io,
+        ),
+        (
+            "ad_skip",
+            "Ad skip",
+            lambda: AD_SKIP,
+            "confirm",
+            None,
+            lambda v: _apply_bool("AD_SKIP", "Ad skip set to", v),
+        ),
+        (
+            "down_on_like",
+            "Auto-download on like",
+            lambda: DOWN_ON_LIKE,
+            "confirm",
+            None,
+            lambda v: _apply_bool("DOWN_ON_LIKE", "Auto-download on like set to", v),
+        ),
+        (
+            "notify",
+            "Desktop notifications",
+            lambda: NOTIFY,
+            "confirm",
+            None,
+            lambda v: _apply_bool("NOTIFY", "Desktop notifications set to", v),
+        ),
+        (
+            "max_search",
+            "Max search results (1-20)",
+            lambda: MAX_SEARCH_RESULTS,
+            "text",
+            None,
+            lambda v: _apply_int(
+                "MAX_SEARCH_RESULTS", v, 1, 20, "Max search results changed"
+            ),
+        ),
+        (
+            "max_radio",
+            "Max radio tracks (1-50)",
+            lambda: MAX_RESULTS_RADIO,
+            "text",
+            None,
+            lambda v: _apply_int(
+                "MAX_RESULTS_RADIO", v, 1, 50, "Max radio tracks changed"
+            ),
+        ),
     ]
-    if Display != "rich":
-        rows = [r for r in rows if r[0] != "progress_columns"]
+    if Display == "rich":
+        rows = [
+            r
+            for r in rows
+            if r[0]
+            not in (
+                "bar_width",
+                "bar_height",
+                "bar_spacing",
+                "bar_char",
+                "prog_char",
+                "prog_char_em",
+            )
+        ]
+    else:
+        rows = [r for r in rows if r[0] not in ("progress_columns", "progress_type")]
     return rows
 
 
@@ -1521,16 +1785,14 @@ def _interactive_config():
             "name": "setting",
             "message": "Which setting?",
             "choices": [
-                questionary.Choice(
-                    title=f"{label}  (current: {current()})", value=key
-                )
+                questionary.Choice(title=f"{label}  (current: {current()})", value=key)
                 for key, label, current, *_ in rows
             ],
         }
     ]
     try:
         answers = questionary.prompt(screen, style=py_style)
-    except (KeyboardInterrupt, EOFError):
+    except KeyboardInterrupt, EOFError:
         answers = None
     if not answers:
         print(f"\n{GREY}Config cancelled. Nothing changed.{Reset}")
@@ -1553,12 +1815,32 @@ def _interactive_config():
         question["default"] = str(current())
     try:
         edit = questionary.prompt([question], style=py_style)
-    except (KeyboardInterrupt, EOFError):
+    except KeyboardInterrupt, EOFError:
         edit = None
     if not edit or edit.get("value") is None:
         print(f"\n{GREY}{label} unchanged.{Reset}")
         return
-    msg = apply(edit["value"])
+    value = edit["value"]
+    if value == "Custom…":
+        try:
+            custom = questionary.prompt(
+                [
+                    {
+                        "type": "text",
+                        "name": "value",
+                        "message": "Custom spinner — a rich spinner name or 1-16 characters",
+                        "default": str(current()),
+                    }
+                ],
+                style=py_style,
+            )
+        except KeyboardInterrupt, EOFError:
+            custom = None
+        if not custom or custom.get("value") is None or not str(custom["value"]).strip():
+            print(f"\n{GREY}Spinner unchanged.{Reset}")
+            return
+        value = str(custom["value"]).strip()
+    msg = apply(value)
     if msg:
         print(msg)
 

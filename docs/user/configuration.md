@@ -13,7 +13,9 @@ color names, or `config <target> <value>` for one-off changes.
 | `primary` (pri)   | Color for online songs                     | any color name                                       |
 | `secondary` (sec) | Color for offline songs                    | any color name                                       |
 | `tertiary` (ter)  | Color for labels                           | any color name                                       |
-| `display`         | Playback display mode                      | `none`, `bars`, `lyrics`, `progress`                   |
+| `display`         | Playback display mode                      | `none`, `bars`, `lyrics`, `progress`, `rich`            |
+| `progress_type`   | Rich progress layout (when `display rich`) | `default`, `download`, `pulse`, `custom`                |
+| `rich_spinner`    | Rich spinner (when `display rich`)         | any name from `python -m rich.spinner`, or custom chars |
 | `barwidth`        | Number of bars in the visualizer           | 4–80                                                 |
 | `barheight`       | Height of bars                             | 10–90                                                |
 | `barspacing`      | Space between bars                         | 0–4, or `min` / `fit` / `max`                        |
@@ -40,6 +42,8 @@ Settings persist to `~/.flow/config.json`:
   "secondary": "purple",
   "tertiary": "blue",
   "display": "bars",
+  "progress_columns": ["bar", "percentage", "time_remaining"],
+  "progress_type": "default",
   "bar_width": 20,
   "bar_height": 40,
   "bar_spacing": 1,
@@ -47,6 +51,8 @@ Settings persist to `~/.flow/config.json`:
   "prog_char": "█",
   "prog_char_em": "░",
   "sensitivity": 1.0,
+  "spinner": "|/-\\",
+  "rich_spinner": "dots",
   "dev": false,
   "ffmpeg": true,
   "ad_skip": true,

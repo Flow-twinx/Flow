@@ -1,5 +1,13 @@
 <div align="center">
-  <img src="web/templates/Logo.png" alt="Flow logo" width="120"/>
+
+  <pre>
+███████╗██╗      ██████╗ ██╗    ██╗
+██╔════╝██║     ██╔═══██╗██║    ██║
+█████╗  ██║     ██║   ██║██║ █╗ ██║
+██╔══╝  ██║     ██║   ██║██║███╗██║
+██║     ███████╗╚██████╔╝╚███╔███╔╝
+╚═╝     ╚══════╝ ╚═════╝  ╚══╝╚══╝
+  </pre>
 
   <h1>Flow</h1>
 
@@ -8,7 +16,7 @@
   <p>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
     <img alt="Python 3.14+" src="https://img.shields.io/badge/python-3.14%2B-3776AB.svg?logo=python&logoColor=white">
-    <img alt="Platform: Linux, macOS" src="https://img.shields.io/badge/platform-linux%20%7C%20macos-lightgrey.svg">
+    <img alt="Platform: Linux, macOS" src="https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20-lightgrey.svg">
   </p>
 
   <p>
@@ -38,6 +46,7 @@ in the TUI and it is liked in the web GUI and the shell too.
 ## Features
 
 **Playback**
+
 - Automatic online/offline detection with a manual `switch`
 - YouTube search and streaming, radio mixes and JioSaavn (`savan`)
 - Offline library with search, tab completion and liked songs
@@ -45,6 +54,7 @@ in the TUI and it is liked in the web GUI and the shell too.
 - Audio-reactive spectrum visualizer, or synced lyrics, while a track plays
 
 **Library**
+
 - Downloads from YouTube (`-d`) as webm, opus, m4a or mp3
 - Playlists: create, edit, merge, dedupe, reorder, and export or import `.m3u`
 - Like and unlike, with optional auto-download on like
@@ -53,23 +63,26 @@ in the TUI and it is liked in the web GUI and the shell too.
 - Play by tag: `lang punjabi` or `artist karan` plays matching songs from your library
 
 **Lyrics**
+
 - Synced lines from [LRCLIB](https://lrclib.net), with YouTube Music as a fallback
 - Printed in the terminal in `lyrics` display mode, or scrolled with the track in the web GUI
 
 **Interfaces**
+
 - An interactive CLI shell, a full-screen TUI and a local web GUI
 - `flow-min`, a plain non-interactive CLI for scripts, ssh and agents (see below)
 
 **Extensible**
+
 - Community plugins that run as isolated processes and talk to Flow through a typed, host-validated API
 
 ## Interfaces
 
-| Command    | What it is                                                                 |
-| ---------- | -------------------------------------------------------------------------- |
-| `flow`     | Interactive shell with commands, tab completion and one-shot playback flags |
-| `flow-tui` | Full-screen [Textual](https://textual.textualize.io) UI with a track list and Now Playing panel |
-| `flow-web` | Local web GUI served on `127.0.0.1`, on the first free port from 5000 to 5005 |
+| Command    | What it is                                                                                                                      |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `flow`     | Interactive shell with commands, tab completion and one-shot playback flags                                                     |
+| `flow-tui` | Full-screen [Textual](https://textual.textualize.io) UI with a track list and Now Playing panel                                 |
+| `flow-web` | Local web GUI served on `127.0.0.1`, on the first free port from 5000 to 5005                                                   |
 | `flow-min` | Plain output, no colour, spinner or prompt: one line or one `--json` document per command, documented exit codes, safe in pipes |
 
 All four share the same library and settings, and playback control works

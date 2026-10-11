@@ -1,26 +1,3 @@
-"""Typed RPC dispatch for the Flow daemon socket.
-
-This runs *inside* the resident daemon, in-process. Every method resolves to a
-real validated backend function — there is no plugin-facing passthrough that
-lets a plugin run arbitrary `flow` flags. The method surface is small and
-typed (`docs/dev/plugins.md`):
-
-- state    current_track / is_playing / status   (file reads)
-- data     library_stats / history               (SQLite reads via backend.library
--                                                  and backend.history)
-- player   pause / resume / next / previous / seek / seek_back / like /
-           unlike / download                (host-routed player control)
-- players  players — live player registry (kind, pid, port)
-- config   get_config / get_configs / set_config   (PLUGIN_SAFE_KEYS enforced)
-- ui       set_theme / list_themes / set_spinner
-- raw      raw_cli — only when the plugin is installed with ``"raw": true``
-           in plugin.json or FLOW_PLUGIN_RAW=1 was set by the launcher
-- events   connection-level event registry; server can push ``event`` frames
-
-Generic ``control(*flow_args)`` passthrough is gone. `raw_cli` is the only
-arbitrary flag surface, and it's gated host-side.
-"""
-
 import json
 import os
 import pathlib
