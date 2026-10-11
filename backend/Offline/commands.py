@@ -108,7 +108,7 @@ COMMANDS = {
     "rename": "Rename a downloaded song (alias: re)",
     "lang": "Play songs by language tag | lang <tag> | -s shuffle",
     "artist": "Play songs by artist | artist <name> | -s shuffle",
-    "tags": "Library tags | tags (editor) | tags list/add/remove/rename/delete",
+    "tags": "Library tags | tags (editor) | tags list/add/remove/rename/delete (-m for multi add/remove)",
     "playlist": "Manage playlists | create add remove list play rename move dup merge sort clear dedupe info export import (-m for multi add/remove) (alias: plist)",
     "switch": "Switch to Online mode (checks connection)",
     "help": "Show this help message",
@@ -938,7 +938,7 @@ def list_tags():
     custom = library.all_song_tags()
     if not langs and not artists and not custom:
         e("No tags yet")
-        m("  Try: tags add <song> <tag>  (bare `tags` opens the editor)")
+        m("  Try: tags add <song> <tag> | tags add -m <tag>  (bare `tags` opens the editor)")
         return
     if langs:
         m("\nLanguages:")
@@ -1297,6 +1297,52 @@ def tags_remove_song(extra):
         m(f"     Removed '{tag}' from '{_truncate(path)}'")
 
 
+def tags_add_many(extra):
+    """`tags add -m <tag>` tags every song you checkbox-pick."""
+    if not extra:
+        e("Usage: tags add -m <tag>")
+        return
+    tag = " ".join(extra).strip()
+    if not tag:
+        e("Usage: tags add -m <tag>")
+        return
+    ids = _pick_songs("Which songs get the tag?")
+    if ids is None:
+        e("     No songs picked (needs an interactive terminal)")
+        return
+    if not ids:
+        m("    No songs picked")
+        return
+    done = 0
+    for vid in ids:
+        if library.set_song_tag(vid, tag, True):
+            done += 1
+    m(f"     Tagged {done} song(s) with '{tag}'")
+
+
+def tags_remove_many(extra):
+    """`tags remove -m <tag>` takes a tag off every song you checkbox-pick."""
+    if not extra:
+        e("Usage: tags remove -m <tag>")
+        return
+    tag = " ".join(extra).strip()
+    if not tag:
+        e("Usage: tags remove -m <tag>")
+        return
+    ids = _pick_songs("Which songs lose the tag?")
+    if ids is None:
+        e("     No songs picked (needs an interactive terminal)")
+        return
+    if not ids:
+        m("    No songs picked")
+        return
+    done = 0
+    for vid in ids:
+        if library.set_song_tag(vid, tag, False):
+            done += 1
+    m(f"     Removed '{tag}' from {done} song(s)")
+
+
 def tags_rename(extra):
     """`tags rename <tag> <new>` renames a free-form tag on every song."""
     if len(extra) < 2:
@@ -1335,7 +1381,7 @@ def _one_song(query):
 
 
 def tags_cmd(extra, args):
-    """`tags` opens the tag editor; `tags list|add|remove|rename|delete` are scriptable."""
+    """`tags` opens the tag editor; `tags list|add|remove|rename|delete` are scriptable (-m picks multiple songs)."""
     if not extra:
         if sys.stdin.isatty():
             edit_tags()
@@ -1344,20 +1390,28 @@ def tags_cmd(extra, args):
         return
     action = extra[0].lower()
     rest = extra[1:]
+    multi = getattr(args, "multi", False)
     if action == "list":
         list_tags()
     elif action == "add":
-        tags_add_song(rest)
+        if multi:
+            tags_add_many(rest)
+        else:
+            tags_add_song(rest)
     elif action == "remove":
-        tags_remove_song(rest)
+        if multi:
+            tags_remove_many(rest)
+        else:
+            tags_remove_song(rest)
     elif action == "rename":
         tags_rename(rest)
     elif action == "delete":
         tags_delete(rest)
     else:
         e(f"Unknown tags action: {action}")
-        m("  Try: tags | tags list | tags add <song> <tag>")
-        m("       tags remove <song> <tag> | tags rename <tag> <new> | tags delete <tag>")
+        m("  Try: tags | tags list | tags add <song> <tag> | tags add -m <tag>")
+        m("       tags remove <song> <tag> | tags remove -m <tag>")
+        m("       tags rename <tag> <new> | tags delete <tag>")
 
 
 def switch_mode():
