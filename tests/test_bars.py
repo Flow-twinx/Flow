@@ -317,8 +317,10 @@ def test_rich_display_active_gates_on_display(monkeypatch, restore_config_global
 
 def test_rich_panel_renders_track_metadata(capsys, restore_config_globals):
     import backend.rich_display as rich_display
+    from rich.console import Console
 
     disp = rich_display.NowPlaying("First", duration=60)
+    disp.console = Console(width=80)  # pinned: subtitle truncation is width-sensitive
     disp.start()
     disp.set_track(
         "Second", artist="Artist", album="Album", duration=120, status="playing"
