@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            spec: packaging/flow.linux.spec
+            artifact: flow-linux
+            binary: dist/flow
+          - os: macos-latest
+            spec: packaging/flow.macos.spec
+            artifact: flow-macos
+            binary: dist/flow
+          - os: windows-latest
+            spec: packaging/flow.windows.spec
+            artifact: flow-windows.exe
+            binary: dist/flow.exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.12.x"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install system deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            vlc \
+            libgirepository-2.0-dev \
+            libcairo2-dev \
+            gobject-introspection \
+            libdbus-1-dev \
+            libportaudio2
+
+      - name: Install VLC (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install --cask vlc
+          echo "VLC_PLUGIN_PATH=/Applications/VLC.app/Contents/MacOS/plugins" >> "$GITHUB_ENV"
+
+      - name: Install VLC (Windows, portable)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $vlcZip = "$env:RUNNER_TEMP\vlc.zip"
+          $vlcDir = "$env:RUNNER_TEMP\vlc"
+          curl.exe -L --fail --retry 3 -o $vlcZip "https://get.videolan.org/vlc/3.0.21/win64/vlc-3.0.21-win64.zip"
+          New-Item -ItemType Directory -Force -Path $vlcDir | Out-Null
+          tar.exe -xf $vlcZip -C $vlcDir
+          $vlcRoot = (Get-ChildItem $vlcDir -Directory | Select-Object -First 1).FullName
+          "PYTHON_VLC_LIB_PATH=$vlcRoot\libvlc.dll" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VLC_PLUGIN_PATH=$vlcRoot\plugins" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Sync project
+        run: uv sync --group dev
+
+      - name: Build onefile binary
+        run: uv run pyinstaller --noconfirm --clean ${{ matrix.spec }}
+
+      - name: Smoke test the binary
+        run: |
+          ${{ matrix.binary }} --check
+          ${{ matrix.binary }} --status
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.binary }}
+
+      - name: Stage release asset with OS-specific name
+        run: cp "${{ matrix.binary }}" "dist/${{ matrix.artifact }}"
+
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/${{ matrix.artifact }}
+          overwrite_files: true

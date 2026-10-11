@@ -80,9 +80,16 @@ def restore_config_globals():
     config.ProgChar = "\u2588"
     config.ProgCharEm = "\u2591"
     config.Sensitivity = 1.0
+    config.SPINNER = "|/-\\"
+    config.RichSpinner = "dots"
+    config.ProgressType = "default"
     config.Primary = config.CYAN
     config.Secondary = config.PURPLE
     config.Tertiary = config.BLUE
+    config._STYLE["primary"] = "cyan"
+    config._STYLE["secondary"] = "purple"
+    config._STYLE["tertiary"] = "blue"
+    config.ProgressColumns = ["bar", "percentage", "time_remaining"]
     config.FORMAT = "webm"
     config.MAX_SEARCH_RESULTS = 5
     config.MAX_RESULTS_RADIO = 35
@@ -96,14 +103,22 @@ def _fake_interactive(monkeypatch, tmp_path, answers_seq):
 
     answers = iter(answers_seq)
     asked = []
+    collected = {}
 
     class _FakePrompt:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
 
-        def unsafe_ask(self):
-            asked.append(self.kwargs.get("name"))
-            return next(answers)
+        def unsafe_ask(self, patch_stdout=None):
+            when = self.kwargs.get("when")
+            if when is not None and not when(collected):
+                return None
+            name = self.kwargs.get("name")
+            value = next(answers)
+            if name is not None:
+                collected[name] = value
+            asked.append(name)
+            return value
 
     monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "config.json")
     monkeypatch.setattr(
@@ -115,81 +130,129 @@ def _fake_interactive(monkeypatch, tmp_path, answers_seq):
     return asked
 
 
-def test_interactive_config_offers_prog_chars_for_progress(
+def test_interactive_config_picks_one_setting(
     monkeypatch, tmp_path, capsys, restore_config_globals
 ):
-    asked = _fake_interactive(
-        monkeypatch,
-        tmp_path,
-        [
-            "progress", "cyan", "purple", "blue", "webm",
-            "|", "-",
-            True, True, True, "5", "35",
-        ],
-    )
-    # display, 3 colors, format, prog_char, prog_char_em, 3 confirms,
-    # max_search, max_radio — the visualizer questions (width/height/
-    # spacing/char/sensitivity) must NOT fire for progress.
-    assert len(asked) == 12
-    out = _clean(capsys.readouterr().out)
-    assert "Progress char changed to |" in out
-    assert "Progress empty char changed to -" in out
-    assert "Bar width" not in out
-    assert "Bar char changed" not in out
-    assert "Bar height" not in out
-    assert "Bar spacing" not in out
-    assert "Sensitivity" not in out
-    assert config.Display == "progress"
-    assert config.ProgChar == "|"
-    assert config.ProgCharEm == "-"
-
-
-def test_interactive_config_hides_bar_chars_for_lyrics(
-    monkeypatch, tmp_path, restore_config_globals
-):
-    asked = _fake_interactive(
-        monkeypatch,
-        tmp_path,
-        [
-            "lyrics", "cyan", "purple", "blue", "webm",
-            True, True, True, "5", "35",
-        ],
-    )
-    # display, 3 colors, format, 3 confirms, max_search, max_radio
-    assert len(asked) == 10
-    assert config.Display == "lyrics"
-
-
-def test_interactive_config_keeps_visualizer_options_for_bars(
-    monkeypatch, tmp_path, capsys, restore_config_globals
-):
-    asked = _fake_interactive(
-        monkeypatch,
-        tmp_path,
-        [
-            "bars", "cyan", "purple", "blue", "webm",
-            "30", "40", "1", "|", "1.0",
-            True, True, True, "5", "35",
-        ],
-    )
-    assert len(asked) == 15
+    asked = _fake_interactive(monkeypatch, tmp_path, ["bar_width", "30"])
+    assert len(asked) == 2  # one pick + one value edit
     out = _clean(capsys.readouterr().out)
     assert "Bar width changed to 30" in out
-    assert "Bar height changed to 40" in out
-    assert "Bar spacing changed to 1" in out
-    assert "Bar char changed to |" in out
-    assert "Sensitivity changed to 1.0" in out
-    assert "Progress char" not in out
     assert config.BarWidth == 30
-    assert config.BarHeight == 40
-    assert config.BarSpacing == 1
-    assert config.BarChar == "|"
+    # nothing else was edited
+    assert config.Display == "bars"
+    assert config.ProgChar == "\u2588"
+    assert config.ProgCharEm == "\u2591"
+
+
+def test_interactive_config_picks_display(
+    monkeypatch, tmp_path, capsys, restore_config_globals
+):
+    _fake_interactive(monkeypatch, tmp_path, ["display", "rich"])
+    out = _clean(capsys.readouterr().out)
+    assert "Display mode changed to rich" in out
+    assert config.Display == "rich"
+
+
+def test_interactive_config_picks_prog_char(
+    monkeypatch, tmp_path, capsys, restore_config_globals
+):
+    _fake_interactive(monkeypatch, tmp_path, ["prog_char", "|"])
+    out = _clean(capsys.readouterr().out)
+    assert "Progress char changed to |" in out
+    assert config.ProgChar == "|"
+
+
+def test_interactive_config_picks_theme(
+    monkeypatch, tmp_path, capsys, restore_config_globals
+):
+    _fake_interactive(monkeypatch, tmp_path, ["theme", "sunset"])
+    out = _clean(capsys.readouterr().out)
+    assert "Theme changed to 'sunset'" in out
+    assert config._STYLE["primary"] == "orange1"
+    assert config._STYLE["secondary"] == "pink1"
+
+
+def test_interactive_config_picks_confirm(
+    monkeypatch, tmp_path, capsys, restore_config_globals
+):
+    _fake_interactive(monkeypatch, tmp_path, ["notify", False])
+    out = _clean(capsys.readouterr().out)
+    assert "Desktop notifications set to False" in out
+    assert config.NOTIFY is False
+
+
+def test_interactive_config_lists_every_setting(restore_config_globals):
+    config.Display = "rich"
+    rows = config._interactive_rows()
+    keys = {r[0] for r in rows}
+    assert len(rows) == len(keys)  # no duplicate keys
+    for key in (
+        "display", "primary", "secondary", "tertiary", "theme", "spinner",
+        "progress_type", "progress_columns", "format", "sensitivity", "ad_skip",
+        "down_on_like", "notify", "max_search", "max_radio",
+    ):
+        assert key in keys
+    # bar settings belong to the `bars`/plain-text displays, not rich
+    for key in (
+        "bar_width", "bar_height", "bar_spacing", "bar_char",
+        "prog_char", "prog_char_em",
+    ):
+        assert key not in keys
+
+
+def test_interactive_config_hides_rich_columns_outside_rich(restore_config_globals):
+    config.Display = "bars"
+    keys = {r[0] for r in config._interactive_rows()}
+    assert "progress_columns" not in keys
+    assert "progress_type" not in keys
+    assert "display" in keys
+    assert "bar_width" in keys
+    assert "spinner" in keys
 
 
 def test_display_mode_accepts_progress():
     assert "progress" in config._DISPLAY_MODES
     msg = config._apply_display("progress")
     assert "changed to progress" in msg
+
+
+def test_display_mode_accepts_rich():
+    assert "rich" in config._DISPLAY_MODES
+    msg = config._apply_display("rich")
+    assert "changed to rich" in msg
+
+
+def test_progress_columns_accept_rich_options():
+    assert all(c in config._RICH_COLUMN_NAMES for c in config.ProgressColumns)
+    msg = config._apply_progress_columns("bar,percentage")
+    assert "set to" in msg
+    assert config.ProgressColumns == ["bar", "percentage"]
+    other = config._apply_progress_columns("spinner time_remaining")
+    assert "set to" in other
+    bad = config._apply_progress_columns("bogus")
+    assert "Unknown" in bad
+    assert "bar" in bad and "spinner" in bad
+
+
+def test_rich_color_styles_accepted():
+    msg = config._apply_color("primary", "#ff8800")
+    assert "changed to" in msg
+    assert config._STYLE["primary"] == "#ff8800"
+    bad = config._apply_color("secondary", "not_a_color")
+    assert "Unknown" in bad
+
+
+def test_rich_display_panel_renders(capsys, restore_config_globals):
+    import backend.rich_display as rich_display
+
+    disp = rich_display.NowPlaying("Some Track", artist="Artist", duration=120)
+    disp.start()
+    disp.update(30.0, paused=True)
+    disp.stop()
+    out = capsys.readouterr().out
+    assert "Some Track" in out
+    assert "Artist" in out
+    assert "[Paused]" in out
 
 
 def test_render_progress_writes_live_line(capsys):
@@ -218,3 +281,201 @@ def test_youtube_progress_hook_renders_bar(capsys):
 def test_youtube_progress_hook_ignores_other_statuses(capsys):
     youtube.progress_hook({"status": "finished"})
     assert capsys.readouterr().out == ""
+
+
+def test_rich_progress_columns_dedupe(restore_config_globals):
+    import backend.rich_display as rich_display
+
+    config.ProgressColumns = ["bar", "task", "percentage"]
+    columns = rich_display._progress().columns
+    names = [type(c).__name__ for c in columns]
+    assert names.count("TaskProgressColumn") == 1
+    assert "BarColumn" in names
+
+
+def test_rich_panel_width_is_small(restore_config_globals):
+    import backend.rich_display as rich_display
+    from rich.console import Console
+
+    disp = rich_display.NowPlaying("Track", duration=60)
+    disp.console = Console(width=100)
+    assert 30 <= disp._panel_width() <= 80
+    disp.console = Console(width=80)
+    assert disp._panel_width() == 32
+
+
+def test_rich_display_active_gates_on_display(monkeypatch, restore_config_globals):
+    import backend.rich_display as rich_display
+    import sys
+
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    config.Display = "bars"
+    assert rich_display.active() is False
+    config.Display = "rich"
+    assert rich_display.active() is True
+
+
+def test_rich_panel_renders_track_metadata(capsys, restore_config_globals):
+    import backend.rich_display as rich_display
+    from rich.console import Console
+
+    disp = rich_display.NowPlaying("First", duration=60)
+    disp.console = Console(width=80)  # pinned: subtitle truncation is width-sensitive
+    disp.start()
+    disp.set_track(
+        "Second", artist="Artist", album="Album", duration=120, status="playing"
+    )
+    disp.update(5.0)
+    disp.stop()
+    out = capsys.readouterr().out
+    assert "Second" in out
+    assert "Artist" in out
+    assert "Album" in out
+    assert "playin" in out  # subtitle truncates at the small width
+
+
+def test_connection_spinner_delegates_to_rich(monkeypatch, restore_config_globals):
+    import cli.main as cli_main
+    import backend.rich_display as rich_display
+
+    calls = []
+    monkeypatch.setattr(rich_display, "active", lambda: True)
+    monkeypatch.setattr(
+        rich_display, "spinner_run", lambda stop, label="": calls.append(label)
+    )
+    config.Display = "rich"
+    cli_main._spinner(lambda: True)
+    assert calls == ["Checking connection"]
+
+
+def test_search_spinner_delegates_to_rich(monkeypatch, restore_config_globals):
+    from backend.Online import commands as online_commands
+    import backend.rich_display as rich_display
+
+    calls = []
+    monkeypatch.setattr(rich_display, "active", lambda: True)
+    monkeypatch.setattr(
+        rich_display, "spinner_run", lambda stop, label="": calls.append(label)
+    )
+    config.Display = "rich"
+    online_commands._spinner(lambda: True, label="Searching")
+    assert calls == ["Searching"]
+
+
+def test_download_hook_delegates_to_rich(monkeypatch, restore_config_globals):
+    import backend.rich_display as rich_display
+
+    calls = []
+    monkeypatch.setattr(rich_display, "active", lambda: True)
+    monkeypatch.setattr(
+        rich_display,
+        "download_update",
+        lambda got, total: calls.append((got, total)),
+    )
+    youtube.progress_hook(
+        {
+            "status": "downloading",
+            "downloaded_bytes": 5_000_000,
+            "total_bytes": 10_000_000,
+        }
+    )
+    assert calls == [(5_000_000, 10_000_000)]
+
+
+def test_progress_type_applies_presets(restore_config_globals):
+    msg = config._apply_progress_type("default")
+    assert "changed to default" in msg
+    assert config.ProgressType == "default"
+    assert config.ProgressColumns == ["bar", "percentage", "time_remaining"]
+    config._apply_progress_type("download")
+    assert config.ProgressColumns == [
+        "download", "file_size", "total_size", "transfer_speed",
+    ]
+    msg = config._apply_progress_type("pulse")
+    assert "changed to pulse" in msg
+    assert config.ProgressColumns == ["spinner"]
+    config._apply_progress_type("default")
+
+
+def test_progress_type_rejects_unknown(restore_config_globals):
+    bad = config._apply_progress_type("bogus")
+    assert "Unknown progress type" in bad
+    assert config.ProgressType == "default"
+
+
+def test_progress_columns_edit_marks_custom(restore_config_globals):
+    config._apply_progress_type("download")
+    config._apply_progress_columns("bar,time_remaining")
+    assert config.ProgressType == "custom"
+    assert config.ProgressColumns == ["bar", "time_remaining"]
+
+
+def test_progress_type_custom_keeps_columns(restore_config_globals):
+    config._apply_progress_columns("bar,time_remaining")
+    msg = config._apply_progress_type("custom")
+    assert "custom" in msg
+    assert config.ProgressType == "custom"
+    assert config.ProgressColumns == ["bar", "time_remaining"]
+    config._apply_progress_type("default")
+
+
+def test_rich_spinner_applies_and_persists(restore_config_globals):
+    msg = config._apply_rich_spinner("dots5")
+    assert "dots5" in msg
+    assert config.RichSpinner == "dots5"
+    saved = json.loads(pathlib.Path(config.CONFIG_FILE).read_text())
+    assert saved["rich_spinner"] == "dots5"
+    config.RichSpinner = "bounce"
+    config._load_config()
+    assert config.RichSpinner == "dots5"  # loaded back from file
+    config._apply_rich_spinner("dots")
+
+
+def test_rich_spinner_rejects_empty(restore_config_globals):
+    bad = config._apply_rich_spinner("")
+    assert "Rich spinner must" in bad
+    assert config.RichSpinner == "dots"
+
+
+def test_interactive_config_picks_progress_type(
+    monkeypatch, tmp_path, capsys, restore_config_globals
+):
+    config.Display = "rich"
+    _fake_interactive(monkeypatch, tmp_path, ["progress_type", "download"])
+    assert config.ProgressType == "download"
+    assert config.ProgressColumns == [
+        "download", "file_size", "total_size", "transfer_speed",
+    ]
+
+
+def test_interactive_config_spinner_custom(
+    monkeypatch, tmp_path, capsys, restore_config_globals
+):
+    config.Display = "rich"
+    _fake_interactive(monkeypatch, tmp_path, ["spinner", "Custom…", "dots6"])
+    assert config.RichSpinner == "dots6"
+    out = _clean(capsys.readouterr().out)
+    assert "Rich spinner set to 'dots6'" in out
+
+
+def test_spinner_name_validates(restore_config_globals):
+    import backend.rich_display as rich_display
+
+    config.RichSpinner = "dots"
+    assert rich_display._spinner_name() == "dots"
+    config.RichSpinner = "bounce"
+    assert rich_display._spinner_name() == "bounce"
+    config.RichSpinner = "|/-\\"
+    assert rich_display._spinner_name() == "dots"  # custom chars fall back
+    config.RichSpinner = "dots"
+
+
+def test_rich_spinner_column_builds(restore_config_globals):
+    import backend.rich_display as rich_display
+
+    config.ProgressType = "pulse"
+    config.ProgressColumns = list(config._PROGRESS_TYPES["pulse"])
+    columns = rich_display._progress().columns
+    assert any(type(c).__name__ == "SpinnerColumn" for c in columns)
+    config.ProgressType = "default"
+    config.ProgressColumns = list(config._PROGRESS_TYPES["default"])

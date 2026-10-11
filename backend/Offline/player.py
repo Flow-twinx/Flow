@@ -1,18 +1,30 @@
 import atexit
-import curses
-import errno
-import fcntl
 import os
 import pathlib
-import signal
 import sys
-import termios
 import threading
 import time
 
+from backend import (
+    config,
+    history,
+    ipc,
+    keys,
+    library,
+    mpris,
+    platform,
+    rich_display,
+    status,
+    visualizer,
+)
+
+platform.bootstrap_vlc()
 import vlc
 
-from backend import config, history, library, mpris, status, visualizer
+try:
+    import curses
+except ImportError:
+    curses = None
 
 _truncate_title = config._truncate_title
 
@@ -32,10 +44,8 @@ ter = lambda t: print(f"{T}{t}{R}")
 
 _paused = False
 _player = None
-_original_term = None
+_reader = None
 _radio_active = False
-_stop_reader = threading.Event()
-_reader_thread = None
 
 _next_req = False
 _prev_req = False
@@ -84,110 +94,81 @@ def _clear_stale_pid():
 atexit.register(_clear_stale_pid)
 
 
-def _sigusr1_toggle(sig, frame):
+def _sigusr1_toggle():
     global _paused
     _paused = not _paused
     if _player:
         _player.pause()
 
 
-def _sigusr2_next(sig, frame):
+def _sigusr2_next():
     global _next_req
     _next_req = True
     if _player:
         _player.stop()
 
 
-def _sigusr3_prev(sig, frame):
+def _sigusr3_prev():
     global _prev_req
     _prev_req = True
     if _player:
         _player.stop()
 
 
-def _sigusr4_stop(sig, frame):
+def _sigusr4_stop():
     global _stop_req
     _stop_req = True
     if _player:
         _player.stop()
 
 
-def _seek_current(sig, frame):
-    delta_ms = config.read_seek()
+def _seek_current(payload=None):
+    delta_ms = (payload or {}).get("delta") if payload else None
+    if delta_ms is None:
+        delta_ms = config.read_seek()
     config.clear_seek()
     if _player and delta_ms:
         cur = _player.get_time()
         if cur is not None and cur >= 0:
-            _player.set_time(max(0, int(cur) + delta_ms))
+            _player.set_time(max(0, int(cur) + int(delta_ms)))
 
 
-def setup_nav_signals():
-    signal.signal(signal.SIGUSR1, _sigusr1_toggle)
-    signal.signal(signal.SIGUSR2, _sigusr2_next)
-    signal.signal(config.SIG_PREV, _sigusr3_prev)
-    signal.signal(config.SIG_STOP_ALL, _sigusr4_stop)
-    signal.signal(config.SIG_SEEK_FWD, _seek_current)
-    signal.signal(config.SIG_SEEK_BWD, _seek_current)
+def _dispatch_action(action, payload=None):
+    if action == "pause":
+        _sigusr1_toggle()
+    elif action == "next":
+        _sigusr2_next()
+    elif action == "prev":
+        _sigusr3_prev()
+    elif action == "stop_all":
+        _sigusr4_stop()
+    elif action in ("seek_fwd", "seek_bwd"):
+        _seek_current(payload)
+
+
+def _install_controls():
+    port = ipc.serve(_dispatch_action, kind="vlc")
+    config.save_pid(os.getpid(), ctl_port=port)
 
 
 def _setup_pause_input():
-    global _original_term
+    global _reader
     if _radio_active:
-        signal.signal(signal.SIGUSR1, _sigusr1_toggle)
-        setup_nav_signals()
         return
-    fd = sys.stdin.fileno()
-    try:
-        _original_term = termios.tcgetattr(fd)
-        new = termios.tcgetattr(fd)
-        new[0] &= ~termios.IXON
-        new[6][termios.VSUSP] = 0
-        termios.tcsetattr(fd, termios.TCSADRAIN, new)
-    except termios.error, OSError:
-        _original_term = None
-        return
-    flags = fcntl.fcntl(fd, fcntl.F_GETFL)
-    fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-    signal.signal(signal.SIGUSR1, _sigusr1_toggle)
-    signal.signal(signal.SIGTSTP, signal.SIG_IGN)
-    setup_nav_signals()
-    _stop_reader.clear()
-    _reader_thread = threading.Thread(target=_input_reader, daemon=True)
-    _reader_thread.start()
+    _reader = keys.RawReader(_on_pause_key)
+    _reader.start()
 
 
-def _input_reader():
-    fd = sys.stdin.fileno()
-    try:
-        while not _stop_reader.is_set():
-            try:
-                ch = os.read(fd, 1)
-            except OSError as ex:
-                if ex.errno == errno.EAGAIN:
-                    time.sleep(0.05)
-                    continue
-                break
-            if ch == b"\x10":
-                os.kill(os.getpid(), signal.SIGUSR1)
-    except OSError:
-        pass
+def _on_pause_key(ch):
+    if ch == 0x10:
+        ipc.dispatch("pause")
 
 
 def _restore_pause_input():
-    global _original_term, _reader_thread
-    _stop_reader.set()
-    if _reader_thread and _reader_thread.is_alive():
-        _reader_thread.join(timeout=0.2)
-    _reader_thread = None
-    if _original_term is not None:
-        try:
-            fd = sys.stdin.fileno()
-            flags = fcntl.fcntl(fd, fcntl.F_GETFL)
-            fcntl.fcntl(fd, fcntl.F_SETFL, flags & ~os.O_NONBLOCK)
-            termios.tcsetattr(fd, termios.TCSADRAIN, _original_term)
-        except termios.error, OSError:
-            pass
-        _original_term = None
+    global _reader
+    if _reader is not None:
+        _reader.stop()
+        _reader = None
 
 
 def _flags_str(args):
@@ -254,10 +235,15 @@ def _attach_vlc_events():
             pass
 
 
-def _display_loop(player, title=None, args=None, next_title=None, stop_check=None, duration=0):
+def _display_loop(
+    player, title=None, args=None, next_title=None, stop_check=None, duration=0,
+    artist="", album="",
+):
     global _paused
     display = config.Display
-    if display in ("bars", "progress") and not (
+    if display == "bars" and (curses is None or not platform.is_linux()):
+        display = "none"
+    if display in ("bars", "progress", "rich") and not (
         sys.stdin.isatty() and sys.stdout.isatty()
     ):
         display = "none"
@@ -287,7 +273,8 @@ def _display_loop(player, title=None, args=None, next_title=None, stop_check=Non
         shuffle = bool(getattr(args, "shuffle", False))
         repeat = bool(getattr(args, "repeat", False))
         visualizer.set_status(
-            title, shuffle=shuffle, repeat=repeat, next_title=next_title
+            title, shuffle=shuffle, repeat=repeat, next_title=next_title,
+            artist=artist, album=album,
         )
 
     if display == "bars":
@@ -305,6 +292,12 @@ def _display_loop(player, title=None, args=None, next_title=None, stop_check=Non
             return
 
     paused_printed = False
+    rich_disp = None
+    if display == "rich":
+        rich_disp = rich_display.NowPlaying(
+            title or "", artist=artist, album=album, duration=duration
+        )
+        rich_disp.start()
     try:
         while player.get_state() not in (vlc.State.Ended, vlc.State.Error):
             if stop_check and stop_check():
@@ -324,6 +317,11 @@ def _display_loop(player, title=None, args=None, next_title=None, stop_check=Non
                             stdscr.refresh()
                         except curses.error:
                             pass
+                    elif display == "rich":
+                        if rich_disp:
+                            rich_disp.update(
+                                max(0.0, player.get_time() / 1000.0), paused=True
+                            )
                     else:
                         sys.stdout.write(f"\r  {T}[Paused]{R}  ")
                         sys.stdout.flush()
@@ -342,6 +340,9 @@ def _display_loop(player, title=None, args=None, next_title=None, stop_check=Non
             _tick_position(player, elapsed)
             if display == "bars":
                 visualizer.draw()
+            elif display == "rich":
+                if rich_disp:
+                    rich_disp.update(elapsed, _paused)
             elif display == "progress":
                 config.render_progress(elapsed, duration)
             try:
@@ -349,6 +350,8 @@ def _display_loop(player, title=None, args=None, next_title=None, stop_check=Non
             except OSError:
                 pass
     finally:
+        if rich_disp is not None:
+            rich_disp.stop()
         if display == "bars":
             visualizer.stop()
             curses.nocbreak()
@@ -395,6 +398,7 @@ def play_file(filepath, title, args=None, flags=None, next_title=None, nav=None)
         media = instance.media_new(str(filepath))
         _player.set_media(media)
         _player.play()
+        _install_controls()
         _setup_pause_input()
 
         duration = 0
@@ -412,14 +416,6 @@ def play_file(filepath, title, args=None, flags=None, next_title=None, nav=None)
         status.update(title, duration, thumbnail=thumb)
         dur_min, dur_sec = divmod(int(duration), 60)
         flags_str = _flags_str(args)
-        if config.Display != "bars":
-            i(f"\nPlaying : {_truncate_title(title)}")
-            m(
-                f"    [{dur_min}:{dur_sec:02d}]  {flags_str}"
-                if flags_str
-                else f"    [{dur_min}:{dur_sec:02d}]"
-            )
-
         video_id = filepath.stem
         artist = ""
         album = ""
@@ -427,6 +423,17 @@ def play_file(filepath, title, args=None, flags=None, next_title=None, nav=None)
         if lib_entry:
             artist = lib_entry.get("artist") or ""
             album = lib_entry.get("album") or ""
+        if config.Display != "bars":
+            i(f"\nPlaying : {_truncate_title(title)}")
+            if artist:
+                m(f"    {artist}")
+            if album:
+                m(f"    {album}")
+            m(
+                f"    [{dur_min}:{dur_sec:02d}]  {flags_str}"
+                if flags_str
+                else f"    [{dur_min}:{dur_sec:02d}]"
+            )
         history.record_play(
             video_id, title, artist, mode="offline", duration=int(duration)
         )
@@ -464,6 +471,8 @@ def play_file(filepath, title, args=None, flags=None, next_title=None, nav=None)
                 next_title=next_title,
                 stop_check=stop_check,
                 duration=duration,
+                artist=artist,
+                album=album,
             )
         except KeyboardInterrupt:
             _player.stop()

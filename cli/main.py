@@ -3,7 +3,6 @@ import json
 import os
 import re
 import shutil
-import signal
 import sys
 import threading
 import time
@@ -13,7 +12,10 @@ from pathlib import Path
 if __name__ == "__main__" and __package__ is None:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from backend import config, shortcuts
+from backend.platform import bootstrap_vlc
+
+bootstrap_vlc()
+from backend import config, platform, shortcuts
 from backend.Offline import commands as _offline_commands
 from backend.Online import commands as _online_commands
 from backend.ping import is_connected
@@ -53,21 +55,20 @@ def _send_web_command(port, command, payload=None):
         return False
 
 
-def _send_control(command, sig, label, payload=None):
-    from backend import registry
+def _send_control(action, label, payload=None):
+    from backend import ipc, registry
 
     entry = registry.resolve("vlc")
     if entry is not None:
         pid = entry["pid"]
-        try:
-            os.kill(pid, sig)
+        if ipc.send(entry, action, payload):
             print(f"{P}{label} (VLC PID: {pid}){R}")
             return
-        except ProcessLookupError:
-            config.clear_pid_if(pid)
+        config.clear_pid_if(pid)
 
     web = registry.resolve("web")
     if web is not None and web.get("port"):
+        command = ipc.WEB_COMMANDS.get(action, action)
         if _send_web_command(web["port"], command, payload):
             print(f"{P}{label} (web player){R}")
             return
@@ -76,6 +77,11 @@ def _send_control(command, sig, label, payload=None):
 
 
 def _spinner(stop):
+    from backend import rich_display
+
+    if rich_display.active():
+        rich_display.spinner_run(stop, "Checking connection")
+        return
     chars = config.SPINNER
     i = 0
     while not stop():
@@ -175,8 +181,12 @@ def _resume(args):
 
 
 def _full_view():
-    """Full-screen now-playing card: clear, logo + a live progress readout
-    that refreshes once a second (Ctrl-C to exit)."""
+    """Full-screen now-playing view; follows the configured display mode
+    (rich live panel, or the bordered progress card). Ctrl-C to exit."""
+    if config.Display == "rich":
+        _full_view_rich()
+        return
+
     from backend import status as _status
 
     def _tty_width(default=96):
@@ -257,6 +267,61 @@ def _full_view():
         print()
 
 
+def _full_view_rich():
+    """`--full` in rich mode: a live rich panel fed from status.json."""
+    from backend import library, rich_display
+    from backend import status as _status
+
+    def _meta(data):
+        vid = _status._vid_from_thumb(data.get("thumbnail", ""))
+        artist = album = ""
+        if vid:
+            entry = library.get(vid) or {}
+            artist = entry.get("artist") or ""
+            album = entry.get("album") or ""
+        return artist, album
+
+    panel = rich_display.NowPlaying("", duration=0)
+    if not sys.stdout.isatty():
+        data = _status._read()
+        artist, album = _meta(data)
+        playing = bool(data.get("playing")) and _status._fresh(data)
+        panel.set_track(
+            data.get("title") or "—",
+            artist,
+            album,
+            int(data.get("duration", 0)),
+            status="playing" if playing else "not playing",
+        )
+        panel.console.print(panel.render(int(data.get("elapsed", 0)), not playing))
+        return
+
+    tui_shell.clear_screen()
+    panel.start()
+    last = None
+    try:
+        while True:
+            data = _status._read()
+            playing = bool(data.get("playing")) and _status._fresh(data)
+            title = data.get("title") or "—"
+            dur = int(data.get("duration", 0))
+            elapsed = int(data.get("elapsed", 0))
+            artist, album = _meta(data)
+            status_text = "playing" if playing else "not playing"
+            key = (title, artist, album, dur, status_text)
+            if key != last:
+                panel.set_track(title, artist, album, dur, status=status_text)
+                last = key
+            panel.update(elapsed, paused=not playing)
+            time.sleep(1)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        panel.stop()
+        tui_shell.clear_screen()
+        print()
+
+
 def _act_current(action):
     from backend import status as _status
 
@@ -297,6 +362,7 @@ def _act_current(action):
 
 
 def main():
+    platform.widen_stdio()
     parser = argparse.ArgumentParser(
         description="Flow Music Player",
         epilog=(
@@ -382,11 +448,6 @@ def main():
         help="download the currently playing song (requires an active player)",
     )
     parser.add_argument(
-        "--meta",
-        action="store_true",
-        help="backfill metadata in library.db for already downloaded songs (temporary)",
-    )
-    parser.add_argument(
         "--summary",
         action="store_true",
         help="play statistics; add -l for the ranked per-song table, -c to clear all plays",
@@ -440,6 +501,9 @@ def main():
     args, unknown = parser.parse_known_args()
 
     if getattr(args, "setup_island", False):
+        if not platform.is_linux():
+            print(f"{config.Muted}--setup-island is Linux-only (Hyprland) and is skipped here{R}")
+            sys.exit(0)
         _setup_island()
         sys.exit(0)
 
@@ -529,34 +593,27 @@ def main():
 
     control_args = []
     if getattr(args, "pause", False):
-        control_args.append(("stop", signal.SIGUSR1, "Toggled pause/resume", None))
+        control_args.append(("pause", "Toggled pause/resume", None))
     if getattr(args, "next", False):
-        control_args.append(("next", signal.SIGUSR2, "Skipped to next track", None))
+        control_args.append(("next", "Skipped to next track", None))
     if getattr(args, "previous", False):
-        control_args.append(
-            ("previous", config.SIG_PREV, "Went to previous track", None)
-        )
+        control_args.append(("prev", "Went to previous track", None))
     if getattr(args, "seek", None) is not None:
-        control_args.append(
-            ("seek", config.SIG_SEEK_FWD, "Seeked forward", getattr(args, "seek"))
-        )
+        control_args.append(("seek_fwd", "Seeked forward", getattr(args, "seek")))
     if getattr(args, "seekb", None) is not None:
-        control_args.append(
-            ("seekb", config.SIG_SEEK_BWD, "Seeked backward", -getattr(args, "seekb"))
-        )
+        control_args.append(("seek_bwd", "Seeked backward", -getattr(args, "seekb")))
     if control_args:
-        for command, sig, label, delta in control_args:
+        for action, label, delta in control_args:
             if delta is not None:
                 from backend import registry
 
-                if registry.resolve("vlc") is not None:
+                if registry.resolve("vlc") is not None or registry.resolve("tui") is not None:
                     config.write_seek(delta * 1000)
                 label = f"{label} {abs(delta)}s"
             _send_control(
-                command,
-                sig,
+                action,
                 label,
-                payload={"delta": delta} if delta is not None else None,
+                payload={"delta": delta * 1000} if delta is not None else None,
             )
         sys.exit(0)
 
@@ -566,8 +623,6 @@ def main():
         sys.exit(_act_current("unlike"))
     if getattr(args, "download", False):
         sys.exit(_act_current("download"))
-    if getattr(args, "meta", False):
-        sys.exit(_online_commands.backfill_metadata())
 
     forced_offline = False
     if getattr(args, "resume", False):

@@ -1,18 +1,18 @@
-import errno
-import fcntl
 import os
 import pathlib
 import random
 import signal
 import sys
-import termios
 import threading
 import time
 
 from backend import (
     config,
     help_detail,
+    ipc,
+    keys,
     library,
+    platform,
     playlist,
     plist_cli,
     shortcuts,
@@ -60,12 +60,15 @@ def _radio_sigquit(sig, frame):
 
 def _fork_bg(label):
     config.kill_stored()
+    if not platform.can_fork():
+        i(f"{label} (background playback is unavailable on this OS)")
+        return True
     pid = os.fork()
     if pid > 0:
         config.save_pid(pid)
         i(f"{label} in background (PID: {pid})")
         return False
-    player.setup_nav_signals()
+    player._install_controls()
     devnull = os.open(os.devnull, os.O_RDWR)
     os.dup2(devnull, 0)
     os.dup2(devnull, 1)
@@ -109,7 +112,7 @@ COMMANDS = {
     "download": "Download audio from YouTube | -f <format> (opus, m4a, mp3, webm)",
     "delete": "Delete a downloaded song (alias: dl-d)",
     "artist": "Play songs by artist | artist <name> | -s shuffle",
-    "tags": "Library tags | tags | tags scan (preview) | tags apply",
+    "tags": "Library tags | tags (editor) | tags list/add/remove/rename/delete",
     "playlist": "Manage playlists | create add remove list play rename move dup merge sort clear dedupe info export import download (-m for multi add/remove)",
     "switch": "Switch to Offline mode",
     "help": "Show this help message",
@@ -181,6 +184,11 @@ def run(cmd: str, extra: list[str], args):
 
 
 def _spinner(stop, label="Searching"):
+    from backend import rich_display
+
+    if rich_display.active():
+        rich_display.spinner_run(stop, label)
+        return
     chars = config.SPINNER
     i = 0
     while not stop():
@@ -1151,57 +1159,27 @@ def radio(extra, args):
             return
 
     old_sigint = signal.signal(signal.SIGINT, _radio_sigint)
-    old_sigquit = signal.signal(signal.SIGQUIT, _radio_sigquit)
-    old_sigusr1 = signal.getsignal(signal.SIGUSR1)
-
-    fd = sys.stdin.fileno()
+    old_sigquit = None
+    old_sigusr1 = None
+    ctl = sys.stdin.fileno()
     tty_fd = None
-    old_term = None
-    old_fd_flags = None
-    try:
-        tty_fd = os.open("/dev/tty", os.O_RDWR)
-        ctl = tty_fd
-    except OSError:
-        ctl = fd
-    try:
-        old_term = termios.tcgetattr(ctl)
-        new = termios.tcgetattr(ctl)
-        new[0] &= ~termios.IXON
-        new[6][termios.VQUIT] = 0x11
-        new[6][termios.VSUSP] = 0
-        termios.tcsetattr(ctl, termios.TCSADRAIN, new)
-        old_fd_flags = fcntl.fcntl(ctl, fcntl.F_GETFL)
-        fcntl.fcntl(ctl, fcntl.F_SETFL, old_fd_flags | os.O_NONBLOCK)
-    except termios.error, OSError:
-        pass
-
-    def _radio_sigusr1(sig, frame):
-        player._sigusr1_toggle(sig, frame)
-
-    signal.signal(signal.SIGUSR1, _radio_sigusr1)
-    signal.signal(signal.SIGTSTP, signal.SIG_IGN)
     player._radio_active = True
 
-    radio_stop = threading.Event()
-
-    def _radio_input_reader():
+    if not platform.is_windows():
+        old_sigquit = signal.signal(signal.SIGQUIT, _radio_sigquit)
+        old_sigusr1 = signal.getsignal(signal.SIGUSR1)
         try:
-            while not radio_stop.is_set():
-                try:
-                    ch = os.read(ctl, 1)
-                except OSError as ex:
-                    if ex.errno == errno.EAGAIN:
-                        time.sleep(0.05)
-                        continue
-                    break
-                if not ch:
-                    break
-                if ch == b"\x10":
-                    os.kill(os.getpid(), signal.SIGUSR1)
+            tty_fd = os.open("/dev/tty", os.O_RDWR)
+            ctl = tty_fd
         except OSError:
             pass
+        signal.signal(signal.SIGTSTP, signal.SIG_IGN)
 
-    radio_reader = threading.Thread(target=_radio_input_reader, daemon=True)
+    def _radio_key(ch):
+        if ch == 0x10:
+            ipc.dispatch("pause")
+
+    radio_reader = keys.RawReader(_radio_key, fd=ctl)
     radio_reader.start()
 
     flags = {"quit": lambda: _radio_quit, "skip": lambda: _radio_skip}
@@ -1268,24 +1246,22 @@ def radio(extra, args):
         _radio_quit = True
     finally:
         player._radio_active = False
-        radio_stop.set()
-        if radio_reader.is_alive():
-            radio_reader.join(timeout=0.2)
-        if old_term is not None:
+        radio_reader.stop()
+        if not platform.is_windows():
+            if tty_fd is not None:
+                try:
+                    os.close(tty_fd)
+                except OSError:
+                    pass
             try:
-                if old_fd_flags is not None:
-                    fcntl.fcntl(ctl, fcntl.F_SETFL, old_fd_flags)
-                termios.tcsetattr(ctl, termios.TCSADRAIN, old_term)
-            except termios.error, OSError:
+                signal.signal(signal.SIGQUIT, old_sigquit)
+            except (ValueError, OSError):
                 pass
-        if tty_fd is not None:
             try:
-                os.close(tty_fd)
-            except OSError:
+                signal.signal(signal.SIGUSR1, old_sigusr1)
+            except (ValueError, OSError):
                 pass
         signal.signal(signal.SIGINT, old_sigint)
-        signal.signal(signal.SIGQUIT, old_sigquit)
-        signal.signal(signal.SIGUSR1, old_sigusr1)
 
 
 def _resolve_fmt(args, extra=None):
@@ -1372,183 +1348,6 @@ def _download_one(entry, fmt):
         i(f"    Downloaded and converted to {fmt}: {_truncate_title(title)}")
     else:
         i(f"    Downloaded: {_truncate_title(title)}")
-
-
-# def backfill_metadata():
-#     ids = library.get_downloaded_ids()
-#     if not ids:
-#         e("     No downloaded songs in the library")
-#         return 1
-#     import yt_dlp
-
-#     i(f"    Fetching metadata for {len(ids)} downloaded songs...")
-#     updated = 0
-#     skipped = 0
-#     failed = 0
-#     for pos, video_id in enumerate(ids, 1):
-#         tag = f"[{pos}/{len(ids)}] {video_id}"
-#         existing = library.get(video_id) or {}
-#         if existing.get("artist") or existing.get("duration"):
-#             skipped += 1
-#             continue
-#         try:
-#             with yt_dlp.YoutubeDL(youtube.ydl_opts_play) as ydl:
-#                 info = ydl.extract_info(
-#                     f"https://www.youtube.com/watch?v={video_id}", download=False
-#                 )
-#         except Exception as exc:
-#             failed += 1
-#             m(f"    {tag}: failed ({exc})")
-#             continue
-#         if not info:
-#             failed += 1
-#             m(f"    {tag}: no metadata returned")
-#             continue
-#         meta = library.meta_from_info(info)
-#         meta["title"] = info.get("title", "")
-#         library.update_meta(video_id, meta)  # saves library.db right here
-#         updated += 1
-#         label = meta.get("title") or video_id
-#         artist = meta.get("artist") or ""
-#         album = f" [{meta['album']}]" if meta.get("album") else ""
-#         dur = meta.get("duration")
-#         dur_s = f" ({dur // 60}:{dur % 60:02d})" if dur else ""
-#         i(
-#             f"    {tag}: {_truncate_title(label)}{dur_s}{album}"
-#             + (f" — {artist}" if artist else "")
-#         )
-#     tail = f" ({skipped} already done, {failed} failed)" if skipped or failed else ""
-#     print(f"\n{P}Backfilled metadata for {updated}/{len(ids)} songs{R}{tail}")
-#     return 0
-
-
-# def backfill_metadata():
-#     files = sorted(
-#         f
-#         for f in config.DOWNLOAD_DIR.rglob("*")
-#         if f.is_file() and f.suffix.lower() in _AUDIO_EXTS
-#     )
-#     if not files:
-#         m("     No downloaded songs found in ~/.flow/downloads")
-#         return 1
-
-#     import yt_dlp
-
-#     i(f"    Rebuilding library entries for {len(files)} downloaded file(s)...")
-#     updated = 0
-#     skipped = 0
-#     failed = 0
-#     with yt_dlp.YoutubeDL(youtube.ydl_opts_play) as ydl:
-#         for pos, f in enumerate(files, 1):
-#             video_id = f.stem
-#             tag = f"[{pos}/{len(files)}] {video_id}"
-#             existing = library.get(video_id) or {}
-#             if (
-#                 existing.get("title")
-#                 or existing.get("artist")
-#                 or existing.get("duration")
-#             ):
-#                 skipped += 1
-#                 continue
-#             try:
-#                 info = ydl.extract_info(
-#                     f"https://www.youtube.com/watch?v={video_id}", download=False
-#                 )
-#             except Exception as exc:
-#                 failed += 1
-#                 m(f"    {tag}: failed ({exc})")
-#                 continue
-#             if not info:
-#                 failed += 1
-#                 m(f"    {tag}: no metadata returned")
-#                 continue
-#             title = info.get("title") or ""
-#             meta = library.meta_from_info(info)
-#             library.track_download(video_id, str(f), title, meta)
-#             try:
-#                 library.download_thumbnail(video_id)
-#             except Exception:
-#                 pass
-#             updated += 1
-#             label = _truncate_title(title) if title else video_id
-#             artist = meta.get("artist") or ""
-#             album = f" [{meta['album']}]" if meta.get("album") else ""
-#             dur = meta.get("duration")
-#             dur_s = f" ({dur // 60}:{dur % 60:02d})" if dur else ""
-#             i(f"    {tag}: {label}{dur_s}{album}" + (f" — {artist}" if artist else ""))
-#     tail = f" ({skipped} already done, {failed} failed)" if skipped or failed else ""
-#     print(f"\n{P}Rebuilt metadata for {updated}/{len(files)} songs{R}{tail}")
-#     return 0
-
-
-def backfill_metadata():
-    files = sorted(
-        f
-        for f in config.DOWNLOAD_DIR.rglob("*")
-        if f.is_file() and f.suffix.lower() in _AUDIO_EXTS
-    )
-    if not files:
-        m("     No downloaded songs found in ~/.flow/downloads")
-        return 1
-
-    import yt_dlp
-    from Tile import parse_title
-
-    i(f"    Rebuilding library entries for {len(files)} downloaded file(s)...")
-    updated = 0
-    skipped = 0
-    failed = 0
-    with yt_dlp.YoutubeDL(youtube.ydl_opts_play) as ydl:
-        for pos, f in enumerate(files, 1):
-            video_id = f.stem
-            tag = f"[{pos}/{len(files)}] {video_id}"
-            existing = library.get(video_id) or {}
-            if existing.get("title") and existing.get("artist"):
-                skipped += 1
-                continue
-            try:
-                info = ydl.extract_info(
-                    f"https://www.youtube.com/watch?v={video_id}", download=False
-                )
-            except Exception as exc:
-                failed += 1
-                m(f"    {tag}: failed ({exc})")
-                continue
-            if not info:
-                failed += 1
-                m(f"    {tag}: no metadata returned")
-                continue
-
-            raw_title = info.get("title") or ""
-            meta = library.meta_from_info(info)
-            parsed = parse_title(raw_title) if raw_title else {}
-            title = parsed.get("title") or raw_title
-            artist = parsed.get("artist") or meta.get("artist") or ""
-            if title:
-                meta["title"] = title
-            if artist:
-                meta["artist"] = artist
-            library.track_download(video_id, str(f), title, meta)
-            if meta.get("title"):
-                library.update_meta(video_id, meta)
-            try:
-                library.download_thumbnail(video_id)
-            except Exception:
-                pass
-            updated += 1
-            label = _truncate_title(title) if title else video_id
-            album = f" [{meta['album']}]" if meta.get("album") else ""
-            dur = meta.get("duration")
-            dur_s = f" ({dur // 60}:{dur % 60:02d})" if dur else ""
-            extras = parsed.get("extras") or []
-            extra_s = f" {{{', '.join(str(x) for x in extras)}}}" if extras else ""
-            i(
-                f"    {tag}: {label}{dur_s}{album}{extra_s}"
-                + (f" — {artist}" if artist else "")
-            )
-    tail = f" ({skipped} already done, {failed} failed)" if skipped or failed else ""
-    print(f"\n{P}Rebuilt metadata for {updated}/{len(files)} songs{R}{tail}")
-    return 0
 
 
 _AUDIO_EXTS = {

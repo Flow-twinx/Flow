@@ -9,14 +9,18 @@ import sys
 
 CONFIG_FILE = pathlib.Path.home() / ".flow/config.json"
 
-SIG_STOP = _signal.SIGUSR1
-SIG_NEXT = _signal.SIGUSR2
-SIG_PREV = _signal.SIGRTMIN + 2
-SIG_SEEK_FWD = _signal.SIGRTMIN + 3
-SIG_SEEK_BWD = _signal.SIGRTMIN + 4
-SIG_REPEAT = _signal.SIGRTMIN + 5
-SIG_SHUFFLE = _signal.SIGRTMIN + 6
-SIG_STOP_ALL = _signal.SIGRTMIN + 7
+SIG_STOP = getattr(_signal, "SIGUSR1", None)
+SIG_NEXT = getattr(_signal, "SIGUSR2", None)
+if hasattr(_signal, "SIGRTMIN"):
+    SIG_PREV = _signal.SIGRTMIN + 2
+    SIG_SEEK_FWD = _signal.SIGRTMIN + 3
+    SIG_SEEK_BWD = _signal.SIGRTMIN + 4
+    SIG_REPEAT = _signal.SIGRTMIN + 5
+    SIG_SHUFFLE = _signal.SIGRTMIN + 6
+    SIG_STOP_ALL = _signal.SIGRTMIN + 7
+else:
+    SIG_PREV = SIG_SEEK_FWD = SIG_SEEK_BWD = None
+    SIG_REPEAT = SIG_SHUFFLE = SIG_STOP_ALL = None
 
 
 _FLAG_MAP = {"-bg": "bg", "-s": "shuffle", "-d": "download", "-m": "multi"}
@@ -59,56 +63,130 @@ def merge_flags(extra: list[str], args) -> tuple[list[str], object]:
     return rest, args
 
 
-RED = "\033[0;31m"
-GREEN = "\033[0;32m"
-BROWN = "\033[0;33m"
-BLUE = "\033[0;34m"
-PURPLE = "\033[0;35m"
-CYAN = "\033[0;36m"
-GREY = "\033[90m"
-YELLOW = "\033[1;33m"
-WHITE = "\033[1;37m"
-MAROON = "\033[38;5;124m"
-OLIVE = "\033[38;5;100m"
-DARK_KHAKI = "\033[38;5;136m"
-GOLD = "\033[38;5;220m"
-TAN = "\033[38;5;215m"
-SALMON = "\033[38;5;209m"
-CORAL = "\033[38;5;203m"
-HOT_PINK = "\033[38;5;205m"
-VIOLET = "\033[38;5;141m"
-DEEP_PURPLE = "\033[38;5;129m"
-TEAL = "\033[38;5;30m"
-SKY_BLUE = "\033[38;5;117m"
-STEEL_BLUE = "\033[38;5;67m"
-NAVY = "\033[38;5;18m"
-INDIGO = "\033[38;5;54m"
-ORANGE = "\033[38;5;202m"
-PINK = "\033[38;5;205m"
-LIME = "\033[38;5;154m"
+try:
+    from rich.color import ANSI_COLOR_NAMES
+    from rich.console import Console as _RichConsole
+    from rich.style import Style as _RichStyle
+
+    _FORCE = _RichConsole(
+        force_terminal=True, color_system="truecolor", legacy_windows=False
+    )
+    _HAS_RICH = True
+except Exception:
+    ANSI_COLOR_NAMES = {}
+    _FORCE = None
+    _RichStyle = None
+    _HAS_RICH = False
+
+
+def _sgr(style):
+    """Render a rich style string to its ANSI SGR prefix."""
+    if not _HAS_RICH:
+        return ""
+    try:
+        with _FORCE.capture() as cap:
+            _FORCE.print("\u2593", style=str(style), end="")
+        out = cap.get()
+        if out.endswith("\x1b[0m"):
+            out = out[:-4]
+        if out.endswith("\u2593"):
+            out = out[:-1]
+        return out
+    except Exception:
+        return ""
+
+
+def _valid_style(value):
+    """True when `value` is a parseable rich style (named color, #hex, rgb(), ...)."""
+    if not _HAS_RICH:
+        return str(value).lower() in (
+            "red",
+            "green",
+            "yellow",
+            "blue",
+            "purple",
+            "cyan",
+            "grey",
+            "white",
+            "black",
+            "orange",
+            "pink",
+        )
+    try:
+        _RichStyle.parse(str(value))
+        return True
+    except Exception:
+        return False
+
+
+RICH_COLORS = sorted(ANSI_COLOR_NAMES)
+
+RED = _sgr("red")
+GREEN = _sgr("green")
+BROWN = _sgr("dark_goldenrod")
+BLUE = _sgr("blue")
+PURPLE = _sgr("purple")
+CYAN = _sgr("cyan")
+GREY = _sgr("grey62")
+YELLOW = _sgr("bold yellow")
+WHITE = _sgr("bold white")
+MAROON = _sgr("red3")
+OLIVE = _sgr("yellow4")
+DARK_KHAKI = _sgr("dark_khaki")
+GOLD = _sgr("gold1")
+TAN = _sgr("tan")
+SALMON = _sgr("salmon1")
+CORAL = _sgr("orange_red1")
+HOT_PINK = _sgr("hot_pink")
+VIOLET = _sgr("violet")
+DEEP_PURPLE = _sgr("purple3")
+TEAL = _sgr("dark_cyan")
+SKY_BLUE = _sgr("light_sky_blue1")
+STEEL_BLUE = _sgr("steel_blue")
+NAVY = _sgr("navy_blue")
+INDIGO = _sgr("purple4")
+ORANGE = _sgr("orange1")
+PINK = _sgr("pink1")
+LIME = _sgr("spring_green3")
 Reset = "\033[0m"
-
-_COLORS = {
-    k.lower().replace("_", ""): v
-    for k, v in vars().items()
-    if isinstance(v, str) and v.startswith("\033") and k != "Reset"
-}
-
-_COLOR_NAMES = {v: k for k, v in _COLORS.items()}
 
 _TARGET_ALIASES = {
     "pri": "primary",
     "sec": "secondary",
     "ter": "tertiary",
     "spin": "spinner",
+    "richcols": "progress_columns",
+    "rich_columns": "progress_columns",
+    "progtype": "progress_type",
+    "richspin": "rich_spinner",
+    "rich_spin": "rich_spinner",
 }
-_TARGETS = {"primary", "secondary", "tertiary", "display"}
-_DISPLAY_MODES = {"none", "bars", "lyrics", "progress"}
+_TARGETS = {
+    "primary",
+    "secondary",
+    "tertiary",
+    "display",
+    "progress_columns",
+    "progress_type",
+    "rich_spinner",
+}
+_DISPLAY_MODES = {"none", "bars", "lyrics", "progress", "rich"}
 _BAR_SPACING = {"min", "fit", "max"}
 
-Primary = CYAN
-Secondary = PURPLE
-Tertiary = BLUE
+_STYLE = {"primary": "cyan", "secondary": "purple", "tertiary": "blue"}
+
+
+def _render():
+    """Recompute Primary/Secondary/Tertiary ANSI from the chosen rich styles."""
+    global Primary, Secondary, Tertiary
+    Primary = _sgr(_STYLE["primary"]) or CYAN
+    Secondary = _sgr(_STYLE["secondary"]) or PURPLE
+    Tertiary = _sgr(_STYLE["tertiary"]) or BLUE
+
+
+Primary = _sgr("cyan")
+Secondary = _sgr("purple")
+Tertiary = _sgr("blue")
 Muted = GREY
 Display = "bars"
 BarWidth = 20
@@ -119,14 +197,37 @@ ProgChar = "\u2588"
 ProgCharEm = "\u2591"
 Sensitivity = 1.0
 SPINNER = "|/-\\"
+RichSpinner = "dots"
+ProgressType = "default"
+ProgressColumns = ["bar", "percentage", "time_remaining"]
+
+_PROGRESS_TYPES = {
+    "default": ["bar", "percentage", "time_remaining"],
+    "download": ["download", "file_size", "total_size", "transfer_speed"],
+    "pulse": ["spinner"],
+}
+
+_RICH_COLUMN_NAMES = (
+    "bar",
+    "download",
+    "file_size",
+    "m_of_n",
+    "percentage",
+    "spinner",
+    "task",
+    "time_elapsed",
+    "time_remaining",
+    "total_size",
+    "transfer_speed",
+)
 
 THEMES = {
     "ocean": ("cyan", "purple", "blue"),
-    "sunset": ("orange", "pink", "gold"),
-    "forest": ("green", "lime", "teal"),
-    "fire": ("red", "orange", "gold"),
-    "mono": ("grey", "white", "maroon"),
-    "royal": ("indigo", "violet", "skyblue"),
+    "sunset": ("orange1", "pink1", "gold1"),
+    "forest": ("green", "spring_green3", "dark_cyan"),
+    "fire": ("red", "orange1", "gold1"),
+    "mono": ("grey62", "white", "red3"),
+    "royal": ("purple4", "violet", "light_sky_blue1"),
 }
 
 ####### Be carefull this will make everything print on screen including links title view and all things ###
@@ -495,12 +596,51 @@ def _strip_filler(text):
     return text
 
 
+_TILE_CONTEXTS: dict = {}
+
+
+def _tile_context():
+    """Tile's junk/artist rules plus flow's `~/.flow/ignore.txt` words (cached)."""
+    from Tile import (
+        DEFAULT_ARTIST_FILE,
+        DEFAULT_IGNORE_FILE,
+        Context,
+        get_context,
+    )
+
+    def mtime(path):
+        try:
+            return path.stat().st_mtime_ns
+        except OSError:
+            return -1
+
+    key = (
+        str(IGNORE_FILE),
+        mtime(IGNORE_FILE),
+        str(DEFAULT_IGNORE_FILE),
+        mtime(DEFAULT_IGNORE_FILE),
+        str(DEFAULT_ARTIST_FILE),
+        mtime(DEFAULT_ARTIST_FILE),
+    )
+    if key not in _TILE_CONTEXTS:
+        tile = get_context(DEFAULT_IGNORE_FILE, DEFAULT_ARTIST_FILE)
+        flow = get_context(IGNORE_FILE, DEFAULT_ARTIST_FILE)
+        _TILE_CONTEXTS.clear()
+        _TILE_CONTEXTS[key] = Context(
+            strip_words=tile.strip_words | flow.strip_words,
+            soft_words=tile.soft_words | flow.soft_words,
+            phrases=tile.phrases | flow.phrases,
+            artists=tile.artists,
+            labels=tile.labels,
+        )
+    return _TILE_CONTEXTS[key]
+
+
 def extract_song(title):
-    for segment in _PIPE.split(title):
-        parts = [p for p in map(_strip_filler, _DASH.split(segment)) if p]
-        if parts:
-            return parts[1] if len(parts) > 1 else parts[0]
-    return ""
+    """The song name from a raw title, parsed by the Tile package."""
+    from Tile import parse_title
+
+    return parse_title(title or "", _tile_context())["title"]
 
 
 def _truncate_title(title):
@@ -523,6 +663,8 @@ def _load_config():
         ProgCharEm, \
         Sensitivity, \
         SPINNER, \
+        RichSpinner, \
+        ProgressType, \
         DEV_MODE, \
         FFMPEG, \
         _ffmpeg_configured, \
@@ -532,19 +674,34 @@ def _load_config():
         DOWN_ON_LIKE, \
         MAX_SEARCH_RESULTS, \
         MAX_RESULTS_RADIO, \
-        NOTIFY
+        NOTIFY, \
+        ProgressColumns
     if not CONFIG_FILE.exists():
         return
     try:
         data = json.loads(CONFIG_FILE.read_text())
-        if "primary" in data and data["primary"] in _COLORS:
-            Primary = _COLORS[data["primary"]]
-        if "secondary" in data and data["secondary"] in _COLORS:
-            Secondary = _COLORS[data["secondary"]]
-        if "tertiary" in data and data["tertiary"] in _COLORS:
-            Tertiary = _COLORS[data["tertiary"]]
+        if "primary" in data and _valid_style(data["primary"]):
+            _STYLE["primary"] = str(data["primary"])
+        if "secondary" in data and _valid_style(data["secondary"]):
+            _STYLE["secondary"] = str(data["secondary"])
+        if "tertiary" in data and _valid_style(data["tertiary"]):
+            _STYLE["tertiary"] = str(data["tertiary"])
+        _render()
         if "display" in data and data["display"] in _DISPLAY_MODES:
             Display = data["display"]
+        if "progress_columns" in data and isinstance(data["progress_columns"], list):
+            cols = [
+                c
+                for c in data["progress_columns"]
+                if isinstance(c, str) and c in _RICH_COLUMN_NAMES
+            ]
+            if cols:
+                ProgressColumns = cols
+        if "progress_type" in data and data["progress_type"] in _PROGRESS_TYPES:
+            ProgressType = data["progress_type"]
+            ProgressColumns = list(_PROGRESS_TYPES[ProgressType])
+        elif "progress_type" in data and data["progress_type"] == "custom":
+            ProgressType = "custom"
         if (
             "bar_width" in data
             and isinstance(data["bar_width"], int)
@@ -595,6 +752,12 @@ def _load_config():
             and 2 <= len(data["spinner"]) <= 16
         ):
             SPINNER = data["spinner"]
+        if (
+            "rich_spinner" in data
+            and isinstance(data["rich_spinner"], str)
+            and data["rich_spinner"]
+        ):
+            RichSpinner = data["rich_spinner"][:16]
         if "dev" in data and isinstance(data["dev"], bool):
             DEV_MODE = data["dev"]
         if "ffmpeg" in data and isinstance(data["ffmpeg"], bool):
@@ -633,10 +796,12 @@ def _load_config():
 def _save_config():
     CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
     data = {
-        "primary": _COLOR_NAMES.get(Primary, "cyan"),
-        "secondary": _COLOR_NAMES.get(Secondary, "purple"),
-        "tertiary": _COLOR_NAMES.get(Tertiary, "blue"),
+        "primary": _STYLE["primary"],
+        "secondary": _STYLE["secondary"],
+        "tertiary": _STYLE["tertiary"],
         "display": Display,
+        "progress_columns": ProgressColumns,
+        "progress_type": ProgressType,
         "bar_width": BarWidth,
         "bar_height": BarHeight,
         "bar_spacing": BarSpacing,
@@ -645,6 +810,7 @@ def _save_config():
         "prog_char_em": ProgCharEm,
         "sensitivity": Sensitivity,
         "spinner": SPINNER,
+        "rich_spinner": RichSpinner,
         "dev": DEV_MODE,
         "ffmpeg": FFMPEG,
         "ad_skip": AD_SKIP,
@@ -666,7 +832,7 @@ try:
 
     VERSION = _version("flow-twinx")
 except PackageNotFoundError:
-    VERSION = "0.5.1"
+    VERSION = "0.8.4"
 
 Mode = "Online"
 
@@ -694,12 +860,12 @@ def clear_seek():
     SEEK_FILE.unlink(missing_ok=True)
 
 
-def save_pid(pid: int):
+def save_pid(pid: int, ctl_port: int | None = None):
     PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     PID_FILE.write_text(str(pid))
     from backend import registry
 
-    registry.register("vlc", pid)
+    registry.register("vlc", pid, ctl_port=ctl_port)
 
 
 def read_pid() -> int | None:
@@ -719,12 +885,12 @@ def clear_pid():
     registry.unregister("vlc")
 
 
-def save_tui_pid(pid: int):
+def save_tui_pid(pid: int, ctl_port: int | None = None):
     TUI_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     TUI_PID_FILE.write_text(str(pid))
     from backend import registry
 
-    registry.register("tui", pid)
+    registry.register("tui", pid, ctl_port=ctl_port)
 
 
 def read_tui_pid() -> int | None:
@@ -744,7 +910,7 @@ def clear_tui_pid():
     registry.unregister("tui")
 
 
-def save_pid_if_free(pid: int) -> bool:
+def save_pid_if_free(pid: int, ctl_port: int | None = None) -> bool:
     """Claim the player pid slot unless another live player already holds it."""
     existing = read_pid()
     if existing is not None and existing != pid:
@@ -755,7 +921,10 @@ def save_pid_if_free(pid: int) -> bool:
                 return False
         except Exception:
             pass
-    save_pid(pid)
+    if ctl_port is not None:
+        save_pid(pid, ctl_port=ctl_port)
+    else:
+        save_pid(pid)
     return True
 
 
@@ -772,16 +941,12 @@ def clear_tui_pid_if(pid: int):
 
 
 def kill_stored():
-    import os
-    import signal
+    from backend import platform
 
     pid = read_pid()
     if pid is None:
         return False
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
+    platform.kill_pid(pid)
     clear_pid()
     return True
 
@@ -790,16 +955,13 @@ _BAR_CHARS = {"dot": "\u25aa", "block": "\u2588", "circle": "\u2688"}
 
 
 def _apply_color(which, value):
-    global Primary, Secondary, Tertiary
-    color = _COLORS.get(value)
-    if color is None:
-        return f"Unknown color '{value}'. Use 'config -h' to see available colors."
-    if which == "primary":
-        Primary = _COLORS[value]
-    elif which == "secondary":
-        Secondary = _COLORS[value]
-    else:
-        Tertiary = _COLORS[value]
+    if not _valid_style(value):
+        return (
+            f"Unknown color '{value}'. Any rich style works: a named color, "
+            "#hex, rgb(r,g,b), bold/italic."
+        )
+    _STYLE[which] = str(value)
+    _render()
     _save_config()
     code = {"primary": Primary, "secondary": Secondary, "tertiary": Tertiary}[which]
     return f"{code}{which.capitalize()} color changed to {value}{Reset}"
@@ -808,10 +970,23 @@ def _apply_color(which, value):
 def _apply_display(value):
     global Display
     if value not in _DISPLAY_MODES:
-        return f"Unknown display mode '{value}'. Options: none, bars, lyrics, progress"
+        return f"Unknown display mode '{value}'. Options: none, bars, lyrics, progress, rich"
     Display = value
     _save_config()
     return f"{Tertiary}Display mode changed to {value}{Reset}"
+
+
+def _apply_progress_columns(value):
+    global ProgressColumns, ProgressType
+    parts = [p.strip().lower() for p in re.split(r"[,\s]+", str(value)) if p.strip()]
+    if not parts or any(p not in _RICH_COLUMN_NAMES for p in parts):
+        return (
+            f"Unknown progress column(s). Rich options: {', '.join(_RICH_COLUMN_NAMES)}"
+        )
+    ProgressColumns = parts
+    ProgressType = "custom"
+    _save_config()
+    return f"{Tertiary}Rich progress columns set to {', '.join(parts)}{Reset}"
 
 
 def _apply_bar_width(v):
@@ -858,8 +1033,6 @@ def _apply_prog_char_em(v):
     _save_config()
     return f"{Tertiary}Progress empty char changed to {ProgCharEm}{Reset}"
 
-
-import shutil
 
 MIN_BAR = 8
 
@@ -926,16 +1099,58 @@ def _apply_spinner(value):
     return f"{Tertiary}Spinner set to '{value}'{Reset}"
 
 
+def rich_spinner_names():
+    """Every spinner name rich knows (the `python -m rich.spinner` list)."""
+    try:
+        from rich.spinner import SPINNERS
+
+        return sorted(SPINNERS)
+    except Exception:
+        return []
+
+
+def _spinner_choices():
+    """Rich spinner picker options: every name plus the custom escape hatch."""
+    return rich_spinner_names() + ["Custom…"]
+
+
+def _apply_rich_spinner(value):
+    global RichSpinner
+    name = str(value).strip()
+    if not (1 <= len(name) <= 16):
+        return "Rich spinner must be a name or 1-16 characters"
+    RichSpinner = name
+    _save_config()
+    return f"{Tertiary}Rich spinner set to '{name}'{Reset}"
+
+
+def _apply_progress_type(value):
+    global ProgressType, ProgressColumns
+    key = str(value).strip().lower()
+    if key == "custom":
+        ProgressType = "custom"
+        _save_config()
+        return f"{Tertiary}Progress type set to custom (edit the columns as you like){Reset}"
+    cols = _PROGRESS_TYPES.get(key)
+    if cols is None:
+        return (
+            f"Unknown progress type '{value}'. Options: "
+            f"{', '.join(sorted(_PROGRESS_TYPES))}, custom"
+        )
+    ProgressType = key
+    ProgressColumns = list(cols)
+    _save_config()
+    return f"{Tertiary}Progress type changed to {key} ({', '.join(cols)}){Reset}"
+
+
 def _apply_theme(name):
-    global Primary, Secondary, Tertiary
     if name == "list":
         return f"{Muted}Themes: {', '.join(sorted(THEMES))}{Reset}"
     trio = THEMES.get(name.lower())
     if trio is None:
         return f"Unknown theme '{name}'. Themes: {', '.join(sorted(THEMES))}"
-    Primary = _COLORS[trio[0]]
-    Secondary = _COLORS[trio[1]]
-    Tertiary = _COLORS[trio[2]]
+    _STYLE["primary"], _STYLE["secondary"], _STYLE["tertiary"] = trio
+    _render()
     _save_config()
     return f"{Tertiary}Theme changed to '{name}'{Reset}"
 
@@ -957,7 +1172,10 @@ PLUGIN_SAFE_KEYS = {
     "tertiary",
     "theme",
     "spinner",
+    "rich_spinner",
     "display",
+    "progress_columns",
+    "progress_type",
     "barwidth",
     "barheight",
     "barspacing",
@@ -983,6 +1201,10 @@ def apply_config(key, value):
         return _apply_theme(value)
     if target == "spinner":
         return _apply_spinner(value)
+    if target == "rich_spinner":
+        return _apply_rich_spinner(value)
+    if target == "progress_type":
+        return _apply_progress_type(value)
     if target == "primary":
         return _apply_color("primary", value)
     if target == "secondary":
@@ -991,6 +1213,8 @@ def apply_config(key, value):
         return _apply_color("tertiary", value)
     if target == "display":
         return _apply_display(value)
+    if target == "progress_columns":
+        return _apply_progress_columns(value)
     if target in ("barwidth", "width"):
         return _apply_int("BarWidth", value, 4, 80, "Bar width changed")
     if target in ("barheight", "height"):
@@ -1043,11 +1267,7 @@ def apply_config(key, value):
 
 
 def _current_theme():
-    cur = (
-        _COLOR_NAMES.get(Primary),
-        _COLOR_NAMES.get(Secondary),
-        _COLOR_NAMES.get(Tertiary),
-    )
+    cur = (_STYLE["primary"], _STYLE["secondary"], _STYLE["tertiary"])
     for name, trio in THEMES.items():
         if tuple(trio) == cur:
             return name
@@ -1057,12 +1277,15 @@ def _current_theme():
 def config_get(key):
     target = _TARGET_ALIASES.get(key.lower(), key.lower())
     getters = {
-        "primary": lambda: _COLOR_NAMES.get(Primary),
-        "secondary": lambda: _COLOR_NAMES.get(Secondary),
-        "tertiary": lambda: _COLOR_NAMES.get(Tertiary),
+        "primary": lambda: _STYLE["primary"],
+        "secondary": lambda: _STYLE["secondary"],
+        "tertiary": lambda: _STYLE["tertiary"],
         "theme": _current_theme,
         "spinner": lambda: SPINNER,
+        "rich_spinner": lambda: RichSpinner,
         "display": lambda: Display,
+        "progress_columns": lambda: ProgressColumns,
+        "progress_type": lambda: ProgressType,
         "barwidth": lambda: BarWidth,
         "barheight": lambda: BarHeight,
         "barspacing": lambda: BarSpacing,
@@ -1122,7 +1345,15 @@ def cmd_config(extra: list[str], args=None):
         print(f"  {Primary}primary{Reset}   (aliases: pri)")
         print(f"  {Secondary}secondary{Reset} (aliases: sec)")
         print(f"  {Tertiary}tertiary{Reset}  (aliases: ter)")
-        print(f"  {GREY}display{Reset}    (none, bars, lyrics)")
+        print(f"  {GREY}display{Reset}    (none, bars, lyrics, progress, rich)")
+        print(
+            f"  {GREY}progress_columns{Reset} (rich progress bar columns — "
+            f"{', '.join(_RICH_COLUMN_NAMES)}; aliases: richcols, rich_columns)"
+        )
+        print(
+            f"  {GREY}progress_type{Reset} (rich progress layout — default, download, "
+            f"pulse, custom; current: {ProgressType})"
+        )
         print(f"  {GREY}barwidth{Reset}   (4-80, current: {BarWidth})")
         print(f"  {GREY}barheight{Reset}  (10-90, current: {BarHeight})")
         print(f"  {GREY}barspacing{Reset} (0-4, min, fit, max — current: {BarSpacing})")
@@ -1139,7 +1370,11 @@ def cmd_config(extra: list[str], args=None):
         print(
             f"  {GREY}theme{Reset}      (ocean, sunset, forest, fire, mono, royal — or 'list')"
         )
-        print(f"  {GREY}spinner{Reset}     (2-16 chars, current: {SPINNER})")
+        print(
+            f"  {GREY}rich_spinner{Reset} (rich spinner — a name from `python -m "
+            f"rich.spinner`, or 1-16 custom chars; current: {RichSpinner})"
+        )
+        print(f"  {GREY}spinner{Reset}     (2-16 chars, plain-text spinner, current: {SPINNER})")
         print(f"  {GREY}format{Reset}     (opus, m4a, mp3, webm — current: {FORMAT})")
         print(
             f"  {GREY}ad_skip{Reset}     (true/false — SponsorBlock segment skipping, current: {AD_SKIP})"
@@ -1155,9 +1390,11 @@ def cmd_config(extra: list[str], args=None):
         )
         print(f"  {GREY}max_search{Reset} (1-20, current: {MAX_SEARCH_RESULTS})")
         print(f"  {GREY}max_radio{Reset}  (1-50, current: {MAX_RESULTS_RADIO})")
-        print(f"\n{Tertiary}Available colors:{Reset}")
-        for name, code in _COLORS.items():
-            print(f"  {code}{name}{Reset}")
+        print(
+            f"\n{Tertiary}Available colors (any rich style: named color, #hex, rgb(r,g,b), bold/italic):{Reset}"
+        )
+        for name in RICH_COLORS:
+            print(f"  {_sgr(name)}{name}{Reset}")
         print(f"\n{GREY}Config file: {CONFIG_FILE}{Reset}")
         return
     if not extra:
@@ -1180,6 +1417,12 @@ def cmd_config(extra: list[str], args=None):
         emit(_apply_color("tertiary", value))
     elif target == "display":
         emit(_apply_display(value))
+    elif target == "progress_columns":
+        emit(_apply_progress_columns(value))
+    elif target == "progress_type":
+        emit(_apply_progress_type(value))
+    elif target in ("rich_spinner", "richspin", "rich_spin"):
+        emit(_apply_rich_spinner(value))
     elif target in ("barwidth", "width"):
         print(_apply_int("BarWidth", value, 4, 80, "Bar width changed"))
     elif target in ("barheight", "height"):
@@ -1256,7 +1499,17 @@ def notify(title, body=""):
     if not NOTIFY:
         return
     try:
-        subprocess.run(["notify-send", title, body], check=False)
+        if sys.platform == "darwin":
+            subprocess.run(
+                [
+                    "osascript",
+                    "-e",
+                    f'display notification "{body}" with title "{title}"',
+                ],
+                check=False,
+            )
+        elif os.name != "nt":
+            subprocess.run(["notify-send", title, body], check=False)
     except OSError:
         pass
 
@@ -1268,8 +1521,238 @@ def down_notify(song_name, error=False):
         notify("Downloaded Song", f"song: {song_name}")
 
 
+def _apply_bool(attr, ok_msg, v):
+    globals()[attr] = bool(v)
+    _save_config()
+    return f"{Tertiary}{ok_msg} {v}{Reset}"
+
+
+def _apply_sensitivity_io(v):
+    try:
+        val = float(v)
+    except ValueError:
+        return "sensitivity must be a number (0.5-5.0)"
+    if not (0.5 <= val <= 5.0):
+        return "sensitivity must be between 0.5 and 5.0"
+    return _apply_sensitivity(val)
+
+
+def _apply_bar_spacing_io(v):
+    s = str(v).strip().lower()
+    if s in _BAR_SPACING:
+        return _apply_bar_spacing(s)
+    try:
+        return _apply_bar_spacing(int(s))
+    except ValueError:
+        return "bar_spacing must be min/fit/max or 0-4"
+
+
+def _interactive_rows():
+    if Display == "rich":
+        spinner_row = (
+            "spinner",
+            "Spinner",
+            lambda: RichSpinner,
+            "select",
+            _spinner_choices(),
+            lambda v: _apply_rich_spinner(v) if v != "Custom…" else None,
+        )
+    else:
+        spinner_row = (
+            "spinner",
+            "Spinner",
+            lambda: SPINNER,
+            "text",
+            None,
+            _apply_spinner,
+        )
+    rows = [
+        (
+            "display",
+            "Display mode",
+            lambda: Display,
+            "select",
+            ["none", "bars", "lyrics", "progress", "rich"],
+            lambda v: _apply_display(str(v)),
+        ),
+        (
+            "primary",
+            "Primary color",
+            lambda: _STYLE["primary"],
+            "select",
+            RICH_COLORS,
+            lambda v: _apply_color("primary", str(v)),
+        ),
+        (
+            "secondary",
+            "Secondary color",
+            lambda: _STYLE["secondary"],
+            "select",
+            RICH_COLORS,
+            lambda v: _apply_color("secondary", str(v)),
+        ),
+        (
+            "tertiary",
+            "Tertiary color",
+            lambda: _STYLE["tertiary"],
+            "select",
+            RICH_COLORS,
+            lambda v: _apply_color("tertiary", str(v)),
+        ),
+        (
+            "theme",
+            "Color theme",
+            _current_theme,
+            "select",
+            sorted(THEMES),
+            lambda v: _apply_theme(str(v)),
+        ),
+        spinner_row,
+        (
+            "progress_type",
+            "Progress type",
+            lambda: ProgressType,
+            "select",
+            sorted(_PROGRESS_TYPES) + ["custom"],
+            _apply_progress_type,
+        ),
+        (
+            "progress_columns",
+            "Rich progress columns",
+            lambda: ", ".join(ProgressColumns),
+            "text",
+            None,
+            lambda v: _apply_progress_columns(str(v)),
+        ),
+        (
+            "format",
+            "Default download format",
+            lambda: FORMAT,
+            "select",
+            sorted(_VALID_FORMATS),
+            lambda v: _apply_format(str(v)),
+        ),
+        (
+            "bar_width",
+            "Bar width (4-80)",
+            lambda: BarWidth,
+            "text",
+            None,
+            lambda v: _apply_int("BarWidth", v, 4, 80, "Bar width changed"),
+        ),
+        (
+            "bar_height",
+            "Bar height (10-90)",
+            lambda: BarHeight,
+            "text",
+            None,
+            lambda v: _apply_int("BarHeight", v, 10, 90, "Bar height changed"),
+        ),
+        (
+            "bar_spacing",
+            "Bar spacing",
+            lambda: BarSpacing,
+            "select",
+            ["min", "fit", "max", "0", "1", "2", "3", "4"],
+            _apply_bar_spacing_io,
+        ),
+        (
+            "bar_char",
+            "Bar char",
+            lambda: _BC_NAME(BarChar),
+            "text",
+            None,
+            _apply_bar_char,
+        ),
+        (
+            "prog_char",
+            "Progress bar fill char",
+            lambda: _BC_NAME(ProgChar),
+            "text",
+            None,
+            _apply_prog_char,
+        ),
+        (
+            "prog_char_em",
+            "Progress bar empty char",
+            lambda: _BC_NAME(ProgCharEm),
+            "text",
+            None,
+            _apply_prog_char_em,
+        ),
+        (
+            "sensitivity",
+            "Sensitivity (0.5-5.0)",
+            lambda: Sensitivity,
+            "text",
+            None,
+            _apply_sensitivity_io,
+        ),
+        (
+            "ad_skip",
+            "Ad skip",
+            lambda: AD_SKIP,
+            "confirm",
+            None,
+            lambda v: _apply_bool("AD_SKIP", "Ad skip set to", v),
+        ),
+        (
+            "down_on_like",
+            "Auto-download on like",
+            lambda: DOWN_ON_LIKE,
+            "confirm",
+            None,
+            lambda v: _apply_bool("DOWN_ON_LIKE", "Auto-download on like set to", v),
+        ),
+        (
+            "notify",
+            "Desktop notifications",
+            lambda: NOTIFY,
+            "confirm",
+            None,
+            lambda v: _apply_bool("NOTIFY", "Desktop notifications set to", v),
+        ),
+        (
+            "max_search",
+            "Max search results (1-20)",
+            lambda: MAX_SEARCH_RESULTS,
+            "text",
+            None,
+            lambda v: _apply_int(
+                "MAX_SEARCH_RESULTS", v, 1, 20, "Max search results changed"
+            ),
+        ),
+        (
+            "max_radio",
+            "Max radio tracks (1-50)",
+            lambda: MAX_RESULTS_RADIO,
+            "text",
+            None,
+            lambda v: _apply_int(
+                "MAX_RESULTS_RADIO", v, 1, 50, "Max radio tracks changed"
+            ),
+        ),
+    ]
+    if Display == "rich":
+        rows = [
+            r
+            for r in rows
+            if r[0]
+            not in (
+                "bar_width",
+                "bar_height",
+                "bar_spacing",
+                "bar_char",
+                "prog_char",
+                "prog_char_em",
+            )
+        ]
+    else:
+        rows = [r for r in rows if r[0] not in ("progress_columns", "progress_type")]
+    return rows
+
+
 def _interactive_config():
-    global AD_SKIP, DOWN_ON_LIKE
     try:
         import questionary
         from questionary import Style
@@ -1281,266 +1764,108 @@ def _interactive_config():
         )
         return
 
-    color_names = sorted(_COLORS.keys())
-    color_choices = [questionary.Choice(title=n, value=n) for n in color_names]
     py_style = Style(
         [
-            ("qmark", f"fg:{_cname(Tertiary)}"),
-            ("question", f"fg:{_cname(Tertiary)}"),
-            ("answer", f"fg:{_cname(Secondary)} bold"),
-            ("pointer", f"fg:{_cname(Primary)} bold"),
-            ("highlighted", f"fg:{_cname(Primary)} bold"),
-            ("selected", f"fg:{_cname(Primary)}"),
-            ("separator", f"fg:{_cname(Muted)}"),
-            ("instruction", f"fg:{_cname(Tertiary)}"),
+            ("qmark", f"fg:{_cname(_STYLE['tertiary'])}"),
+            ("question", f"fg:{_cname(_STYLE['tertiary'])}"),
+            ("answer", f"fg:{_cname(_STYLE['secondary'])} bold"),
+            ("pointer", f"fg:{_cname(_STYLE['primary'])} bold"),
+            ("highlighted", f"fg:{_cname(_STYLE['primary'])} bold"),
+            ("selected", f"fg:{_cname(_STYLE['primary'])}"),
+            ("separator", f"fg:{_cname('grey62')}"),
+            ("instruction", f"fg:{_cname(_STYLE['tertiary'])}"),
             ("text", ""),
         ]
     )
 
-    questions = [
+    rows = _interactive_rows()
+    screen = [
         {
             "type": "select",
-            "name": "display",
-            "message": "Display mode",
-            "choices": ["none", "bars", "lyrics", "progress"],
-            "default": Display,
-        },
-        {
-            "type": "select",
-            "name": "primary",
-            "message": "Primary color",
-            "choices": color_choices,
-            "default": _COLOR_NAMES.get(Primary, "cyan"),
-        },
-        {
-            "type": "select",
-            "name": "secondary",
-            "message": "Secondary color",
-            "choices": color_choices,
-            "default": _COLOR_NAMES.get(Secondary, "purple"),
-        },
-        {
-            "type": "select",
-            "name": "tertiary",
-            "message": "Tertiary color",
-            "choices": color_choices,
-            "default": _COLOR_NAMES.get(Tertiary, "blue"),
-        },
-        {
-            "type": "select",
-            "name": "format",
-            "message": "Default download format",
-            "choices": sorted(_VALID_FORMATS),
-            "default": FORMAT if FORMAT in _VALID_FORMATS else "webm",
-        },
-        {
-            "type": "text",
-            "name": "bar_width",
-            "message": "Bar width (4-80)",
-            "default": str(BarWidth),
-            "when": lambda a: a["display"] == "bars",
-        },
-        {
-            "type": "text",
-            "name": "bar_height",
-            "message": "Bar height (10-90)",
-            "default": str(BarHeight),
-            "when": lambda a: a["display"] == "bars",
-        },
-        {
-            "type": "select",
-            "name": "bar_spacing",
-            "message": "Bar spacing",
-            "choices": ["min", "fit", "max", "0", "1", "2", "3", "4"],
-            "default": str(BarSpacing),
-            "when": lambda a: a["display"] == "bars",
-        },
-        {
-            "type": "text",
-            "name": "bar_char",
-            "message": "Bar char (dot/block/circle or single char)",
-            "default": _BC_NAME(BarChar),
-            "when": lambda a: a["display"] == "bars",
-        },
-        {
-            "type": "text",
-            "name": "prog_char",
-            "message": "Progress bar fill char (dot/block/circle or single char)",
-            "default": _BC_NAME(ProgChar),
-            "when": lambda a: a["display"] == "progress",
-        },
-        {
-            "type": "text",
-            "name": "prog_char_em",
-            "message": "Progress bar empty char (dot/block/circle or single char)",
-            "default": _BC_NAME(ProgCharEm),
-            "when": lambda a: a["display"] == "progress",
-        },
-        {
-            "type": "text",
-            "name": "sensitivity",
-            "message": "Sensitivity (0.5-5.0)",
-            "default": str(Sensitivity),
-            "when": lambda a: a["display"] == "bars",
-        },
-        {
-            "type": "confirm",
-            "name": "ad_skip",
-            "message": "Sponsor segment skipping (ad skip)",
-            "default": AD_SKIP,
-        },
-        {
-            "type": "confirm",
-            "name": "down_on_like",
-            "message": "Auto-download when liking online",
-            "default": DOWN_ON_LIKE,
-        },
-        {
-            "type": "confirm",
-            "name": "notify",
-            "message": "Desktop notifications",
-            "default": NOTIFY,
-        },
-        {
-            "type": "text",
-            "name": "max_search",
-            "message": "Max search results (1-20)",
-            "default": str(MAX_SEARCH_RESULTS),
-        },
-        {
-            "type": "text",
-            "name": "max_radio",
-            "message": "Max radio tracks (1-50)",
-            "default": str(MAX_RESULTS_RADIO),
-        },
+            "name": "setting",
+            "message": "Which setting?",
+            "choices": [
+                questionary.Choice(title=f"{label}  (current: {current()})", value=key)
+                for key, label, current, *_ in rows
+            ],
+        }
     ]
-
-    from questionary.prompts import AVAILABLE_PROMPTS
-
-    answers = {}
-    interrupted = False
-
-    def _apply_collected():
-        global AD_SKIP, DOWN_ON_LIKE
-
-        if "display" in answers:
-            print(_apply_display(answers["display"]))
-        if "primary" in answers:
-            print(_apply_color("primary", answers["primary"]))
-        if "secondary" in answers:
-            print(_apply_color("secondary", answers["secondary"]))
-        if "tertiary" in answers:
-            print(_apply_color("tertiary", answers["tertiary"]))
-
-        if answers.get("display") == "bars":
-            if answers.get("bar_width", "").strip():
-                try:
-                    v = int(answers["bar_width"])
-                    if 4 <= v <= 80:
-                        print(_apply_bar_width(v))
-                except ValueError:
-                    pass
-            if answers.get("bar_height", "").strip():
-                try:
-                    v = int(answers["bar_height"])
-                    if 10 <= v <= 90:
-                        print(_apply_bar_height(v))
-                except ValueError:
-                    pass
-            if "bar_spacing" in answers:
-                try:
-                    val = answers["bar_spacing"]
-                    if str(val) in _BAR_SPACING:
-                        print(_apply_bar_spacing(val))
-                    else:
-                        print(_apply_bar_spacing(int(val)))
-                except ValueError:
-                    pass
-            if "bar_char" in answers:
-                print(_apply_bar_char(answers["bar_char"]))
-            if answers.get("sensitivity", "").strip():
-                try:
-                    v = float(answers["sensitivity"])
-                    if 0.5 <= v <= 5.0:
-                        print(_apply_sensitivity(v))
-                except ValueError:
-                    pass
-        if answers.get("display") == "progress":
-            if "prog_char" in answers:
-                print(_apply_prog_char(answers["prog_char"]))
-            if "prog_char_em" in answers:
-                print(_apply_prog_char_em(answers["prog_char_em"]))
-
-        if "format" in answers:
-            print(_apply_format(answers["format"]))
-        if "max_search" in answers:
-            print(
-                _apply_int(
-                    "MAX_SEARCH_RESULTS",
-                    answers["max_search"],
-                    1,
-                    20,
-                    "Max search results changed",
-                )
-            )
-        if "max_radio" in answers:
-            print(
-                _apply_int(
-                    "MAX_RESULTS_RADIO",
-                    answers["max_radio"],
-                    1,
-                    50,
-                    "Max radio tracks changed",
-                )
-            )
-        if "ad_skip" in answers:
-            AD_SKIP = answers["ad_skip"]
-            print(f"{Tertiary}Ad skip set to {AD_SKIP}{Reset}")
-        if "down_on_like" in answers:
-            DOWN_ON_LIKE = answers["down_on_like"]
-            print(f"{Tertiary}Auto-download on like set to {DOWN_ON_LIKE}{Reset}")
-        if "notify" in answers:
-            NOTIFY = answers["notify"]
-            print(f"{Tertiary}Desktop notifications set to {NOTIFY}{Reset}")
-
     try:
-        for question in questions:
-            cfg = dict(question)
-            when = cfg.get("when")
-            if when and not when(answers):
-                continue
-            kwargs = {k: v for k, v in cfg.items() if k not in ("type", "name", "when")}
-            kwargs["style"] = py_style
-            try:
-                answer = AVAILABLE_PROMPTS[cfg["type"]](**kwargs).unsafe_ask()
-            except KeyboardInterrupt, EOFError:
-                interrupted = True
-                break
-            answers[cfg["name"]] = answer
-    except KeyboardInterrupt:
-        interrupted = True
-
+        answers = questionary.prompt(screen, style=py_style)
+    except KeyboardInterrupt, EOFError:
+        answers = None
     if not answers:
-        print(f"\n{GREY}Config setup cancelled. Nothing to save.{Reset}")
+        print(f"\n{GREY}Config cancelled. Nothing changed.{Reset}")
         return
 
-    if interrupted:
-        print(f"\n{GREY}Interrupted — saving the answers you already gave...{Reset}")
-    _apply_collected()
-    _save_config()
-    if interrupted:
-        print(
-            f"\n{GREY}Config saved (partial — {len(answers)} setting(s) applied).{Reset}"
-        )
+    key = answers["setting"]
+    row = next((r for r in rows if r[0] == key), None)
+    if row is None:
+        return
+    _, label, current, kind, spec, apply = row
+    question = {"type": kind, "name": "value", "message": label}
+    if kind == "select":
+        question["choices"] = spec or []
+        cur = current()
+        if cur in (spec or []):
+            question["default"] = cur
+    elif kind == "confirm":
+        question["default"] = bool(current())
     else:
-        print(f"\n{GREY}Config saved.{Reset}")
+        question["default"] = str(current())
+    try:
+        edit = questionary.prompt([question], style=py_style)
+    except KeyboardInterrupt, EOFError:
+        edit = None
+    if not edit or edit.get("value") is None:
+        print(f"\n{GREY}{label} unchanged.{Reset}")
+        return
+    value = edit["value"]
+    if value == "Custom…":
+        try:
+            custom = questionary.prompt(
+                [
+                    {
+                        "type": "text",
+                        "name": "value",
+                        "message": "Custom spinner — a rich spinner name or 1-16 characters",
+                        "default": str(current()),
+                    }
+                ],
+                style=py_style,
+            )
+        except KeyboardInterrupt, EOFError:
+            custom = None
+        if not custom or custom.get("value") is None or not str(custom["value"]).strip():
+            print(f"\n{GREY}Spinner unchanged.{Reset}")
+            return
+        value = str(custom["value"]).strip()
+    msg = apply(value)
+    if msg:
+        print(msg)
 
 
-def _cname(ansi_code):
-    name = _COLOR_NAMES.get(ansi_code, "white")
-    if name == "deeppurple":  # not a valid prompt_toolkit color name
-        return "darkmagenta"
-    return name
+def _cname(style):
+    """Last color word of a style, as a prompt_toolkit-friendly hex or name."""
+    s = str(style)
+    if s.startswith("\x1b"):
+        # ANSI escape code: map back to the chosen rich style string.
+        resolved = None
+        for which in ("primary", "secondary", "tertiary"):
+            if s == _sgr(_STYLE[which]):
+                resolved = _STYLE[which]
+                break
+        s = resolved or "white"
+    name = s.rsplit(" ", 1)[-1]
+    try:
+        from rich.color import Color
+
+        rgb = Color.parse(name).get_truecolor()
+        if rgb is not None:
+            return rgb.hex
+    except Exception:
+        pass
+    return name or "white"
 
 
 def _BC_NAME(char):

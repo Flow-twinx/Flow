@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [beta, main]
+  pull_request:
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.12.x"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install system deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            vlc \
+            libgirepository-2.0-dev \
+            libcairo2-dev \
+            gobject-introspection \
+            libdbus-1-dev \
+            libportaudio2
+
+      - name: Install VLC (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install --cask vlc
+          echo "VLC_PLUGIN_PATH=/Applications/VLC.app/Contents/MacOS/plugins" >> "$GITHUB_ENV"
+
+      - name: Install VLC (Windows, portable)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $vlcZip = "$env:RUNNER_TEMP\vlc.zip"
+          $vlcDir = "$env:RUNNER_TEMP\vlc"
+          curl.exe -L --fail --retry 3 -o $vlcZip "https://get.videolan.org/vlc/3.0.21/win64/vlc-3.0.21-win64.zip"
+          New-Item -ItemType Directory -Force -Path $vlcDir | Out-Null
+          tar.exe -xf $vlcZip -C $vlcDir
+          $vlcRoot = (Get-ChildItem $vlcDir -Directory | Select-Object -First 1).FullName
+          "PYTHON_VLC_LIB_PATH=$vlcRoot\libvlc.dll" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VLC_PLUGIN_PATH=$vlcRoot\plugins" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Sync project
+        run: uv sync --group dev
+
+      - name: Smoke test (libvlc, a real Instance, entry-point imports)
+        run: |
+          uv run python -c "import vlc; vlc.Instance('--no-video --quiet'); print('libvlc:', vlc.libvlc_get_version())"
+          uv run python -c "import cli.main, minimal.main, tui.main, web.main; print('all entry points import ok')"
+
+      - name: Run tests
+        run: uv run pytest -q

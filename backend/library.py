@@ -56,6 +56,14 @@ CREATE TABLE IF NOT EXISTS play_days (
     day   TEXT PRIMARY KEY,
     plays INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS song_tags (
+    video_id TEXT NOT NULL,
+    tag      TEXT NOT NULL,
+    PRIMARY KEY (video_id, tag)
+);
+
+CREATE INDEX IF NOT EXISTS idx_song_tags_tag ON song_tags(tag);
 """
 
 _COLUMNS = (
@@ -440,6 +448,192 @@ def get_tag_counts() -> list:
     return langs, names
 
 
+def downloaded_rows() -> list:
+    """Every downloaded song with its tags, by name."""
+    with _session() as conn:
+        rows = conn.execute(
+            "SELECT video_id, title, custom_title, artist, language "
+            "FROM songs WHERE downloaded = 1 AND song IS NOT NULL AND song != ''"
+        ).fetchall()
+        tag_rows = conn.execute("SELECT video_id, tag FROM song_tags").fetchall()
+    tags_by = {}
+    for t in tag_rows:
+        tags_by.setdefault(t["video_id"], []).append(t["tag"])
+    out = []
+    for r in rows:
+        out.append(
+            {
+                "video_id": r["video_id"],
+                "title": r["custom_title"] or r["title"] or r["video_id"],
+                "artist": r["artist"] or "",
+                "language": r["language"] or "",
+                "tags": sorted(tags_by.get(r["video_id"], [])),
+            }
+        )
+    return sorted(out, key=lambda row: row["title"].lower())
+
+
+def song_tags(video_id: str) -> list:
+    """Free-form tags on one song, alphabetically."""
+    if not video_id:
+        return []
+    with _session() as conn:
+        rows = conn.execute(
+            "SELECT tag FROM song_tags WHERE video_id = ? ORDER BY tag",
+            (video_id,),
+        ).fetchall()
+    return [r["tag"] for r in rows]
+
+
+def all_song_tags() -> list:
+    """Every free-form tag and how many songs carry it, most used first."""
+    with _session() as conn:
+        rows = conn.execute(
+            "SELECT tag, COUNT(*) AS n FROM song_tags GROUP BY tag"
+        ).fetchall()
+    return sorted(((r["tag"], int(r["n"])) for r in rows), key=lambda kv: (-kv[1], kv[0]))
+
+
+def set_song_tag(video_id: str, tag: str, on: bool = True) -> bool:
+    """Add (`on=True`) or remove one free-form tag on a song. False if unknown."""
+    tag = (tag or "").strip()
+    if not video_id or not tag:
+        return False
+    with _write() as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM songs WHERE video_id = ?", (video_id,)
+        ).fetchone()
+        if exists is None:
+            return False
+        if on:
+            conn.execute(
+                "INSERT OR IGNORE INTO song_tags (video_id, tag) VALUES (?, ?)",
+                (video_id, tag),
+            )
+        else:
+            conn.execute(
+                "DELETE FROM song_tags WHERE video_id = ? AND tag = ?",
+                (video_id, tag),
+            )
+        return True
+
+
+def clear_song_tags(video_id: str) -> int:
+    """Remove every free-form tag from a song; returns how many were dropped."""
+    with _write() as conn:
+        cur = conn.execute("DELETE FROM song_tags WHERE video_id = ?", (video_id,))
+        return cur.rowcount
+
+
+def rename_tag(old: str, new: str) -> int:
+    """Rename a free-form tag on every song; returns how many songs changed."""
+    old, new = (old or "").strip(), (new or "").strip()
+    if not old or not new or old == new:
+        return 0
+    with _write() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO song_tags (video_id, tag) "
+            "SELECT video_id, ? FROM song_tags WHERE tag = ?",
+            (new, old),
+        )
+        cur = conn.execute("DELETE FROM song_tags WHERE tag = ?", (old,))
+        return cur.rowcount
+
+
+def delete_tag(tag: str) -> int:
+    """Drop a free-form tag from every song; returns how many songs changed."""
+    tag = (tag or "").strip()
+    if not tag:
+        return 0
+    with _write() as conn:
+        cur = conn.execute("DELETE FROM song_tags WHERE tag = ?", (tag,))
+        return cur.rowcount
+
+
+def _tag_field(field: str) -> str:
+    """Map a user field name to the songs column it edits."""
+    return "artist" if (field or "").strip().lower() in ("artist", "ar") else "language"
+
+
+def _field_parts(value) -> list:
+    return [part.strip() for part in (value or "").split(",") if part.strip()]
+
+
+def rename_field_tag(field: str, old: str, new: str) -> int:
+    """Rename one value inside the comma-separated `language`/`artist` column."""
+    field = _tag_field(field)
+    old, new = (old or "").strip(), (new or "").strip()
+    if not old or not new or old.lower() == new.lower():
+        return 0
+    with _write() as conn:
+        rows = conn.execute(
+            f"SELECT video_id, {field} AS value FROM songs"
+            f" WHERE {field} IS NOT NULL"
+        ).fetchall()
+        changed = 0
+        for r in rows:
+            parts = _field_parts(r["value"])
+            if old.lower() not in (p.lower() for p in parts):
+                continue
+            kept, seen = [], set()
+            for part in parts:
+                if part.lower() == old.lower():
+                    if new.lower() not in seen:
+                        kept.append(new)
+                        seen.add(new.lower())
+                elif part.lower() not in seen:
+                    kept.append(part)
+                    seen.add(part.lower())
+            conn.execute(
+                f"UPDATE songs SET {field} = ? WHERE video_id = ?",
+                (", ".join(kept), r["video_id"]),
+            )
+            changed += 1
+        return changed
+
+
+def delete_field_tag(field: str, value: str) -> int:
+    """Drop one value out of the comma-separated `language`/`artist` column."""
+    field = _tag_field(field)
+    value = (value or "").strip()
+    if not value:
+        return 0
+    with _write() as conn:
+        rows = conn.execute(
+            f"SELECT video_id, {field} AS value FROM songs"
+            f" WHERE {field} IS NOT NULL"
+        ).fetchall()
+        changed = 0
+        for r in rows:
+            parts = _field_parts(r["value"])
+            if value.lower() not in (p.lower() for p in parts):
+                continue
+            kept = [p for p in parts if p.lower() != value.lower()]
+            conn.execute(
+                f"UPDATE songs SET {field} = ? WHERE video_id = ?",
+                (", ".join(kept) if kept else None, r["video_id"]),
+            )
+            changed += 1
+        return changed
+
+
+def set_song_field(video_id: str, field: str, value: str) -> bool:
+    """Set a song's whole `language`/`artist` value; an empty string clears it."""
+    field = _tag_field(field)
+    value = (value or "").strip()
+    with _write() as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM songs WHERE video_id = ?", (video_id,)
+        ).fetchone()
+        if exists is None:
+            return False
+        conn.execute(
+            f"UPDATE songs SET {field} = ? WHERE video_id = ?",
+            (value or None, video_id),
+        )
+        return True
+
+
 def _default_entry(video_id: str, title: str = "") -> dict:
     return {
         "liked": False,
@@ -709,6 +903,8 @@ def clear_download(video_id: str):
         return True
 
     _mutate(mutate)
+    with _write() as conn:
+        conn.execute("DELETE FROM song_tags WHERE video_id = ?", (video_id,))
 
 
 def _forgettable(entry: dict) -> bool:

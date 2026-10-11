@@ -6,6 +6,8 @@ import threading
 import time
 
 from backend import config
+from backend import ipc
+from backend import platform
 
 BUS_NAME = "org.mpris.MediaPlayer2.flow"
 OBJECT_PATH = "/org/mpris/MediaPlayer2"
@@ -89,32 +91,25 @@ def _next_trackid() -> str:
 
 
 class _Control:
-    """Sends flow's control signals to the current process (the player)."""
-
-    @staticmethod
-    def _kill(sig):
-        try:
-            os.kill(os.getpid(), sig)
-        except OSError:
-            pass
+    """Sends control actions to the current process."""
 
     def play(self):
-        self._kill(config.SIG_STOP)
+        ipc.dispatch("pause")
 
     def pause(self):
-        self._kill(config.SIG_STOP)
+        ipc.dispatch("pause")
 
     def playpause(self):
-        self._kill(config.SIG_STOP)
+        ipc.dispatch("pause")
 
     def stop(self):
-        self._kill(config.SIG_STOP_ALL)
+        ipc.dispatch("stop_all")
 
     def next(self):
-        self._kill(config.SIG_NEXT)
+        ipc.dispatch("next")
 
     def previous(self):
-        self._kill(config.SIG_PREV)
+        ipc.dispatch("prev")
 
 
 def _art_uri(value):
@@ -738,7 +733,11 @@ class _StubBackend:
 
 
 def _build_backend():
-    if _DBUS_OK:
+    if platform.is_windows():
+        # D-Bus/MPRIS is a Linux desktop integration; dbus_fast.aio
+        # cannot import on Windows (no socket.CMSG_LEN).
+        backend = _StubBackend()
+    elif _DBUS_OK:
         backend = _GlibBackend()
     elif _FAST_OK:
         backend = _FastBackend()

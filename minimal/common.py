@@ -6,7 +6,7 @@ import time
 import types
 import urllib.request
 
-from backend import config, library, registry, status
+from backend import config, ipc, library, registry, status
 
 
 def ns(**over):
@@ -48,16 +48,15 @@ def web_command(port, command, payload=None):
         return False
 
 
-def signal(command, sig, payload=None):
-    """Signal the player (VLC pid first, web player as fallback); returns its pid or "web"."""
+def signal(action, payload=None):
+    """Deliver a control action to the running player; returns its pid or "web"."""
     entry = registry.resolve("vlc")
     if entry is not None:
-        try:
-            os.kill(entry["pid"], sig)
+        if ipc.send(entry, action, payload):
             return entry["pid"]
-        except ProcessLookupError:
-            config.clear_pid_if(entry["pid"])
+        config.clear_pid_if(entry["pid"])
     web = registry.resolve("web")
+    command = ipc.WEB_COMMANDS.get(action, action)
     if web is not None and web.get("port") and web_command(web["port"], command, payload):
         return "web"
     return None

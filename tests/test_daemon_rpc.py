@@ -74,7 +74,7 @@ def test_raw_cli_gated_without_capability():
 
 
 def test_players_method_reflects_registry():
-    proc = subprocess.Popen(["sleep", "60"])
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     try:
         registry.register("vlc", proc.pid)
         resp = rpc.handle({"method": "players"})
@@ -105,7 +105,7 @@ def test_pause_routes_to_web_command_file_when_no_player():
 # E2E: real daemon socket
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not HAS_FLOW, reason="flow binary not available")
+@pytest.mark.skipif(not HAS_FLOW or os.name == "nt", reason="flow binary not available, or Windows socket daemon not exercised here")
 def test_daemon_socket_e2e():
     flow = _flow_bin()
     sock_path = str(Path(os.environ["HOME"]) / ".flow/flow.sock")

@@ -1,4 +1,3 @@
-import curses
 import re
 import shutil
 import subprocess
@@ -7,6 +6,11 @@ import threading
 import numpy as np
 import sounddevice as sd
 from backend import config
+
+try:
+    import curses
+except ImportError:
+    curses = None
 
 BLOCK_SIZE = 4096
 SAMPLE_RATE = 48000
@@ -29,6 +33,8 @@ _status_shuffle = False
 _status_repeat = False
 _status_next = None
 _status_paused = False
+_status_artist = ""
+_status_album = ""
 
 
 def _ansi_to_curses_color(ansi_code):
@@ -204,6 +210,8 @@ def _audio_callback(indata, frames, time_info, status):
 
 def start(stdscr, ansi_color):
     global _stream, _bins, _bars, _peak, _stdscr, _orig_source
+    if curses is None:
+        return False
     if _stream is not None:
         return
     _stdscr = stdscr
@@ -247,12 +255,16 @@ def start(stdscr, ansi_color):
     return True
 
 
-def set_status(title=None, shuffle=False, repeat=False, next_title=None):
+def set_status(title=None, shuffle=False, repeat=False, next_title=None,
+               artist="", album=""):
     global _status_title, _status_shuffle, _status_repeat, _status_next
+    global _status_artist, _status_album
     _status_title = title
     _status_shuffle = shuffle
     _status_repeat = repeat
     _status_next = next_title
+    _status_artist = artist or ""
+    _status_album = album or ""
 
 
 def set_paused(paused):
@@ -317,6 +329,8 @@ def _draw_footer(max_y, max_x):
         and not _status_shuffle
         and not _status_repeat
         and not _status_next
+        and not _status_artist
+        and not _status_album
         and not _status_paused
     ):
         return
@@ -333,6 +347,12 @@ def _draw_footer(max_y, max_x):
         if len(n) > 24:
             n = n[:23] + "…"
         badges.append(f"[Next: {n}]")
+    for extra in (_status_artist, _status_album):
+        if extra:
+            e = extra
+            if len(e) > 24:
+                e = e[:23] + "…"
+            badges.append(f"[{e}]")
 
     title_row = max_y - 1
     badge_row = max_y - 2

@@ -1,5 +1,4 @@
 import argparse
-import os
 
 
 def _running_pid():
@@ -13,23 +12,19 @@ def _running_pid():
     return None
 
 
-def _is_tui_pid(pid):
-    """True when the pid belongs to a running Flow TUI."""
-    from backend import registry
+def _control(action, label, require_tui=False):
+    from backend import ipc, registry
 
-    entry = registry.resolve("tui")
-    return entry is not None and entry["pid"] == pid
-
-
-def _control(sig, label, require_tui=False):
     pid = _running_pid()
     if pid is None:
         return False, f"{label}: no running Flow player (start `flowt` first)"
-    if require_tui and not _is_tui_pid(pid):
-        return False, f"{label}: no running Flow TUI (start `flowt` first)"
-    try:
-        os.kill(pid, sig)
-    except ProcessLookupError:
+    if require_tui:
+        entry = registry.resolve("tui")
+        if entry is None or entry["pid"] != pid:
+            return False, f"{label}: no running Flow TUI (start `flowt` first)"
+    else:
+        entry = registry.resolve("vlc") or registry.resolve("tui")
+    if not ipc.send(entry, action):
         return False, f"{label}: player PID {pid} is gone"
     return True, f"{label} (PID {pid})"
 
@@ -81,24 +76,24 @@ def main():
         _show_status()
         return
 
-    from backend import config
-
     controls = (
-        (args.pause, config.SIG_STOP, "Pause toggled", False),
-        (args.next, config.SIG_NEXT, "Next", False),
-        (args.previous, config.SIG_PREV, "Previous", False),
-        (args.repeat, config.SIG_REPEAT, "Repeat toggled", True),
-        (args.shuffle, config.SIG_SHUFFLE, "Shuffle toggled", True),
+        (args.pause, "pause", "Pause toggled", False),
+        (args.next, "next", "Next", False),
+        (args.previous, "prev", "Previous", False),
+        (args.repeat, "repeat", "Repeat toggled", True),
+        (args.shuffle, "shuffle", "Shuffle toggled", True),
     )
     active = [
-        (sig, label, require_tui) for flag, sig, label, require_tui in controls if flag
+        (action, label, require_tui)
+        for flag, action, label, require_tui in controls
+        if flag
     ]
     hard = args.pause or args.next or args.previous
 
     if active and _running_pid() is not None:
         delivered = True
-        for sig, label, require_tui in active:
-            ok, msg = _control(sig, label, require_tui=require_tui)
+        for action, label, require_tui in active:
+            ok, msg = _control(action, label, require_tui=require_tui)
             print(msg)
             if require_tui and not ok:
                 delivered = False

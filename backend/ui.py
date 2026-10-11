@@ -4,32 +4,36 @@ from backend import config
 def questionary_style(mode="online"):
     from questionary import Style
 
-    def name(ansi_code):
-        return config._cname(ansi_code)
+    def name(style):
+        return config._cname(style)
+
+    primary = config._STYLE["primary"]
+    secondary = config._STYLE["secondary"]
+    tertiary = config._STYLE["tertiary"]
 
     if mode == "online":
         return Style(
             [
-                ("qmark", f"fg:{name(config.Primary)} bold"),
-                ("question", f"fg:{name(config.Primary)} bold"),
-                ("answer", f"fg:{name(config.Primary)} bold"),
-                ("pointer", f"fg:{name(config.Primary)} bold"),
-                ("highlighted", f"fg:{name(config.Primary)} bold"),
-                ("selected", f"fg:{name(config.Primary)}"),
-                ("instruction", f"fg:{name(config.Tertiary)}"),
+                ("qmark", f"fg:{name(primary)} bold"),
+                ("question", f"fg:{name(primary)} bold"),
+                ("answer", f"fg:{name(primary)} bold"),
+                ("pointer", f"fg:{name(primary)} bold"),
+                ("highlighted", f"fg:{name(primary)} bold"),
+                ("selected", f"fg:{name(primary)}"),
+                ("instruction", f"fg:{name(tertiary)}"),
                 ("text", ""),
             ]
         )
     else:
         return Style(
             [
-                ("qmark", f"fg:{name(config.Secondary)} bold"),
-                ("question", f"fg:{name(config.Secondary)} bold"),
-                ("answer", f"fg:{name(config.Secondary)} bold"),
-                ("pointer", f"fg:{name(config.Secondary)} bold"),
-                ("highlighted", f"fg:{name(config.Secondary)} bold"),
-                ("selected", f"fg:{name(config.Secondary)}"),
-                ("instruction", f"fg:{name(config.Tertiary)}"),
+                ("qmark", f"fg:{name(secondary)} bold"),
+                ("question", f"fg:{name(secondary)} bold"),
+                ("answer", f"fg:{name(secondary)} bold"),
+                ("pointer", f"fg:{name(secondary)} bold"),
+                ("highlighted", f"fg:{name(secondary)} bold"),
+                ("selected", f"fg:{name(secondary)}"),
+                ("instruction", f"fg:{name(tertiary)}"),
                 ("text", ""),
             ]
         )

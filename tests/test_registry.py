@@ -5,12 +5,14 @@ to end. All state lands under the scratch HOME from ``conftest.py``.
 """
 
 import subprocess
+import sys
 
 from backend import config, registry
 
 
 def _sleeper():
-    return subprocess.Popen(["sleep", "60"])
+    # `sleep` is a POSIX binary; a tiny Python process sleeps on every OS.
+    return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
 
 
 def _wait_dead(proc):

@@ -30,6 +30,8 @@ import os
 import pathlib
 import time
 
+from backend import platform
+
 HOME = pathlib.Path.home()
 STATE_DIR = HOME / ".flow"
 PLAYERS_FILE = STATE_DIR / "players.json"
@@ -63,13 +65,7 @@ def _write(data: dict):
 
 def _alive(pid) -> bool:
     """True when the pid belongs to a live process."""
-    if not pid:
-        return False
-    try:
-        os.kill(int(pid), 0)
-        return True
-    except (OSError, ValueError):
-        return False
+    return platform.pid_exists(pid)
 
 
 def entry(kind: str) -> dict | None:
@@ -80,7 +76,9 @@ def entry(kind: str) -> dict | None:
     return rec
 
 
-def register(kind: str, pid: int, port: int | None = None) -> dict:
+def register(
+    kind: str, pid: int, port: int | None = None, ctl_port: int | None = None
+) -> dict:
     """Register (or refresh) a live player of the given kind."""
     if kind not in KINDS:
         raise ValueError(f"unknown player kind {kind!r}")
@@ -88,6 +86,8 @@ def register(kind: str, pid: int, port: int | None = None) -> dict:
     rec = {"pid": int(pid), "ts": time.time()}
     if port is not None:
         rec["port"] = int(port)
+    if ctl_port is not None:
+        rec["ctl_port"] = int(ctl_port)
     data[kind] = rec
     _write(data)
     return rec
@@ -118,6 +118,8 @@ def live() -> list[dict]:
             row = {"kind": kind, "pid": int(rec["pid"])}
             if rec.get("port") is not None:
                 row["port"] = int(rec["port"])
+            if rec.get("ctl_port") is not None:
+                row["ctl_port"] = int(rec["ctl_port"])
             out.append(row)
     return out
 

@@ -15,7 +15,7 @@ def init(as_json=False):
     _json = bool(as_json)
     sys.stdout.flush()
     previous = _stdout
-    _stdout = os.fdopen(os.dup(1), "w", encoding="utf-8")
+    _stdout = os.fdopen(os.dup(1), "w", encoding="utf-8", newline="\n")
     if previous is not None:
         previous.close()
 
@@ -65,6 +65,10 @@ def quiet():
 def fork_bg():
     """Fork for background playback: the parent gets the child pid, the child goes quiet."""
     sys.stdout.flush()
+    from backend import platform
+
+    if not platform.can_fork():
+        return None
     pid = os.fork()
     if pid:
         from backend import config
