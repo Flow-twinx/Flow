@@ -113,11 +113,19 @@ def build_parser():
         radio.add_argument("--limit", type=int)
         radio.set_defaults(func=(lambda a, f=func: f(" ".join(a.seed) or None, limit=a.limit)))
 
-    tags = add("tags", "show tags, or backfill them with scan/apply")
-    tags.add_argument("action", nargs="?", choices=["list", "scan", "apply"], default="list")
-    tags.add_argument("path", nargs="?", help="preview file to apply")
-    tags.add_argument("-a", "--all", action="store_true", help="scan songs that already have a language tag")
-    tags.set_defaults(func=lambda a: extras.tags(a.action, all_songs=a.all, path=a.path))
+    tags = add("tags", "show tags, or maintain them: add/remove/rename/delete")
+    tags.add_argument(
+        "action",
+        nargs="?",
+        choices=["list", "add", "remove", "rename", "delete"],
+        default="list",
+    )
+    tags.add_argument(
+        "args",
+        nargs="*",
+        help="add/remove: <song> <tag>   rename: <tag> <new>   delete: <tag>",
+    )
+    tags.set_defaults(func=lambda a: extras.tags(a.action, list(a.args)))
 
     add("lyrics", "plain lyrics for the current track").set_defaults(func=lambda a: extras.lyrics())
 

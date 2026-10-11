@@ -131,7 +131,7 @@ download the matching index can be used the same way.
 | `rename <name or index>`       | Rename a downloaded song (offline; alias: `re`). You are then asked for the new name. An index is the number in the `list` output (ascending by name) and the prompt repeats it                                                   |
 | `lang <tag>`                   | Play every downloaded song with that language tag (offline). One word — `hindi`, `punjabi`, `telugu`, ... — set when the song was downloaded. Partial words work (`lang pun`); `-s` shuffles                                      |
 | `artist <name>`                | Play every song by that artist. Offline plays your downloads, online plays the YouTube results whose title credits the artist (falling back to the current track's artist). Partial words work; `-s` shuffles (alias: `ar`)       |
-| `tags [scan \| apply]`         | List the language and artist tags in your library. `tags scan` asks YouTube for each downloaded song's metadata and writes `~/.flow/tags-preview.tsv` (nothing is saved); `tags apply` writes that reviewed file into the library |
+| `tags [list \| add \| remove \| rename \| delete]` | Inspect or maintain tags. Bare `tags` opens an interactive editor; `tags add <song> <tag>` / `tags remove <song> <tag>` tag a song, `tags rename <old> <new>` renames a free-form tag everywhere, `tags delete <tag>` drops it everywhere |
 | `playlist <sub>`               | Manage playlists — see below                                                                                                                                                                                                      |
 | `switch`                       | Toggle between online and offline mode                                                                                                                                                                                            |
 | `config [target [value]]`      | Change settings; run bare for an interactive wizard                                                                                                                                                                               |
@@ -195,7 +195,7 @@ the credited artist (never the channel name). Everything else in a music video's
 title and description — credits, hashtags, `(Official Video)` — is thrown away.
 
 ```bash
-flow tags                     # what you can play by right now
+flow tags list                # what you can play by right now
 flow lang hindi               # every hindi download, ascending by name
 flow lang pun -s              # partial word, shuffled
 flow artist karan             # every Karan Aujla song, ascending by name
@@ -207,20 +207,24 @@ modes: offline it filters your library the same way; online there is no library
 to filter, so it keeps the search results whose **title** credits the artist and,
 when none of them do, falls back to the artist of the track that is playing.
 
-Songs downloaded before tags existed have none. `tags scan` asks YouTube about
-each of them, one at a time, and writes what it finds to
-`~/.flow/tags-preview.tsv` — one row per song, nothing saved to the library
-until you say so:
+Songs downloaded before tags existed have none. `tags` maintains them. Bare
+`tags` opens an interactive editor — pick language, artist or free-form tags,
+then set a value on songs, rename it everywhere or delete it everywhere. The
+plain forms are scriptable:
 
 ```bash
-flow tags scan     # writes ~/.flow/tags-preview.tsv
-$EDITOR ~/.flow/tags-preview.tsv    # read it, fix or drop rows you disagree with
-flow tags apply    # writes the file into library.db
+flow tags                      # interactive editor (in the shell)
+flow tags list                 # languages + artists + free-form tags
+flow tags add "Mitti" workout  # free-form tag on one song
+flow tags remove "Mitti" workout
+flow tags rename workout gym    # on every song that has it
+flow tags delete workout
 ```
 
-`apply` sets the language tag and only fills in an artist where there is none,
-so it never replaces an artist you already have. Add `all` (`flow tags scan all`)
-to re-scan songs that already have a language tag.
+`language` and `artist` come from YouTube's metadata at download time —
+`tags` fixes or extends them by hand. Free-form tags (`workout`, `roadtrip`,
+…) are yours to assign: create one with `tags add`, tidy up with
+rename/delete.
 
 ### export
 

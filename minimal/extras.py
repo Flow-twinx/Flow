@@ -4,13 +4,13 @@ import pathlib
 import random
 
 from backend import config, library, lyrics as lyrics_mod, playlist, status
-from backend.Offline import commands as off_commands
 from backend.Offline import file as lib
 from backend.Online import youtube
 from backend.status import _vid_from_thumb
 
 from . import core, out
 from .common import clock, current
+from .local import _one_download
 
 
 def radio(seed=None, limit=None):
@@ -44,27 +44,57 @@ def radio_off(seed=None, limit=None):
     core.play_paths(paths, label=f"radio  {len(paths)} local tracks")
 
 
-def tags(action=None, all_songs=False, path=None):
-    """Show language and artist tags, or run the backfill scan/apply."""
+def tags(action="list", args=None):
+    """Show tags, or maintain the free-form ones: add/remove/rename/delete."""
+    args = list(args or [])
     if action in (None, "list"):
         languages, artists = library.get_tag_counts()
+        custom = library.all_song_tags()
         rows = [{"kind": "language", "tag": tag, "count": count} for tag, count in languages]
         rows += [{"kind": "artist", "tag": tag, "count": count} for tag, count in artists]
+        rows += [{"kind": "tag", "tag": tag, "count": count} for tag, count in custom]
         text = [f"{row['kind']:<8}  {row['tag']}  {row['count']}" for row in rows]
-        out.emit(rows, text or ["no tags yet - run: flow-min tags scan"])
+        out.emit(rows, text or ["no tags yet"])
         return
-    if action not in ("scan", "apply"):
-        out.fail(f"unknown tags action {action!r}; use list, scan or apply")
-    with out.quiet():
-        if action == "scan":
-            off_commands.scan_tags(["-a"] if all_songs else [])
-        else:
-            off_commands.apply_tags([path] if path else [])
-    languages, artists = library.get_tag_counts()
-    out.emit(
-        {"action": action, "languages": len(languages), "artists": len(artists)},
-        f"ok  {action}  ({len(languages)} languages, {len(artists)} artists)",
-    )
+    if action in ("add", "remove"):
+        if len(args) < 2:
+            out.fail(f"tags {action} needs a song and a tag: tags {action} <song> <tag>")
+        path = _one_download(args[0])
+        tag = " ".join(args[1:]).strip()
+        if not tag:
+            out.fail(f"tags {action}: empty tag")
+        with out.quiet():
+            ok = library.set_song_tag(pathlib.Path(path).stem, tag, action == "add")
+        if not ok:
+            out.fail(f"could not {action} the tag on {args[0]!r}")
+        out.emit(
+            {"status": action, "tag": tag, "song": lib.display_name(path)},
+            f"{'tagged' if action == 'add' else 'untagged'}  '{tag}'  on  {lib.display_name(path)}",
+        )
+        return
+    if action == "rename":
+        if len(args) < 2:
+            out.fail("tags rename needs a tag and its new name: rename <tag> <new>")
+        old, new = args[0], " ".join(args[1:]).strip()
+        with out.quiet():
+            changed = library.rename_tag(old, new)
+        out.emit(
+            {"status": "renamed", "old": old, "new": new, "songs": changed},
+            f"renamed  '{old}' -> '{new}'  ({changed} song(s))",
+        )
+        return
+    if action == "delete":
+        if not args:
+            out.fail("tags delete needs a tag: delete <tag>")
+        tag = " ".join(args).strip()
+        with out.quiet():
+            changed = library.delete_tag(tag)
+        out.emit(
+            {"status": "deleted", "tag": tag, "songs": changed},
+            f"deleted  '{tag}'  ({changed} song(s))",
+        )
+        return
+    out.fail(f"unknown tags action {action!r}; use list, add, remove, rename or delete")
 
 
 def lyrics():

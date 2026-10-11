@@ -108,7 +108,7 @@ COMMANDS = {
     "rename": "Rename a downloaded song (alias: re)",
     "lang": "Play songs by language tag | lang <tag> | -s shuffle",
     "artist": "Play songs by artist | artist <name> | -s shuffle",
-    "tags": "Library tags | tags | tags scan (preview) | tags apply",
+    "tags": "Library tags | tags (editor) | tags list/add/remove/rename/delete",
     "playlist": "Manage playlists | create add remove list play rename move dup merge sort clear dedupe info export import (-m for multi add/remove) (alias: plist)",
     "switch": "Switch to Online mode (checks connection)",
     "help": "Show this help message",
@@ -146,7 +146,10 @@ class _Completer:
                 words = library.get_tag_counts()[index]
                 options = sorted(w for w, _ in words if w.startswith(text.lower()))
             elif parts[0] == "tags":
-                options = [a for a in ("scan", "apply", "all") if a.startswith(text)]
+                options = [
+                    a for a in ("list", "add", "remove", "rename", "delete")
+                    if a.startswith(text)
+                ]
             else:
                 options = []
             self.matches = options
@@ -932,8 +935,10 @@ def artist_track(extra, args):
 def list_tags():
     """What the library can be played by right now."""
     langs, artists = library.get_tag_counts()
-    if not langs and not artists:
-        e("No tags yet - run: tags scan")
+    custom = library.all_song_tags()
+    if not langs and not artists and not custom:
+        e("No tags yet")
+        m("  Try: tags add <song> <tag>  (bare `tags` opens the editor)")
         return
     if langs:
         m("\nLanguages:")
@@ -943,110 +948,416 @@ def list_tags():
         m("\nArtists:")
         for word, count in artists:
             m(f"  {word} ({count})")
+    if custom:
+        m("\nTags:")
+        for word, count in custom:
+            m(f"  {word} ({count})")
 
 
-PREVIEW_FILE = config.DOWNLOAD_DIR.parent / "tags-preview.tsv"
+def edit_tags():
+    """Interactive tag editor: language, artist and free-form tags."""
+    from ..ui import pick
 
-
-def _preview_targets(force):
-    rows = []
-    for video_id, entry in library.load().items():
-        if not entry.get("downloaded"):
-            continue
-        if force or not (entry.get("language") or "").strip():
-            rows.append((video_id, entry.get("title") or video_id))
-    return rows
-
-
-def scan_tags(extra):
-    """`tags scan` writes the tags YouTube reports to a file; nothing is saved."""
-    from ..Online import youtube
-    from ..tags import tags_from_info
-
-    force = any(x in ("-a", "--all", "all") for x in extra)
-    targets = _preview_targets(force)
-    if not targets:
-        m("     Every downloaded song already has a language tag")
+    try:
+        import questionary  # noqa: F401 - presence check
+    except ImportError:
+        questionary = None
+    if questionary is None:
+        e("Tag editor needs questionary; the plain forms still work:")
+        m("  tags list | tags add <song> <tag> | tags remove <song> <tag>")
+        m("  tags rename <tag> <new> | tags delete <tag>")
         return
-
-    lines = ["# video_id\tlanguage\tartist\ttitle"]
-    failed = []
-    for pos, (video_id, title) in enumerate(targets, 1):
-        print(f"\r{P}  [{pos}/{len(targets)}] {title[:46]:48}{R}", end="", flush=True)
-        info = youtube.fetch_info(video_id)
-        if not info:
-            failed.append(title)
-            continue
-        found = tags_from_info(info)
-        lines.append(
-            "\t".join(
-                [
-                    video_id,
-                    found.get("language") or "",
-                    (found.get("artist") or "").replace("\t", " "),
-                    title.replace("\t", " "),
-                ]
-            )
-        )
-    print("\r" + " " * 66 + "\r", end="")
-
-    PREVIEW_FILE.parent.mkdir(parents=True, exist_ok=True)
-    PREVIEW_FILE.write_text("\n".join(lines) + "\n")
-    i(f"  Preview written: {PREVIEW_FILE}")
-    i(f"  {len(lines) - 1} song(s), {len(failed)} failed")
-    m("  Nothing was saved. Review the file, then run: tags apply")
-
-
-def apply_tags(extra):
-    """`tags apply` writes the reviewed preview into library.db."""
-    path = pathlib.Path(next((x for x in extra if not x.startswith("-")), PREVIEW_FILE))
-    if not path.exists():
-        e(f"     No preview at {path} - run: tags scan")
-        return
-    saved_langs = 0
-    saved_artists = 0
-    missing = 0
-    for line in path.read_text().splitlines():
-        if not line.strip() or line.startswith("#"):
-            continue
-        parts = line.split("\t")
-        if len(parts) < 4:
-            continue
-        video_id, language, artist, title = parts[0], parts[1], parts[2], parts[3]
-        entry = library.get(video_id)
-        if entry is None:
-            missing += 1
-            continue
-        meta = {}
-        if language and language != (entry.get("language") or ""):
-            meta["language"] = language
-        if artist and not (entry.get("artist") or "").strip():
-            meta["artist"] = artist
-        if meta:
-            library.update_meta(video_id, meta)
-            saved_langs += "language" in meta
-            saved_artists += "artist" in meta
-    i(
-        f"  Saved {saved_langs} language tag(s), filled {saved_artists} missing artist(s)"
+    kind, used = pick(
+        "What do you want to edit?",
+        [
+            ("Language tags", "language"),
+            ("Artist tags", "artist"),
+            ("Free-form tags", "custom"),
+        ],
+        instruction="(↑↓ navigate, Enter to select)",
+        mode="offline",
     )
-    if missing:
-        m(f"  {missing} row(s) in the file are no longer in the library")
-    m("  Play with: lang <tag>  |  artist <name>")
+    if not used or kind is None:
+        return
+    if kind == "custom":
+        _edit_custom()
+    else:
+        label = "Language" if kind == "language" else "Artist"
+        _edit_field(kind, label)
+
+
+def _edit_field(field, label):
+    """Whole-tag and per-song editing for the language/artist column."""
+    from ..ui import pick, questionary_style
+
+    actions = [
+        (f"Set {label} value on songs", "set"),
+        (f"Rename a {label} value everywhere", "rename"),
+        (f"Delete a {label} value everywhere", "delete"),
+        ("Clear a song's value", "clear"),
+    ]
+    action, used = pick(
+        f"{label} tags - what do you want to do?",
+        actions,
+        instruction="(↑↓ navigate, Enter to select)",
+        mode="offline",
+    )
+    if not used or action is None:
+        return
+    style = questionary_style("offline")
+    if action == "set":
+        ids = _pick_songs(f"Which songs get this {label.lower()}?")
+        if ids is None:
+            return
+        if not ids:
+            m("    No songs picked")
+            return
+        value = _ask_text(f"{label} value (empty clears it):", style)
+        if value is None:
+            m("    Cancelled")
+            return
+        value = value.strip()
+        done = 0
+        for vid in ids:
+            if library.set_song_field(vid, field, value):
+                done += 1
+        m(f"     {label.lower()} set on {done} song(s)")
+    elif action == "rename":
+        _edit_field_rename(field, label, style)
+    elif action == "delete":
+        _edit_field_delete(field, label, style)
+    else:
+        _edit_field_clear(field, label, style)
+
+
+def _edit_field_rename(field, label, style):
+    from ..ui import pick
+
+    words = library.get_tag_counts()[0 if field == "language" else 1]
+    if not words:
+        m(f"     No {label.lower()} tags yet")
+        return
+    choice, used = pick(
+        f"Which {label.lower()} tag?",
+        [(f"{word} ({count})", word) for word, count in words],
+        instruction="(↑↓ navigate, Enter to select)",
+        mode="offline",
+    )
+    if not used or choice is None:
+        return
+    new = _ask_text(f"New name for '{choice}':", style, default=choice)
+    if new is None or not new.strip():
+        m("    Cancelled")
+        return
+    new = new.strip()
+    if new.lower() == choice.lower():
+        m(f"     Already named '{choice}'")
+        return
+    changed = library.rename_field_tag(field, choice, new)
+    m(f"     Renamed {choice!r} -> {new!r} on {changed} song(s)")
+
+
+def _edit_field_delete(field, label, style):
+    from ..ui import pick
+
+    words = library.get_tag_counts()[0 if field == "language" else 1]
+    if not words:
+        m(f"     No {label.lower()} tags yet")
+        return
+    choice, used = pick(
+        f"Which {label.lower()} tag?",
+        [(f"{word} ({count})", word) for word, count in words],
+        instruction="(↑↓ navigate, Enter to select)",
+        mode="offline",
+    )
+    if not used or choice is None:
+        return
+    if not _ask_confirm(f"Delete '{choice}' from every song?", style):
+        m("    Cancelled")
+        return
+    changed = library.delete_field_tag(field, choice)
+    m(f"     Deleted '{choice}' from {changed} song(s)")
+
+
+def _edit_field_clear(field, label, style):
+    row = _pick_one_song("Which song?")
+    if row is None:
+        return
+    if not (row.get("language") or row.get("artist")):
+        m("     That song has nothing to clear")
+        return
+    if not _ask_confirm(f"Clear {label.lower()} from '{row['title']}'?", style):
+        m("    Cancelled")
+        return
+    library.set_song_field(row["video_id"], field, "")
+    m(f"     Cleared {label.lower()} from '{row['title']}'")
+
+
+def _edit_custom():
+    """Interactive editing for the free-form tags."""
+    from ..ui import pick, questionary_style
+
+    actions = [
+        ("Add a tag to songs", "add"),
+        ("Remove a tag from a song", "remove"),
+        ("Rename a tag everywhere", "rename"),
+        ("Delete a tag everywhere", "delete"),
+        ("Clear all tags on a song", "clear"),
+    ]
+    action, used = pick(
+        "Free-form tags - what do you want to do?",
+        actions,
+        instruction="(↑↓ navigate, Enter to select)",
+        mode="offline",
+    )
+    if not used or action is None:
+        return
+    style = questionary_style("offline")
+    if action == "add":
+        existing = library.all_song_tags()
+        if existing:
+            m("     existing tags: " + ", ".join(word for word, _ in existing))
+        ids = _pick_songs("Which songs get the tag?")
+        if ids is None:
+            return
+        if not ids:
+            m("    No songs picked")
+            return
+        tag = _ask_text("Tag name:", style)
+        if tag is None:
+            m("    Cancelled")
+            return
+        tag = tag.strip()
+        if not tag:
+            m("    Empty tag - cancelled")
+            return
+        done = 0
+        for vid in ids:
+            if library.set_song_tag(vid, tag, True):
+                done += 1
+        m(f"     Tagged {done} song(s) with '{tag}'")
+    elif action == "remove":
+        row = _pick_one_song("Which song?")
+        if row is None:
+            return
+        tags = library.song_tags(row["video_id"])
+        if not tags:
+            m("     That song has no free-form tags")
+            return
+        choice, used = pick(
+            "Which tag?", [(t, t) for t in tags], mode="offline"
+        )
+        if not used or choice is None:
+            return
+        library.set_song_tag(row["video_id"], choice, False)
+        m(f"     Removed '{choice}' from '{row['title']}'")
+    elif action == "rename":
+        words = library.all_song_tags()
+        if not words:
+            m("     No free-form tags yet")
+            return
+        choice, used = pick(
+            "Which tag?",
+            [(f"{word} ({count})", word) for word, count in words],
+            mode="offline",
+        )
+        if not used or choice is None:
+            return
+        new = _ask_text(f"New name for '{choice}':", style, default=choice)
+        if new is None or not new.strip():
+            m("    Cancelled")
+            return
+        new = new.strip()
+        if new == choice:
+            m(f"     Already named '{choice}'")
+            return
+        changed = library.rename_tag(choice, new)
+        m(f"     Renamed {choice!r} -> {new!r} on {changed} song(s)")
+    elif action == "delete":
+        words = library.all_song_tags()
+        if not words:
+            m("     No free-form tags yet")
+            return
+        choice, used = pick(
+            "Which tag?",
+            [(f"{word} ({count})", word) for word, count in words],
+            mode="offline",
+        )
+        if not used or choice is None:
+            return
+        if not _ask_confirm(f"Delete '{choice}' from every song?", style):
+            m("    Cancelled")
+            return
+        changed = library.delete_tag(choice)
+        m(f"     Deleted '{choice}' from {changed} song(s)")
+    else:  # clear a song
+        row = _pick_one_song("Which song?")
+        if row is None:
+            return
+        if not library.song_tags(row["video_id"]):
+            m("     That song has no free-form tags")
+            return
+        if not _ask_confirm(f"Clear every tag on '{row['title']}'?", style):
+            m("    Cancelled")
+            return
+        dropped = library.clear_song_tags(row["video_id"])
+        m(f"     Cleared {dropped} tag(s) from '{row['title']}'")
+
+
+def _song_label(row):
+    parts = [row["title"]]
+    if row["artist"]:
+        parts.append(row["artist"])
+    if row["language"]:
+        parts.append(f"({row['language']})")
+    if row["tags"]:
+        parts.append("[" + ", ".join(row["tags"]) + "]")
+    return "  ".join(parts)
+
+
+def _pick_songs(prompt):
+    """Checkbox-pick downloaded songs; [] when none picked, None on cancel."""
+    rows = library.downloaded_rows()
+    if not rows:
+        m("     No downloaded songs to tag")
+        return None
+    from ..ui import pick_many
+
+    choices = [(_song_label(r), r["video_id"]) for r in rows]
+    picked, used = pick_many(prompt, choices, mode="offline")
+    if not used:
+        return None
+    return picked or []
+
+
+def _pick_one_song(prompt):
+    """Pick a single downloaded song row, or None on cancel."""
+    rows = library.downloaded_rows()
+    if not rows:
+        m("     No downloaded songs")
+        return None
+    from ..ui import pick
+
+    choice, used = pick(
+        prompt, [(_song_label(r), r) for r in rows], mode="offline"
+    )
+    if not used or choice is None:
+        return None
+    return choice
+
+
+def _ask_text(prompt, style, default=""):
+    try:
+        import questionary
+
+        return questionary.text(prompt, default=default, style=style).ask()
+    except KeyboardInterrupt, EOFError:
+        return None
+
+
+def _ask_confirm(prompt, style):
+    try:
+        import questionary
+
+        return questionary.confirm(prompt, style=style).ask()
+    except KeyboardInterrupt, EOFError:
+        return None
+
+
+def tags_add_song(extra):
+    """`tags add <song> <tag>` puts a free-form tag on one downloaded song."""
+    if len(extra) < 2:
+        e("Usage: tags add <song> <tag>")
+        return
+    path = _one_song(extra[0])
+    if path is None:
+        e("     No downloaded song matching that name")
+        return
+    tag = " ".join(extra[1:]).strip()
+    if not tag:
+        e("Usage: tags add <song> <tag>")
+        return
+    if library.set_song_tag(path.stem, tag, True):
+        m(f"     Tagged '{_truncate(path)}' with '{tag}'")
+    else:
+        e("     Could not tag that song")
+
+
+def tags_remove_song(extra):
+    """`tags remove <song> <tag>` takes a free-form tag off one downloaded song."""
+    if len(extra) < 2:
+        e("Usage: tags remove <song> <tag>")
+        return
+    path = _one_song(extra[0])
+    if path is None:
+        e("     No downloaded song matching that name")
+        return
+    tag = " ".join(extra[1:]).strip()
+    if library.set_song_tag(path.stem, tag, False):
+        m(f"     Removed '{tag}' from '{_truncate(path)}'")
+
+
+def tags_rename(extra):
+    """`tags rename <tag> <new>` renames a free-form tag on every song."""
+    if len(extra) < 2:
+        e("Usage: tags rename <tag> <new tag>")
+        return
+    old = extra[0]
+    new = " ".join(extra[1:]).strip()
+    changed = library.rename_tag(old, new)
+    if changed:
+        m(f"     Renamed '{old}' -> '{new}' on {changed} song(s)")
+    else:
+        m(f"     No song uses tag '{old}'")
+
+
+def tags_delete(extra):
+    """`tags delete <tag>` drops a free-form tag from every song."""
+    if not extra:
+        e("Usage: tags delete <tag>")
+        return
+    tag = " ".join(extra).strip()
+    changed = library.delete_tag(tag)
+    if changed:
+        m(f"     Deleted tag '{tag}' from {changed} song(s)")
+    else:
+        m(f"     No song uses tag '{tag}'")
+
+
+def _one_song(query):
+    """Resolve a name/index to one downloaded song path, or None."""
+    targets = _match_songs(query, prefer_library=True)
+    if not targets:
+        return None
+    if len(targets) > 1:
+        return _pick_target(targets, "tag")
+    return targets[0]
 
 
 def tags_cmd(extra, args):
-    """`tags` lists tags, `tags scan` previews fresh metadata, `tags apply` saves it."""
-    action = extra[0].lower() if extra else ""
+    """`tags` opens the tag editor; `tags list|add|remove|rename|delete` are scriptable."""
+    if not extra:
+        if sys.stdin.isatty():
+            edit_tags()
+        else:
+            list_tags()
+        return
+    action = extra[0].lower()
     rest = extra[1:]
-    if action == "scan":
-        scan_tags(rest)
-    elif action == "apply":
-        apply_tags(rest)
-    elif not action:
+    if action == "list":
         list_tags()
+    elif action == "add":
+        tags_add_song(rest)
+    elif action == "remove":
+        tags_remove_song(rest)
+    elif action == "rename":
+        tags_rename(rest)
+    elif action == "delete":
+        tags_delete(rest)
     else:
         e(f"Unknown tags action: {action}")
-        m("  Try: tags | tags scan | tags apply")
+        m("  Try: tags | tags list | tags add <song> <tag>")
+        m("       tags remove <song> <tag> | tags rename <tag> <new> | tags delete <tag>")
 
 
 def switch_mode():

@@ -448,11 +448,6 @@ def main():
         help="download the currently playing song (requires an active player)",
     )
     parser.add_argument(
-        "--meta",
-        action="store_true",
-        help="backfill metadata in library.db for already downloaded songs (temporary)",
-    )
-    parser.add_argument(
         "--summary",
         action="store_true",
         help="play statistics; add -l for the ranked per-song table, -c to clear all plays",
@@ -628,8 +623,6 @@ def main():
         sys.exit(_act_current("unlike"))
     if getattr(args, "download", False):
         sys.exit(_act_current("download"))
-    if getattr(args, "meta", False):
-        sys.exit(_online_commands.backfill_metadata())
 
     forced_offline = False
     if getattr(args, "resume", False):
