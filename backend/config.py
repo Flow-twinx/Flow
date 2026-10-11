@@ -560,12 +560,51 @@ def _strip_filler(text):
     return text
 
 
+_TILE_CONTEXTS: dict = {}
+
+
+def _tile_context():
+    """Tile's junk/artist rules plus flow's `~/.flow/ignore.txt` words (cached)."""
+    from Tile import (
+        Context,
+        DEFAULT_ARTIST_FILE,
+        DEFAULT_IGNORE_FILE,
+        get_context,
+    )
+
+    def mtime(path):
+        try:
+            return path.stat().st_mtime_ns
+        except OSError:
+            return -1
+
+    key = (
+        str(IGNORE_FILE),
+        mtime(IGNORE_FILE),
+        str(DEFAULT_IGNORE_FILE),
+        mtime(DEFAULT_IGNORE_FILE),
+        str(DEFAULT_ARTIST_FILE),
+        mtime(DEFAULT_ARTIST_FILE),
+    )
+    if key not in _TILE_CONTEXTS:
+        tile = get_context(DEFAULT_IGNORE_FILE, DEFAULT_ARTIST_FILE)
+        flow = get_context(IGNORE_FILE, DEFAULT_ARTIST_FILE)
+        _TILE_CONTEXTS.clear()
+        _TILE_CONTEXTS[key] = Context(
+            strip_words=tile.strip_words | flow.strip_words,
+            soft_words=tile.soft_words | flow.soft_words,
+            phrases=tile.phrases | flow.phrases,
+            artists=tile.artists,
+            labels=tile.labels,
+        )
+    return _TILE_CONTEXTS[key]
+
+
 def extract_song(title):
-    for segment in _PIPE.split(title):
-        parts = [p for p in map(_strip_filler, _DASH.split(segment)) if p]
-        if parts:
-            return parts[1] if len(parts) > 1 else parts[0]
-    return ""
+    """The song name from a raw title, parsed by the Tile package."""
+    from Tile import parse_title
+
+    return parse_title(title or "", _tile_context())["title"]
 
 
 def _truncate_title(title):
