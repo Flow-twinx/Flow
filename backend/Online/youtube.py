@@ -7,6 +7,10 @@ import yt_dlp
 from backend import config, library, rich_display, sponsor
 
 logger = logging.getLogger(__name__)
+try:
+    from backend import logger as flog
+except Exception:
+    flog = None
 
 SEARCH_CACHE_MAX = 50
 _search_cache = {}
@@ -53,10 +57,20 @@ def search(query, limit=3):
     if key in _search_cache:
         return _search_cache[key]
     try:
+        from backend import logger as flog
+        flog.info("yt_dlp", "search", f"ytsearch{limit}:{query}", {"query": query, "limit": limit})
+    except Exception:
+        pass
+    try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(f"ytsearch{limit}:{query}", download=False)
     except Exception as exc:
         logger.warning("Search failed for %r: %s", query, exc)
+        try:
+            from backend import logger as flog
+            flog.error("yt_dlp", "search_error", str(exc), {"query": query}, exc_info=True)
+        except Exception:
+            pass
         return []
     if not info or not info.get("entries"):
         return []
@@ -128,6 +142,15 @@ def download_url(url, outdir, fmt=None, progress=False):
     if pps:
         opts["postprocessors"] = pps
     try:
+        from backend import logger as flog
+        flog.log_track_event("yt_dlp", "download_start", {"url": url, "fmt": fmt, "outdir": outdir}, {"url": url, "fmt": fmt})
+    except Exception:
+        try:
+            from backend import logger as flog
+            flog.info("yt_dlp", "download", f"downloading {url}", {"url": url, "fmt": fmt, "outdir": outdir})
+        except Exception:
+            pass
+    try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
@@ -137,21 +160,36 @@ def download_url(url, outdir, fmt=None, progress=False):
     except Exception as exc:
         rich_display.download_stop()
         logger.warning("Download failed for %s: %s", url, exc)
+        try:
+            from backend import logger as flog
+            flog.error("yt_dlp", "download_error", str(exc), {"url": url}, exc_info=True)
+        except Exception:
+            pass
         config.down_notify(url, error=True)
         raise
     rich_display.download_stop()
     if opts.get("progress_hooks"):
         sys.stdout.write("\r" + " " * 60 + "\r")
         sys.stdout.flush()
+    dl_info_full = {
+        "url": url,
+        "title": info.get("title", "Unknown"),
+        "video_id": info.get("id"),
+        "uploader": info.get("uploader", "Unknown"),
+        "artist": info.get("artist") or info.get("uploader", "Unknown"),
+        "duration": info.get("duration", 0),
+        "ext": info.get("ext"),
+        "filename": filename,
+        "filesize": info.get("filesize") or info.get("filesize_approx"),
+    }
+    try:
+        from backend import logger as flog
+        flog.log_track_event("yt_dlp", "download_complete", dl_info_full, dl_info_full)
+    except Exception:
+        pass
     config.dev_print(
         "YouTube Download",
-        {
-            "url": url,
-            "title": info.get("title", "Unknown"),
-            "video_id": info.get("id"),
-            "filename": filename,
-            "filesize": info.get("filesize") or info.get("filesize_approx"),
-        },
+        dl_info_full,
     )
     library.track_download(
         info.get("id"),

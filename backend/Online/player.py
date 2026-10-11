@@ -152,14 +152,39 @@ def _seek_current(payload=None):
 
 def _dispatch_action(action, payload=None):
     if action == "pause":
+        try:
+            from backend import logger
+            logger.log_track_event("player", "pause_toggle", {"title": _now.get("title")})
+        except Exception:
+            pass
         _sigusr1_toggle()
     elif action == "next":
+        try:
+            from backend import logger
+            logger.log_track_event("player", "next", {"title": _now.get("title")})
+        except Exception:
+            pass
         _sigusr2_next()
     elif action == "prev":
+        try:
+            from backend import logger
+            logger.log_track_event("player", "prev", {"title": _now.get("title")})
+        except Exception:
+            pass
         _sigusr3_prev()
     elif action == "stop_all":
+        try:
+            from backend import logger
+            logger.log_track_event("player", "stop_all", {"title": _now.get("title")})
+        except Exception:
+            pass
         _sigusr4_stop()
     elif action in ("seek_fwd", "seek_bwd"):
+        try:
+            from backend import logger
+            logger.log_track_event("player", "seek", {"title": _now.get("title"), "action": action, "payload": payload})
+        except Exception:
+            pass
         _seek_current(payload)
 
 

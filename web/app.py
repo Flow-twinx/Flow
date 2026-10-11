@@ -24,24 +24,29 @@ app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 @app.after_request
 def _log_response(response):
+    status_code = response.status_code
+    method = request.method
+    route = request.path
+    msg = ""
+    if (
+        hasattr(response, "get_json")
+        and response.content_type == "application/json"
+    ):
+        try:
+            body = response.get_json(silent=True)
+            if isinstance(body, dict):
+                if "error" in body:
+                    msg = str(body["error"])
+                elif "success" in body:
+                    msg = "ok"
+        except Exception:
+            pass
+    try:
+        from backend import logger as flog
+        flog.log_http("web", method, route, status_code, data={"message": msg, "source": "flask"})
+    except Exception:
+        pass
     if config.DEV_MODE:
-        status_code = response.status_code
-        method = request.method
-        route = request.path
-        msg = ""
-        if (
-            hasattr(response, "get_json")
-            and response.content_type == "application/json"
-        ):
-            try:
-                body = response.get_json(silent=True)
-                if isinstance(body, dict):
-                    if "error" in body:
-                        msg = body["error"]
-                    elif "success" in body:
-                        msg = "ok"
-            except Exception:
-                pass
         if status_code >= 500:
             devlog.log_error(method, status_code, route, "flask", msg)
         elif status_code >= 400:
@@ -53,11 +58,15 @@ def _log_response(response):
     return response
 
 
-if config.DEV_MODE:
+try:
     devlog.setup_werkzeug_handler()
-else:
-    for name in ("werkzeug", "werkzeug.serving", "flask.app"):
+except Exception:
+    pass
+for name in ("werkzeug", "werkzeug.serving", "flask.app"):
+    try:
         logging.getLogger(name).setLevel(logging.ERROR)
+    except Exception:
+        pass
 
 SETTINGS_FILE = pathlib.Path.home() / ".flow/web_ui.json"
 FLOW_DIR = pathlib.Path.home() / ".flow/downloads"
@@ -149,6 +158,11 @@ def _cached_search(query, limit):
     except Exception as exc:
         logger.warning("Search failed for %r: %s", query, exc)
         devlog.log_error("FETCH", 500, "/search", "yt_dlp", f"query={query} err={exc}")
+        try:
+            from backend import logger as flog
+            flog.error("web", "search_error", str(exc), {"query": query}, exc_info=True)
+        except Exception:
+            pass
         _search_cache[key] = results
         return results
     devlog.log_info(
@@ -597,6 +611,11 @@ def api_library_rename():
         return jsonify({"error": "missing video_id"}), 400
     if not library.rename(video_id, title):
         return jsonify({"error": "missing title"}), 400
+    try:
+        from backend import logger as flog
+        flog.info("web", "api_call", "rename", {"video_id": video_id, "path": "/api/library/rename"})
+    except Exception:
+        pass
     devlog.log_success("LIB", 200, "/api/library/rename", "flow", f"{video_id}")
     return jsonify({"success": True, "title": library.get_title(video_id)})
 
@@ -765,6 +784,11 @@ def api_control():
             {"error": f"invalid command, expected one of {sorted(control.COMMANDS)}"}
         ), 400
     control.send(command, delta=data.get("delta"))
+    try:
+        from backend import logger as flog
+        flog.info("web", "control", f"command={command}", {"command": command, "payload": data})
+    except Exception:
+        pass
     devlog.log_success("CTRL", 200, "/api/control", "flow", f"command={command}")
     return jsonify({"success": True, "command": command})
 

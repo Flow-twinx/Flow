@@ -79,12 +79,6 @@ def _modify_chapters_pp():
 
 
 def download_postprocessors():
-    """Postprocessor list for download mode, per the gating table above.
-
-    ModifyChapters (the ffmpeg-based physical cut) is only attached when both
-    `ad_skip` and `ffmpeg_available()` are true. Returns [] when disabled so
-    downloaders behave exactly as if the feature did not exist.
-    """
     if not enabled():
         return []
     pps = [sponsorblock_pp()]
@@ -94,24 +88,13 @@ def download_postprocessors():
 
 
 def stream_postprocessors():
-    """Postprocessor list for stream-mode extraction.
-
-    Attaches the metadata-only SponsorBlock pp (never ModifyChapters — nothing
-    is being cut). Note: yt-dlp only runs postprocessors during a real download,
-    so this alone will not populate `sponsorblock_chapters`; `stream_info()`
-    additionally fetches segments directly from the SponsorBlock API.
-    """
     if not enabled():
         return []
     return [sponsorblock_pp()]
 
 
 def fetch_segments(video_id, duration=None):
-    """Fetch SponsorBlock segments directly from the public API.
 
-    Falls back gracefully (logs a warning, returns []) if the API is down,
-    times out, or has no data for the video — never raises.
-    """
     if not video_id:
         return []
     try:
@@ -179,7 +162,7 @@ def segments(info):
         try:
             start = float(ch.get("start_time"))
             end = float(ch.get("end_time"))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if end > start:
             out.append(
@@ -240,12 +223,7 @@ def stream_info(url, opts=None, with_segments=True):
             ydl_opts["postprocessors"].append(sponsorblock_pp())
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
-    if (
-        with_segments
-        and info
-        and enabled()
-        and not info.get("sponsorblock_chapters")
-    ):
+    if with_segments and info and enabled() and not info.get("sponsorblock_chapters"):
         info = dict(info)
         info["sponsorblock_chapters"] = fetch_segments(
             info.get("id"), info.get("duration")
@@ -265,9 +243,7 @@ class VlcSkipThread(threading.Thread):
     def __init__(self, player, segments_list, interval=0.35):
         super().__init__(name="sponsor-skip", daemon=True)
         self._player = player
-        self._segments = sorted(
-            segments_list, key=lambda s: s.get("start_time", 0)
-        )
+        self._segments = sorted(segments_list, key=lambda s: s.get("start_time", 0))
         self._interval = interval
         self._stop_event = threading.Event()
         self._skipped = set()

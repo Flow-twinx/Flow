@@ -1,0 +1,770 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Install Flow</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..700&family=Instrument+Serif:ital@0;1&display=swap"
+            rel="stylesheet"
+        />
+        <script>
+            (function () {
+                var t = null;
+                try {
+                    t = localStorage.getItem("theme");
+                } catch (e) {}
+                if (t !== "light" && t !== "dark") {
+                    t =
+                        window.matchMedia &&
+                        window.matchMedia("(prefers-color-scheme: light)")
+                            .matches
+                            ? "light"
+                            : "dark";
+                }
+                document.documentElement.setAttribute("data-theme", t);
+            })();
+        </script>
+        <style>
+            :root {
+                --coral: #f76f53;
+                --sans:
+                    "Bricolage Grotesque", -apple-system, BlinkMacSystemFont,
+                    "Segoe UI", sans-serif;
+                --serif: "Instrument Serif", Georgia, serif;
+                --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+                --radius: 10px;
+            }
+            [data-theme="light"] {
+                --paper: #f2f0e3;
+                --ink: #2e2e2e;
+                --muted: rgba(0, 0, 0, 0.05);
+                --line: rgba(0, 0, 0, 0.12);
+                --faint: rgba(46, 46, 46, 0.65);
+                --code: rgba(0, 0, 0, 0.07);
+            }
+            [data-theme="dark"] {
+                --paper: #1f1f1f;
+                --ink: #d1cfc0;
+                --muted: rgba(255, 255, 255, 0.05);
+                --line: rgba(255, 255, 255, 0.12);
+                --faint: rgba(209, 207, 192, 0.65);
+                --code: rgba(0, 0, 0, 0.35);
+            }
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            html {
+                color-scheme: light dark;
+                scroll-behavior: smooth;
+            }
+            body {
+                font-family: var(--sans);
+                font-weight: 500;
+                line-height: 1.6;
+                max-width: 880px;
+                margin: 0 auto;
+                padding: 32px 20px 72px;
+                background: var(--paper);
+                color: var(--ink);
+                min-height: 100vh;
+                transition:
+                    background-color 0.3s ease,
+                    color 0.3s ease;
+            }
+            a {
+                color: var(--ink);
+                text-decoration: underline;
+                text-decoration-color: var(--coral);
+                text-underline-offset: 4px;
+                text-decoration-thickness: 2px;
+            }
+            :focus-visible {
+                outline: 2px solid var(--coral);
+                outline-offset: 3px;
+            }
+            .topbar {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin-bottom: 28px;
+            }
+            h1 {
+                font-family: var(--serif);
+                font-weight: 400;
+                font-size: 2.6em;
+                line-height: 1.1;
+                letter-spacing: -0.01em;
+            }
+            h1 em {
+                color: var(--coral);
+            }
+            .theme-toggle {
+                display: grid;
+                place-items: center;
+                width: 38px;
+                height: 38px;
+                border-radius: 50%;
+                border: 1px solid var(--line);
+                background: transparent;
+                color: var(--ink);
+                cursor: pointer;
+                transition: background-color 0.2s ease;
+            }
+            .theme-toggle:hover {
+                background: var(--muted);
+            }
+            .theme-toggle svg {
+                width: 18px;
+                height: 18px;
+            }
+            [data-theme="dark"] .moon,
+            [data-theme="light"] .sun {
+                display: none;
+            }
+            .sub {
+                color: var(--faint);
+                margin-bottom: 20px;
+            }
+            .crumbs {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                margin-bottom: 22px;
+            }
+            .crumb {
+                font: inherit;
+                font-size: 0.85em;
+                padding: 5px 12px;
+                border-radius: 99px;
+                border: 1px solid var(--line);
+                background: var(--muted);
+                color: var(--ink);
+                cursor: pointer;
+            }
+            .crumb:hover {
+                border-color: var(--coral);
+            }
+            h2 {
+                font-family: var(--serif);
+                font-weight: 400;
+                font-size: 1.9em;
+                line-height: 1.1;
+                margin-bottom: 6px;
+            }
+            .pick {
+                display: grid;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 14px;
+                margin-top: 18px;
+            }
+            .card {
+                display: flex;
+                flex-direction: column;
+                align-items: flex-start;
+                text-align: left;
+                font: inherit;
+                color: inherit;
+                background: var(--muted);
+                border: 1px solid var(--line);
+                border-radius: var(--radius);
+                padding: 22px;
+                cursor: pointer;
+                transition: border-color 0.2s ease;
+                will-change: transform;
+            }
+            .card:hover,
+            .card.current {
+                border-color: var(--coral);
+            }
+            @media (prefers-reduced-motion: no-preference) {
+                .card:hover {
+                    transform: perspective(900px) translate3d(0, -6px, 20px)
+                        rotateX(2deg);
+                    box-shadow: -5px 5px 0 var(--coral);
+                }
+            }
+            .card svg {
+                width: 34px;
+                height: 34px;
+                margin-bottom: 12px;
+                stroke: var(--coral);
+                fill: none;
+                stroke-width: 1.6;
+                stroke-linecap: round;
+                stroke-linejoin: round;
+            }
+            .card .name {
+                font-family: var(--serif);
+                font-weight: 400;
+                font-size: 1.7em;
+                line-height: 1.1;
+            }
+            .card .meta {
+                font-size: 0.85em;
+                color: var(--faint);
+                margin-top: 6px;
+            }
+            .card .tag {
+                font-size: 0.75em;
+                color: var(--coral);
+                margin-top: 10px;
+            }
+            .bar {
+                height: 6px;
+                border-radius: 99px;
+                background: var(--muted);
+                border: 1px solid var(--line);
+                margin: 16px 0 20px;
+                overflow: hidden;
+            }
+            .bar i {
+                display: block;
+                height: 100%;
+                width: 0;
+                background: var(--coral);
+                transition: width 0.3s ease;
+            }
+            .step {
+                display: flex;
+                gap: 14px;
+                background: var(--muted);
+                border: 1px solid var(--line);
+                border-radius: var(--radius);
+                padding: 18px;
+                margin-bottom: 12px;
+                transition:
+                    border-color 0.2s ease,
+                    opacity 0.2s ease;
+            }
+            .step.done {
+                opacity: 0.55;
+                border-color: var(--coral);
+            }
+            .step input {
+                accent-color: var(--coral);
+                width: 20px;
+                height: 20px;
+                margin-top: 4px;
+                flex: 0 0 auto;
+                cursor: pointer;
+            }
+            .step .body {
+                min-width: 0;
+                flex: 1;
+            }
+            .step h3 {
+                font-weight: 600;
+                font-size: 1.1em;
+                line-height: 1.3;
+            }
+            .step p {
+                color: var(--faint);
+                font-size: 0.95em;
+                margin-top: 4px;
+            }
+            .tip {
+                font-size: 0.9em;
+                margin-top: 10px;
+                padding-left: 12px;
+                border-left: 3px solid var(--coral);
+            }
+            .code {
+                position: relative;
+                margin-top: 10px;
+                background: var(--code);
+                border: 1px solid var(--line);
+                border-radius: 8px;
+            }
+            .code pre {
+                font-family: var(--mono);
+                font-size: 0.82em;
+                line-height: 1.7;
+                padding: 12px 74px 12px 14px;
+                overflow-x: auto;
+                white-space: pre;
+            }
+            .copy {
+                position: absolute;
+                top: 8px;
+                right: 8px;
+                font: inherit;
+                font-size: 0.75em;
+                font-weight: 700;
+                padding: 3px 10px;
+                border-radius: 6px;
+                border: 0;
+                background: var(--coral);
+                color: #1f1f1f;
+                cursor: pointer;
+            }
+            .copy:hover {
+                opacity: 0.88;
+            }
+            .notice {
+                background: var(--muted);
+                border: 1px solid var(--line);
+                border-left: 4px solid var(--coral);
+                border-bottom: 4px solid var(--coral);
+                border-radius: var(--radius);
+                padding: 22px 24px;
+                margin-top: 24px;
+            }
+            .notice h2 {
+                color: var(--coral);
+            }
+            .notice p {
+                margin-top: 6px;
+            }
+            .notice ul {
+                margin: 8px 0 0 20px;
+            }
+            .notice code {
+                font-family: var(--mono);
+                font-size: 0.9em;
+            }
+            .cta {
+                display: inline-block;
+                margin: 16px 10px 0 0;
+                padding: 9px 18px;
+                border-radius: 8px;
+                background: var(--coral);
+                color: #1f1f1f;
+                font-weight: 700;
+                text-decoration: none;
+            }
+            .cta:hover {
+                opacity: 0.88;
+            }
+            [hidden] {
+                display: none !important;
+            }
+            @media (max-width: 720px) {
+                .pick {
+                    grid-template-columns: 1fr;
+                }
+            }
+            @media (prefers-reduced-motion: reduce) {
+                * {
+                    transition: none !important;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="topbar">
+            <h1>Install <em>Flow</em></h1>
+            <button
+                class="theme-toggle"
+                id="themeToggle"
+                type="button"
+                aria-label="Toggle light and dark theme"
+                title="Toggle theme"
+            >
+                <svg
+                    class="sun"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                >
+                    <circle cx="12" cy="12" r="4" />
+                    <path
+                        d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"
+                    />
+                </svg>
+                <svg
+                    class="moon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                >
+                    <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+                </svg>
+            </button>
+        </div>
+
+        <p class="sub" id="tagline">
+            Answer two questions and get the exact steps for your setup.
+        </p>
+        <div class="crumbs" id="crumbs" hidden></div>
+        <main id="stage"></main>
+
+        <aside class="notice" role="note" aria-label="Help">
+            <h2>Stuck?</h2>
+            <p>
+                Run <code>flow --check</code> and send me the output. I can
+                usually spot the problem from it.
+            </p>
+            <a
+                class="cta"
+                href="https://app.slack.com/client/E09V59WQY1E/C0C9748QM7S"
+                target="_blank"
+                rel="noopener"
+                >Message me on Slack</a
+            >
+            <a class="cta" href="mailto:twinzler@proton.me">Mail me</a>
+        </aside>
+
+        <script>
+            (function () {
+                const root = document.documentElement;
+                document
+                    .getElementById("themeToggle")
+                    .addEventListener("click", () => {
+                        const next =
+                            root.getAttribute("data-theme") === "dark"
+                                ? "light"
+                                : "dark";
+                        root.setAttribute("data-theme", next);
+                        try {
+                            localStorage.setItem("theme", next);
+                        } catch (e) {}
+                    });
+            })();
+
+            const svg = (p) =>
+                `<svg viewBox="0 0 24 24" aria-hidden="true">${p}</svg>`;
+            const ICON = {
+                windows: svg(
+                    '<rect x="3" y="3" width="8" height="8"/><rect x="13" y="3" width="8" height="8"/><rect x="3" y="13" width="8" height="8"/><rect x="13" y="13" width="8" height="8"/>',
+                ),
+                macos: svg(
+                    '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+                ),
+                linux: svg(
+                    '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/>',
+                ),
+                binary: svg('<path d="M12 3v12M7 10l5 5 5-5M4 20h16"/>'),
+                pypi: svg(
+                    '<path d="M12 2l9 5v10l-9 5-9-5V7z"/><path d="M3 7l9 5 9-5M12 12v10"/>',
+                ),
+                manual: svg(
+                    '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 7v10M18 11c0 4-6 3-12 6"/>',
+                ),
+            };
+
+            const OS = {
+                windows: {
+                    name: "Windows",
+                    meta: "Windows 10 and 11, 64-bit",
+                    py: "py --version",
+                },
+                macos: {
+                    name: "macOS",
+                    meta: "Apple silicon (arm64)",
+                    py: "python3 --version",
+                },
+                linux: {
+                    name: "Linux",
+                    meta: "Debian, Ubuntu, Fedora, Arch",
+                    py: "python3 --version",
+                },
+            };
+            const METHOD = {
+                binary: {
+                    name: "Binary",
+                    meta: "Fastest. Download a ready-made build, no Python setup.",
+                    tag: "recommended",
+                },
+                pypi: {
+                    name: "PyPI",
+                    meta: "One pip command. Easy to update later.",
+                    tag: "",
+                },
+                manual: {
+                    name: "Manual",
+                    meta: "Clone the repo with git. Best for hacking on Flow.",
+                    tag: "",
+                },
+            };
+
+            function detectOS() {
+                const ua = navigator.userAgent.toLowerCase();
+                if (ua.includes("windows")) return "windows";
+                if (ua.includes("mac")) return "macos";
+                if (ua.includes("linux") || ua.includes("x11")) return "linux";
+                return null;
+            }
+
+            function vlcStep(os) {
+                const s = {
+                    t: "Install VLC",
+                    d: "Flow plays audio through libvlc, so VLC must be installed before Flow starts. Flow finds a standard install on its own.",
+                };
+                if (os === "linux")
+                    s.code = [
+                        ["sudo apt install vlc        # Debian / Ubuntu"],
+                        ["sudo dnf install vlc        # Fedora"],
+                        ["sudo pacman -S vlc          # Arch"],
+                    ];
+                if (os === "macos") {
+                    s.code = ["brew install --cask vlc"];
+                    s.tip =
+                        "Keep VLC somewhere other than /Applications? Run this before starting Flow:";
+                    s.code2 = [
+                        'export VLC_PLUGIN_PATH="/path/to/VLC.app/Contents/MacOS/plugins"',
+                    ];
+                }
+                if (os === "windows") {
+                    s.link = [
+                        "https://www.videolan.org/vlc/",
+                        "Download the official VLC installer",
+                    ];
+                    s.tip =
+                        "Prefer no installer? Use the portable 64-bit zip, then point Flow at it in PowerShell before each launch:";
+                    s.code = [
+                        "https://get.videolan.org/vlc/3.0.21/win64/vlc-3.0.21-win64.zip",
+                    ];
+                    s.code2 = [
+                        '$env:PYTHON_VLC_LIB_PATH = "C:\\path\\to\\vlc\\libvlc.dll"',
+                        '$env:VLC_PLUGIN_PATH = "C:\\path\\to\\vlc\\plugins"',
+                    ];
+                }
+                return s;
+            }
+            const pythonStep = (os) => ({
+                t: "Check for Python 3.14 or newer",
+                d: "Flow needs Python 3.14+. If the version printed is older, install a newer Python from python.org first.",
+                code: [OS[os].py],
+            });
+            const ffmpegStep = (os) => ({
+                t: "Install ffmpeg (optional)",
+                d: "Only needed to download in opus, m4a or mp3. Without it, downloads fall back to webm. Skip this if webm is fine.",
+                code: [
+                    os === "linux"
+                        ? "sudo apt install ffmpeg"
+                        : os === "macos"
+                          ? "brew install ffmpeg"
+                          : "winget install ffmpeg",
+                ],
+            });
+            const verifyStep = () => ({
+                t: "Verify the install",
+                d: "Prints a table of core dependencies (ffmpeg, vlc, yt-dlp, psutil, flask, numpy, sounddevice, ytmusicapi) with pass or fail.",
+                code: ["flow --check"],
+            });
+
+            function build(os, m) {
+                const out = [vlcStep(os)];
+                if (m !== "binary") out.unshift(pythonStep(os));
+                out.push(ffmpegStep(os));
+                if (m === "pypi") {
+                    out.push({
+                        t: "Install Flow from PyPI",
+                        d: "Installs the package and its Python dependencies.",
+                        code: ["pip install flow-twinx"],
+                    });
+                    out.push({
+                        t: "Start Flow",
+                        d: "Opens the interactive shell.",
+                        code: ["flow"],
+                    });
+                }
+                if (m === "manual") {
+                    out.push({
+                        t: "Install git",
+                        d: "Needed to clone the repo, and later by the plugin system to clone plugins.",
+                        code: [
+                            os === "linux"
+                                ? "sudo apt install git"
+                                : os === "macos"
+                                  ? "brew install git"
+                                  : "winget install Git.Git",
+                        ],
+                    });
+                    out.push({
+                        t: "Clone the repository",
+                        d: "Downloads the source into a Flow folder.",
+                        code: [
+                            "git clone https://github.com/Twinx015/Flow.git",
+                            "cd Flow",
+                        ],
+                    });
+                    out.push({
+                        t: "Install dependencies",
+                        d: "uv is the quickest. Use pip if you don't have it.",
+                        code: ["uv sync            # or: pip install ."],
+                    });
+                    out.push({
+                        t: "Start Flow",
+                        d: "Runs Flow from the project folder.",
+                        code: ["uv run flow        # or: flow"],
+                    });
+                }
+                if (m === "binary") {
+                    const file =
+                        os === "windows"
+                            ? "the Windows .exe"
+                            : os === "macos"
+                              ? "the macOS build"
+                              : "the Linux build";
+                    out.push({
+                        t: "Download the latest build",
+                        d: `Open the latest release and download ${file}. The download page also highlights the right file for your system.`,
+                        link: [
+                            "https://github.com/Flow-twinx/Flow/releases/latest",
+                            "Open the latest release",
+                        ],
+                    });
+                    if (os === "windows")
+                        out.push({
+                            t: "Allow it to run",
+                            d: "If SmartScreen warns you, choose More info, then Run anyway. Then start Flow from PowerShell in the folder you saved it in.",
+                            code: [".\\flow.exe"],
+                        });
+                    else
+                        out.push({
+                            t: "Make it executable and run it",
+                            d: "Run these in the folder you downloaded to. Replace the file name with the one you downloaded.",
+                            code: ["chmod +x ./flow", "./flow"],
+                            tip:
+                                os === "macos"
+                                    ? "If macOS blocks it as an unidentified developer, clear the quarantine flag and run it again:"
+                                    : "",
+                            code2:
+                                os === "macos"
+                                    ? ["xattr -d com.apple.quarantine ./flow"]
+                                    : null,
+                        });
+                }
+                out.push(verifyStep());
+                return out;
+            }
+
+            const esc = (s) =>
+                String(s).replace(
+                    /[&<>"']/g,
+                    (c) =>
+                        ({
+                            "&": "&amp;",
+                            "<": "&lt;",
+                            ">": "&gt;",
+                            '"': "&quot;",
+                            "'": "&#39;",
+                        })[c],
+                );
+            const codeBlock = (lines) =>
+                `<div class="code"><pre>${esc(lines.join("\n"))}</pre><button class="copy" type="button" data-copy="${esc(lines.map((l) => l.replace(/\s+#.*$/, "")).join("\n"))}">Copy</button></div>`;
+            const codeBlocks = (code) =>
+                (Array.isArray(code[0]) ? code : [code])
+                    .map(codeBlock)
+                    .join("");
+
+            const state = { os: null, method: null };
+            const stage = document.getElementById("stage");
+            const crumbs = document.getElementById("crumbs");
+            const tagline = document.getElementById("tagline");
+
+            function pickCards(map, kind, current) {
+                return `<div class="pick">${Object.keys(map)
+                    .map(
+                        (k) => `
+    <button class="card ${k === current ? "current" : ""}" type="button" data-${kind}="${k}">
+      ${ICON[k]}<span class="name">${map[k].name}</span><span class="meta">${map[k].meta}</span>
+      ${kind === "os" && k === detectOS() ? '<span class="tag">your os</span>' : ""}${kind === "method" && map[k].tag ? `<span class="tag">${map[k].tag}</span>` : ""}
+    </button>`,
+                    )
+                    .join("")}</div>`;
+            }
+
+            function render() {
+                crumbs.hidden = !state.os;
+                crumbs.innerHTML = "";
+                if (state.os)
+                    crumbs.innerHTML += `<button class="crumb" data-back="os" type="button">${OS[state.os].name} ✎</button>`;
+                if (state.method)
+                    crumbs.innerHTML += `<button class="crumb" data-back="method" type="button">${METHOD[state.method].name} ✎</button>`;
+
+                if (!state.os) {
+                    tagline.textContent =
+                        "Answer two questions and get the exact steps for your setup.";
+                    stage.innerHTML = `<h2>Which system are you on?</h2>${pickCards(OS, "os", detectOS())}`;
+                } else if (!state.method) {
+                    tagline.textContent = `Installing on ${OS[state.os].name}.`;
+                    stage.innerHTML = `<h2>How do you want to install it?</h2>${pickCards(METHOD, "method", "binary")}`;
+                } else {
+                    tagline.textContent = `${METHOD[state.method].name} install on ${OS[state.os].name}. Tick each step as you finish it.`;
+                    const steps = build(state.os, state.method);
+                    stage.innerHTML =
+                        `<div class="bar"><i id="fill"></i></div>` +
+                        steps
+                            .map(
+                                (s, i) => `
+      <div class="step"><input type="checkbox" id="s${i}" aria-label="Mark step done" />
+        <div class="body"><label for="s${i}"><h3>${esc(s.t)}</h3></label><p>${esc(s.d)}</p>
+        ${s.link ? `<p><a href="${esc(s.link[0])}" target="_blank" rel="noopener">${esc(s.link[1])}</a></p>` : ""}
+        ${s.code ? codeBlocks(s.code) : ""}${s.tip ? `<p class="tip">${esc(s.tip)}</p>` : ""}${s.code2 ? codeBlocks(s.code2) : ""}
+        </div></div>`,
+                            )
+                            .join("") +
+                        `
+      <div class="notice" id="done" hidden><h2>Flow is installed.</h2>
+        <p>Pick the interface you like:</p>
+        <ul><li><code>flow</code> interactive CLI shell</li><li><code>flow-min</code> plain CLI for scripts, ssh and agents</li><li><code>flow-tui</code> full-screen TUI</li><li><code>flow-web</code> web GUI</li></ul></div>`;
+                    const boxes = [...stage.querySelectorAll(".step input")];
+                    boxes.forEach((b) =>
+                        b.addEventListener("change", () => {
+                            b.closest(".step").classList.toggle(
+                                "done",
+                                b.checked,
+                            );
+                            const n = boxes.filter((x) => x.checked).length;
+                            document.getElementById("fill").style.width =
+                                (n / boxes.length) * 100 + "%";
+                            document.getElementById("done").hidden =
+                                n !== boxes.length;
+                        }),
+                    );
+                }
+            }
+
+            document.addEventListener("click", (e) => {
+                const t = e.target.closest(
+                    "[data-os],[data-method],[data-back],[data-copy]",
+                );
+                if (!t) return;
+                if (t.dataset.os) {
+                    state.os = t.dataset.os;
+                    state.method = null;
+                    render();
+                } else if (t.dataset.method) {
+                    state.method = t.dataset.method;
+                    render();
+                } else if (t.dataset.back === "os") {
+                    state.os = null;
+                    state.method = null;
+                    render();
+                } else if (t.dataset.back === "method") {
+                    state.method = null;
+                    render();
+                } else if (t.dataset.copy !== undefined) {
+                    const done = () => {
+                        t.textContent = "Copied";
+                        setTimeout(() => (t.textContent = "Copy"), 1500);
+                    };
+                    try {
+                        navigator.clipboard
+                            .writeText(t.dataset.copy)
+                            .then(done, () => (t.textContent = "Press Ctrl+C"));
+                    } catch (err) {
+                        t.textContent = "Press Ctrl+C";
+                    }
+                }
+            });
+
+            render();
+        </script>
+    </body>
+</html>

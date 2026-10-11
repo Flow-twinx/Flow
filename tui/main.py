@@ -989,6 +989,20 @@ class Flow(App):
                 mode="offline" if track.kind == "local" else "online",
                 duration=int(track.duration or 0),
             )
+            try:
+                from backend import logger
+                track_info = {
+                    "title": track.title or "",
+                    "artist": artist,
+                    "video_id": video_id,
+                    "duration": int(track.duration or 0),
+                    "source": "tui",
+                    "mode": "offline" if track.kind == "local" else "online",
+                    "kind": track.kind,
+                }
+                logger.log_track_play("tui", track_info)
+            except Exception:
+                pass
         except Exception:
             pass
 

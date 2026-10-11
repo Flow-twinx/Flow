@@ -472,10 +472,35 @@ def cmd_run(extra) -> int:
         [sys.executable, str(entry_path), *plugin_args],
         cwd=str(dest),
         env=env,
-        stdout=log_file,
-        stderr=log_file,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
     _pid_file(name).write_text(str(proc.pid))
+
+    # Start threads to log plugin stdout/stderr
+    try:
+        from backend import logger
+
+        def _log_stream(stream_name):
+            try:
+                stream = getattr(proc, stream_name)
+                if stream is None:
+                    return
+                for line in iter(stream.readline, b""):
+                    try:
+                        text = line.decode("utf-8", errors="replace")
+                    except Exception:
+                        text = str(line)
+                    logger.log_process_output("plugin", name, stream_name, text)
+            except Exception:
+                pass
+
+        import threading
+        threading.Thread(target=_log_stream, args=("stdout",), daemon=True).start()
+        threading.Thread(target=_log_stream, args=("stderr",), daemon=True).start()
+        logger.info("plugin", "start", f"plugin '{name}' started", {"name": name, "pid": proc.pid, "bg": bg})
+    except Exception:
+        pass
 
     if bg:
         print(f"{P}Running plugin '{name}' in background (pid {proc.pid}){R}")
@@ -489,6 +514,11 @@ def cmd_run(extra) -> int:
         _kill_pid(name, proc.pid)
         return 130
     finally:
+        try:
+            from backend import logger
+            logger.info("plugin", "stop", f"plugin '{name}' stopped", {"name": name})
+        except Exception:
+            pass
         _pid_file(name).unlink(missing_ok=True)
 
 

@@ -1,9 +1,7 @@
-import logging
-import logging.handlers
 import pathlib
 import threading
 
-from backend import config
+from backend import config, logger
 
 e = config.RED
 s = config.GREEN
@@ -11,58 +9,82 @@ r = config.Reset
 w = config.ORANGE
 
 LOGS_DIR = pathlib.Path.home() / ".flow/LOGS"
-
-_handler = None
 _emit_lock = threading.Lock()
 
 
-def _make_handler():
-    LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    h = logging.handlers.RotatingFileHandler(
-        LOGS_DIR / "flow2.log", maxBytes=512_000, backupCount=3, encoding="utf-8"
-    )
-    h.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-    return h
-
-
 def setup_werkzeug_handler():
-    h = _make_handler()
-    for name in ("werkzeug", "werkzeug.serving"):
-        wlog = logging.getLogger(name)
-        wlog.handlers.clear()
-        wlog.addHandler(h)
-        wlog.setLevel(logging.WARNING)
+    """Setup werkzeug logging to use new logger system."""
+    try:
+        import logging
+
+        for name in ("werkzeug", "werkzeug.serving"):
+            wlog = logging.getLogger(name)
+            wlog.handlers.clear()
+            # Let it propagate to root, but we handle via our logger
+            wlog.setLevel(logging.WARNING)
+    except Exception:
+        pass
 
 
 def _emit(level, msg):
     if not config.DEV_MODE:
         return
-    global _handler
     with _emit_lock:
-        if _handler is None:
-            _handler = _make_handler()
+        try:
+            if level == logging.ERROR:
+                logger.error("web", "request", msg)
+            elif level == logging.WARNING:
+                logger.warn("web", "request", msg)
+            else:
+                logger.info("web", "request", msg)
+        except Exception:
+            pass
         print(msg, flush=True)
-        _handler.emit(logging.LogRecord("devlog", level, "", 0, msg, (), None))
 
 
 def log_error(method, status, route, source="", message=""):
-    _emit(
-        logging.ERROR, f"{e}[ERROR] [{source}] {method} {status} {route} - {message}{r}"
-    )
+    try:
+        import logging
+
+        full_msg = f"{e}[ERROR] [{source}] {method} {status} {route} - {message}{r}"
+        _emit(logging.ERROR, full_msg)
+        logger.error("web", "http", f"{method} {status} {route}", {"method": method, "status": status, "route": route, "source": source, "message": message})
+    except Exception:
+        pass
 
 
 def log_success(method, status, route, source="", message=""):
-    _emit(logging.INFO, f"{s}[OK] [{source}] {method} {status} {route} - {message}{r}")
+    try:
+        import logging
+
+        full_msg = f"{s}[OK] [{source}] {method} {status} {route} - {message}{r}"
+        _emit(logging.INFO, full_msg)
+        logger.info("web", "http", f"{method} {status} {route}", {"method": method, "status": status, "route": route, "source": source, "message": message})
+    except Exception:
+        pass
 
 
 def log_info(method, status, route, source="", message=""):
-    if route == "/api/control/poll":
-        return
-    _emit(logging.INFO, f"[INFO] [{source}] {method} {status} {route} - {message}")
+    try:
+        if route == "/api/control/poll":
+            # Still log to file but maybe skip console spam? But keep as requested - log everything
+            logger.debug("web", "http_poll", f"{method} {status} {route}", {"method": method, "status": status, "route": route})
+            return
+        import logging
+
+        full_msg = f"[INFO] [{source}] {method} {status} {route} - {message}"
+        _emit(logging.INFO, full_msg)
+        logger.info("web", "http", f"{method} {status} {route}", {"method": method, "status": status, "route": route, "source": source, "message": message})
+    except Exception:
+        pass
 
 
 def log_warn(method, status, route, source="", message=""):
-    _emit(
-        logging.WARNING,
-        f"{w}[WARN] [{source}] {method} {status} {route} - {message}{r}",
-    )
+    try:
+        import logging
+
+        full_msg = f"{w}[WARN] [{source}] {method} {status} {route} - {message}{r}"
+        _emit(logging.WARNING, full_msg)
+        logger.warn("web", "http", f"{method} {status} {route}", {"method": method, "status": status, "route": route, "source": source, "message": message})
+    except Exception:
+        pass

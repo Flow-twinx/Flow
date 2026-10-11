@@ -56,13 +56,15 @@ def _send_web_command(port, command, payload=None):
 
 
 def _send_control(action, label, payload=None):
-    from backend import ipc, registry
+    from backend import ipc, logger, registry
 
+    logger.info("cli", "control", f"send_control {action} {label}", {"action": action, "label": label, "payload": payload})
     entry = registry.resolve("vlc")
     if entry is not None:
         pid = entry["pid"]
         if ipc.send(entry, action, payload):
             print(f"{P}{label} (VLC PID: {pid}){R}")
+            logger.info("cli", "control_result", f"sent to vlc pid={pid}", {"target": "vlc", "pid": pid})
             return
         config.clear_pid_if(pid)
 
@@ -71,9 +73,11 @@ def _send_control(action, label, payload=None):
         command = ipc.WEB_COMMANDS.get(action, action)
         if _send_web_command(web["port"], command, payload):
             print(f"{P}{label} (web player){R}")
+            logger.info("cli", "control_result", f"sent to web port={web['port']}", {"target": "web", "port": web["port"]})
             return
 
     print(f"{M}No VLC or web player running{R}")
+    logger.warn("cli", "control_result", "no player running", {"action": action})
 
 
 def _spinner(stop):
@@ -715,9 +719,21 @@ def main():
             unknown = _summary_extra(args, unknown)
 
         try:
+            from backend import logger
+            logger.log_command("cli", args.command, unknown, {"mode": config.Mode})
+        except Exception:
+            pass
+        try:
             commands.run(args.command, unknown, args)
         except KeyboardInterrupt:
             pass
+        except Exception as e:
+            try:
+                from backend import logger
+                logger.error("cli", "command_error", str(e), {"command": args.command}, exc_info=True)
+            except Exception:
+                pass
+            raise
     else:
         show_banner()
         if unknown:
@@ -726,7 +742,13 @@ def main():
         try:
             while True:
                 try:
-                    parts = tui_input().strip().split()
+                    raw_input = tui_input().strip()
+                    try:
+                        from backend import logger
+                        logger.log_user_input("cli", raw_input)
+                    except Exception:
+                        pass
+                    parts = raw_input.split()
                     if not parts:
                         continue
                     cmd = parts[0].lower()
@@ -748,15 +770,26 @@ def main():
                     if plugins.dispatch(cmd, extra, cmd_args) is not None:
                         continue
                     try:
+                        from backend import logger
+                        logger.log_command("cli", cmd, extra, {"mode": config.Mode, "shell": True})
+                    except Exception:
+                        pass
+                    try:
                         commands.run(cmd, extra, cmd_args)
                     except KeyboardInterrupt:
                         config.clear_pid_if(os.getpid())
+                    except Exception as e:
+                        try:
+                            from backend import logger
+                            logger.error("cli", "command_error", str(e), {"command": cmd}, exc_info=True)
+                        except Exception:
+                            pass
                     if getattr(cmd_args, "bg", False):
                         break
                     if cmd == "switch":
                         commands = _load_commands()
                         show_banner()
-                except EOFError, KeyboardInterrupt:
+                except (EOFError, KeyboardInterrupt):
                     print(f"{M}\nGoodbye!{R}")
                     break
         finally:

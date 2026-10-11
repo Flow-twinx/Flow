@@ -23,6 +23,11 @@ def show_banner():
     builtins.print(f"{c}         Mode : {config.Mode}{config.Reset}")
     if config.DEV_MODE:
         print(f"     {config.RED}       [Dev Mode]{config.Reset}")
+    try:
+        from backend import logger
+        logger.debug("tui", "ui", "show_banner called", {"mode": config.Mode, "dev_mode": config.DEV_MODE})
+    except Exception:
+        pass
     builtins.print()
 
 

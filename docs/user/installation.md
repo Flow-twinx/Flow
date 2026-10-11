@@ -30,6 +30,16 @@ This installs four commands:
 - `flow-tui` — full-screen TUI
 - `flow-web` — web GUI
 
+## Install from the release page
+
+After installing binary for your os ,
+
+On linux and macos:
+
+```bash
+chmod +x binary_name
+```
+
 ## Install from PyPI
 
 ```bash
@@ -49,7 +59,7 @@ numpy, sounddevice, ytmusicapi) with pass/fail status.
 ## Installing VLC
 
 Flow plays audio through libvlc via `python-vlc`. `python-vlc` resolves the
-library at `import vlc` time, so VLC must be installed *before* Flow imports
+library at `import vlc` time, so VLC must be installed _before_ Flow imports
 it. Flow's startup bootstrap (`backend.platform.bootstrap_vlc`) picks up a
 standard install automatically on each OS.
 

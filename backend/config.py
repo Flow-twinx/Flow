@@ -258,6 +258,14 @@ def set_format(fmt):
 
 
 def dev_print(label: str, data: dict | list | str | None = None):
+    # Log to new logger as well
+    try:
+        from backend import logger
+
+        logger.debug("system", "dev_print", label, {"data": data} if data is not None else None)
+    except Exception:
+        pass
+
     if not DEV_MODE:
         return
     Y = "\033[1;33m"
@@ -789,7 +797,7 @@ def _load_config():
             and 1 <= data["max_radio"] <= 50
         ):
             MAX_RESULTS_RADIO = data["max_radio"]
-    except json.JSONDecodeError, OSError:
+    except (json.JSONDecodeError, OSError):
         pass
 
 
@@ -852,7 +860,7 @@ def write_seek(delta_ms: int):
 def read_seek() -> int:
     try:
         return int(SEEK_FILE.read_text().strip())
-    except ValueError, OSError:
+    except (ValueError, OSError):
         return 0
 
 
@@ -1455,6 +1463,12 @@ def cmd_config(extra: list[str], args=None):
         DEV_MODE = value == "true"
         _save_config()
         print(f"{Tertiary}Dev mode set to {DEV_MODE}{Reset}")
+        try:
+            from backend import logger
+
+            logger.info("system", "config_change", f"Dev mode set to {DEV_MODE}", {"dev_mode": DEV_MODE})
+        except Exception:
+            pass
     elif target == "format":
         print(_apply_format(value))
     elif target == "ad_skip":

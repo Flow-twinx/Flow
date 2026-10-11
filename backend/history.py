@@ -88,6 +88,31 @@ def record_play(
     if mode == "online" and title:
         try:
             record(video_id, title, artist)
+            try:
+                from backend import logger
+                logger.log_track_play("history", {
+                    "title": title,
+                    "artist": artist,
+                    "video_id": video_id,
+                    "duration": duration,
+                    "mode": mode,
+                    "source": "online",
+                })
+            except Exception:
+                pass
+        except Exception:
+            pass
+    else:
+        try:
+            from backend import logger
+            logger.log_track_play("history", {
+                "title": title,
+                "artist": artist,
+                "video_id": video_id,
+                "duration": duration,
+                "mode": mode,
+                "source": mode,
+            })
         except Exception:
             pass
     return count

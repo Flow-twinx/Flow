@@ -13,11 +13,17 @@
 
   <p><b>A modern terminal music player with online streaming, an offline library, a TUI and a web GUI.</b></p>
 
-  <p>
-    <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
-    <img alt="Python 3.14+" src="https://img.shields.io/badge/python-3.14%2B-3776AB.svg?logo=python&logoColor=white">
-    <img alt="Platform: Linux, macOS" src="https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20-lightgrey.svg">
-  </p>
+<p>
+    <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square&labelColor=black"></a>
+    <img alt="Python 3.14+" src="https://img.shields.io/badge/python-3.14%2B-blue?style=flat-square&labelColor=black&logo=python&logoColor=white">
+    <img alt="Platform: Linux, macOS, Windows" src="https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-blue?style=flat-square&labelColor=black">
+    <a href="https://github.com/flow-twinx/flow">
+        <img alt="Stars" src="https://img.shields.io/github/stars/flow-twinx/flow?style=flat-square&labelColor=black&color=blue"/></a>
+    <a href="https://pypi.org/project/flow-twinx/">
+        <img alt="PyPI" src="https://img.shields.io/pypi/v/flow-twinx?style=flat-square&labelColor=black&color=blue&logo=pypi&logoColor=white"/></a>
+    <a href="https://pepy.tech/project/flow-twinx">
+        <img alt="Downloads" src="https://static.pepy.tech/personalized-badge/flow-twinx?period=total&units=international_system&left_color=black&right_color=blue&left_text=Downloads"></a>
+</p>
 
   <p>
     <a href="#installation">Installation</a> ·
