@@ -17,15 +17,15 @@ jobs:
         include:
           - os: ubuntu-latest
             spec: packaging/flow.linux.spec
-            artifact: flow-linux
+            artifact: flow_linux_x86_64
             binary: dist/flow
           - os: macos-latest
             spec: packaging/flow.macos.spec
-            artifact: flow-macos
+            artifact: flow_macos_arm64
             binary: dist/flow
           - os: windows-latest
             spec: packaging/flow.windows.spec
-            artifact: flow-windows.exe
+            artifact: flow_windows_x86_64.exe
             binary: dist/flow.exe
     steps:
       - uses: actions/checkout@v4

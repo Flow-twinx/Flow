@@ -1,0 +1,711 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Download Flow</title>
+
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..700&family=Instrument+Serif:ital@0;1&display=swap"
+            rel="stylesheet"
+        />
+
+        <script>
+            (function () {
+                var t = null;
+                try {
+                    t = localStorage.getItem("theme");
+                } catch (e) {}
+                if (t !== "light" && t !== "dark") {
+                    t =
+                        window.matchMedia &&
+                        window.matchMedia("(prefers-color-scheme: light)")
+                            .matches
+                            ? "light"
+                            : "dark";
+                }
+                document.documentElement.setAttribute("data-theme", t);
+            })();
+        </script>
+
+        <style>
+            :root {
+                --coral: #f76f53;
+                --sans:
+                    "Bricolage Grotesque", -apple-system, BlinkMacSystemFont,
+                    "Segoe UI", sans-serif;
+                --serif: "Instrument Serif", Georgia, serif;
+                --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+                --radius: 10px;
+            }
+            [data-theme="light"] {
+                --paper: #f2f0e3;
+                --ink: #2e2e2e;
+                --muted: rgba(0, 0, 0, 0.05);
+                --line: rgba(0, 0, 0, 0.12);
+                --faint: rgba(46, 46, 46, 0.65);
+                --icon-filter: brightness(0) opacity(0.8);
+            }
+            [data-theme="dark"] {
+                --paper: #1f1f1f;
+                --ink: #d1cfc0;
+                --muted: rgba(255, 255, 255, 0.05);
+                --line: rgba(255, 255, 255, 0.12);
+                --faint: rgba(209, 207, 192, 0.65);
+                --icon-filter: brightness(0) invert(0.62);
+            }
+
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            html {
+                color-scheme: light dark;
+                scroll-behavior: smooth;
+            }
+            body {
+                font-family: var(--sans);
+                font-weight: 500;
+                line-height: 1.6;
+                max-width: 880px;
+                margin: 0 auto;
+                padding: 32px 20px 72px;
+                background: var(--paper);
+                color: var(--ink);
+                min-height: 100vh;
+                transition:
+                    background-color 0.3s ease,
+                    color 0.3s ease;
+            }
+            a {
+                color: var(--ink);
+                text-decoration: underline;
+                text-decoration-color: var(--coral);
+                text-underline-offset: 4px;
+                text-decoration-thickness: 2px;
+            }
+            :focus-visible {
+                outline: 2px solid var(--coral);
+                outline-offset: 3px;
+            }
+
+            .topbar {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin-bottom: 28px;
+            }
+            h1 {
+                font-family: var(--serif);
+                font-weight: 400;
+                font-size: 2.6em;
+                line-height: 1.1;
+                letter-spacing: -0.01em;
+            }
+            h1 em {
+                color: var(--coral);
+            }
+            .theme-toggle {
+                display: grid;
+                place-items: center;
+                width: 38px;
+                height: 38px;
+                border-radius: 50%;
+                border: 1px solid var(--line);
+                background: transparent;
+                color: var(--ink);
+                cursor: pointer;
+                transition: background-color 0.2s ease;
+            }
+            .theme-toggle:hover {
+                background: var(--muted);
+            }
+            .theme-toggle svg {
+                width: 18px;
+                height: 18px;
+            }
+            [data-theme="dark"] .moon,
+            [data-theme="light"] .sun {
+                display: none;
+            }
+
+            .notice {
+                background: var(--muted);
+                border: 1px solid var(--line);
+                border-left: 4px solid var(--coral);
+                border-bottom: 4px solid var(--coral);
+                border-radius: var(--radius);
+                padding: 22px 24px;
+                font-size: 1.1em;
+                line-height: 1.7;
+            }
+            .notice h2 {
+                font-family: var(--serif);
+                font-weight: 400;
+                font-size: 1.9em;
+                line-height: 1.1;
+                margin-bottom: 8px;
+                color: var(--coral);
+            }
+            .notice p + p {
+                margin-top: 8px;
+            }
+            .notice strong {
+                font-weight: 700;
+            }
+            .cta {
+                display: inline-block;
+                margin-top: 16px;
+                padding: 9px 18px;
+                border-radius: 8px;
+                background: var(--coral);
+                color: #1f1f1f;
+                font-weight: 700;
+                text-decoration: none;
+                transition: opacity 0.2s ease;
+            }
+            .cta:hover {
+                opacity: 0.88;
+            }
+
+            hr {
+                border: 0;
+                border-top: 1px solid var(--line);
+                margin: 32px 0 24px;
+            }
+            .sub {
+                color: var(--faint);
+                margin-bottom: 20px;
+            }
+
+            .layout {
+                display: grid;
+                grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+                gap: 14px;
+                align-items: stretch;
+            }
+            .layout[hidden],
+            #status[hidden],
+            .all[hidden] {
+                display: none;
+            }
+            .primary {
+                display: flex;
+            }
+            .primary > .card {
+                flex: 1;
+            }
+            .others {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                grid-auto-rows: 1fr;
+                gap: 14px;
+            }
+
+            .card {
+                display: flex;
+                flex-direction: column;
+                background: var(--muted);
+                border: 1px solid var(--line);
+                border-radius: var(--radius);
+                padding: 16px;
+                transition: border-color 0.2s ease;
+                will-change: transform;
+            }
+            .card:hover,
+            .card.current {
+                border-color: var(--coral);
+            }
+            @media (prefers-reduced-motion: no-preference) {
+                .card:hover {
+                    transform: perspective(900px) translate3d(0, -6px, 20px)
+                        rotateX(2deg);
+                    box-shadow:
+                        -5px 5px 0 var(--coral),
+                        -5px 5px 0 var(--coral);
+                }
+            }
+
+            .card-head {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                margin-bottom: 4px;
+            }
+            .logo {
+                width: 20px;
+                height: 20px;
+                flex: 0 0 auto;
+                filter: var(--icon-filter);
+            }
+            .name {
+                font-weight: 600;
+            }
+            .tag {
+                margin-left: auto;
+                font-size: 0.75em;
+                color: var(--coral);
+                white-space: nowrap;
+            }
+            .file {
+                font-family: var(--mono);
+                font-size: 0.75em;
+                color: var(--faint);
+                word-break: break-all;
+                margin-bottom: 8px;
+            }
+            .meta {
+                font-size: 0.8em;
+                color: var(--faint);
+                margin-bottom: 14px;
+            }
+            .btn {
+                display: block;
+                text-align: center;
+                text-decoration: none;
+                margin-top: auto;
+                padding: 8px 14px;
+                border-radius: 8px;
+                background: var(--coral);
+                color: #1f1f1f;
+                font-weight: 700;
+                transition: opacity 0.2s ease;
+            }
+            .btn:hover {
+                opacity: 0.88;
+            }
+            .btn.secondary {
+                background: transparent;
+                border: 1px solid var(--line);
+                color: var(--ink);
+            }
+            .btn.secondary:hover {
+                opacity: 1;
+                border-color: var(--coral);
+            }
+
+            .card.lg {
+                padding: 28px;
+            }
+            .card.lg .logo {
+                width: 40px;
+                height: 40px;
+            }
+            .card.lg .card-head {
+                gap: 14px;
+                margin-bottom: 12px;
+            }
+            .card.lg .name {
+                font-family: var(--serif);
+                font-weight: 400;
+                font-size: 2em;
+                line-height: 1.1;
+            }
+            .card.lg .file {
+                font-size: 0.85em;
+                margin-bottom: 10px;
+            }
+            .card.lg .meta {
+                font-size: 0.9em;
+                margin-bottom: 24px;
+            }
+            .card.lg .btn {
+                padding: 13px;
+                font-size: 1.05em;
+            }
+
+            .source {
+                grid-column: 1 / -1;
+            }
+            .src-links {
+                display: flex;
+                gap: 8px;
+                margin-top: auto;
+            }
+            .src-links .btn {
+                flex: 1;
+                margin-top: 0;
+            }
+
+            .all {
+                display: inline-block;
+                margin-top: 24px;
+            }
+
+            #status {
+                color: var(--faint);
+                margin: 16px 0;
+            }
+            #status.error {
+                color: var(--ink);
+                border: 1px solid var(--coral);
+                border-radius: var(--radius);
+                padding: 14px 18px;
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+                * {
+                    transition: none !important;
+                }
+            }
+            @media (max-width: 720px) {
+                .layout {
+                    grid-template-columns: 1fr;
+                }
+            }
+            @media (max-width: 460px) {
+                .others {
+                    grid-template-columns: 1fr;
+                }
+                .source {
+                    grid-column: auto;
+                }
+                .notice {
+                    padding: 18px;
+                }
+            }
+            #imp {
+                background-color: var(--coral);
+                border-radius: 2px;
+                color: var(--paper) !important;
+                padding: 2px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="topbar">
+            <h1>Download <em>Flow</em></h1>
+            <button
+                class="theme-toggle"
+                id="themeToggle"
+                type="button"
+                aria-label="Toggle light and dark theme"
+                title="Toggle theme"
+            >
+                <svg
+                    class="sun"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                >
+                    <circle cx="12" cy="12" r="4" />
+                    <path
+                        d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"
+                    />
+                </svg>
+                <svg
+                    class="moon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                >
+                    <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+                </svg>
+            </button>
+        </div>
+
+        <aside class="notice" role="note" aria-label="Important message">
+            <h2>Important!</h2>
+            <p>
+                I have been making this project for over
+                <strong>5 months</strong> and have spent
+                <strong>100 hours</strong> on it.
+            </p>
+            <p>
+                Please rate it as much as you can. If you are facing an issue
+                installing, please rate it good and ask me for help — just
+                message me on Slack.
+            </p>
+            <p id="imp">
+                I am getting cursed from the last 2 ships, so please rate it
+                good.
+            </p>
+            <a
+                class="cta"
+                href="https://app.slack.com/client/E09V59WQY1E/C0C9748QM7S"
+                target="_blank"
+                rel="noopener"
+                >Message me on Slack</a
+            >
+            <a
+                class="cta"
+                href="Mailto:twinzler@proton.me"
+                target="_blank"
+                rel="noopener"
+                >Mail me</a
+            >
+        </aside>
+
+        <hr />
+
+        <p class="sub" id="tagline">
+            Grab the latest release for your platform.
+        </p>
+
+        <div id="status" role="status">Loading latest release…</div>
+        <div class="layout" id="layout" hidden>
+            <div class="primary" id="primary"></div>
+            <div class="others" id="others"></div>
+        </div>
+
+        <a
+            class="all"
+            id="all"
+            href="https://github.com/Flow-twinx/Flow/releases/latest"
+            hidden
+        >
+            View all releases on GitHub →
+        </a>
+
+        <script>
+            (function () {
+                const root = document.documentElement;
+                const btn = document.getElementById("themeToggle");
+                const mq = window.matchMedia("(prefers-color-scheme: light)");
+
+                function stored() {
+                    try {
+                        return localStorage.getItem("theme");
+                    } catch (e) {
+                        return null;
+                    }
+                }
+                btn.addEventListener("click", () => {
+                    const next =
+                        root.getAttribute("data-theme") === "dark"
+                            ? "light"
+                            : "dark";
+                    root.setAttribute("data-theme", next);
+                    try {
+                        localStorage.setItem("theme", next);
+                    } catch (e) {}
+                });
+                mq.addEventListener("change", (e) => {
+                    if (!stored())
+                        root.setAttribute(
+                            "data-theme",
+                            e.matches ? "light" : "dark",
+                        );
+                });
+            })();
+
+            const REPO = "Flow-twinx/Flow";
+            const API = `https://api.github.com/repos/${REPO}/releases/latest`;
+            const CACHE_KEY = "flow-latest-release";
+            const CACHE_MS = 10 * 60 * 1000;
+
+            const ICONS = {
+                linux: "https://thesvg.org/icons/linux/default.svg",
+                macos: "https://thesvg.org/icons/apple/default.svg",
+                windows: "https://thesvg.org/icons/windows/default.svg",
+                source: "https://thesvg.org/icons/open-source-initiative/default.svg",
+                unknown:
+                    "data:image/svg+xml;utf8," +
+                    encodeURIComponent(
+                        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#000"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-2h2v2zm1.8-6.7l-.9.9c-.7.7-1 1.2-1 2.3h-2v-.5c0-.8.3-1.6 1-2.3l1.2-1.3c.4-.3.6-.8.6-1.3 0-1.1-.9-2-2-2s-2 .9-2 2H8.7A3.3 3.3 0 0 1 12 5a3.3 3.3 0 0 1 3.3 3.2c0 .8-.3 1.5-.8 2.1z"/></svg>',
+                    ),
+            };
+
+            const LABELS = {
+                linux: "Linux (x86_64)",
+                macos: "macOS (arm64)",
+                windows: "Windows (x86_64)",
+                unknown: "Other",
+                source: "Source code",
+            };
+
+            function platformOf(name) {
+                const n = name.toLowerCase();
+                if (n.includes("windows") || n.endsWith(".exe"))
+                    return "windows";
+                if (
+                    n.includes("macos") ||
+                    n.includes("darwin") ||
+                    n.includes("mac")
+                )
+                    return "macos";
+                if (n.includes("linux")) return "linux";
+                return "unknown";
+            }
+
+            function currentPlatform() {
+                const ua = navigator.userAgent.toLowerCase();
+                if (ua.includes("mac")) return "macos";
+                if (ua.includes("windows") || ua.includes("win32"))
+                    return "windows";
+                if (ua.includes("linux") || ua.includes("x11")) return "linux";
+                return null;
+            }
+
+            function humanSize(bytes) {
+                if (!bytes) return "";
+                const units = ["B", "KB", "MB", "GB"];
+                let i = 0;
+                while (bytes >= 1024 && i < units.length - 1) {
+                    bytes /= 1024;
+                    i++;
+                }
+                return `${bytes.toFixed(i ? 1 : 0)} ${units[i]}`;
+            }
+
+            function esc(s) {
+                return String(s).replace(
+                    /[&<>"']/g,
+                    (c) =>
+                        ({
+                            "&": "&amp;",
+                            "<": "&lt;",
+                            ">": "&gt;",
+                            '"': "&quot;",
+                            "'": "&#39;",
+                        })[c],
+                );
+            }
+
+            function metaOf(asset) {
+                return [
+                    asset.size ? humanSize(asset.size) : null,
+                    asset.download_count
+                        ? `${asset.download_count.toLocaleString()} downloads`
+                        : null,
+                ]
+                    .filter(Boolean)
+                    .join(" · ");
+            }
+
+            function iconFor(platform) {
+                return `<img class="logo" src="${ICONS[platform]}" alt="" aria-hidden="true" />`;
+            }
+
+            function card(asset, current, large) {
+                const platform = platformOf(asset.name);
+                const isCurrent = platform === current;
+                const el = document.createElement("div");
+                el.className =
+                    "card" +
+                    (large ? " lg" : "") +
+                    (isCurrent ? " current" : "");
+
+                const label = large
+                    ? `Download for ${LABELS[platform].split(" ")[0]}`
+                    : "Download";
+                el.innerHTML = `
+                    <div class="card-head">
+                        ${iconFor(platform)}
+                        <span class="name">${LABELS[platform]}</span>
+                        ${isCurrent && !large ? '<span class="tag">your os</span>' : ""}
+                    </div>
+                    <div class="file">${esc(asset.name)}</div>
+                    <div class="meta">${esc(metaOf(asset))}</div>
+                    <a class="btn" href="${esc(asset.browser_download_url)}">${label}</a>
+                `;
+                return el;
+            }
+
+            function sourceCard(release) {
+                const el = document.createElement("div");
+                el.className = "card source";
+                const links = [
+                    release.zipball_url
+                        ? `<a class="btn secondary" href="${esc(release.zipball_url)}">.zip</a>`
+                        : "",
+                    release.tarball_url
+                        ? `<a class="btn secondary" href="${esc(release.tarball_url)}">.tar.gz</a>`
+                        : "",
+                ].join("");
+                el.innerHTML = `
+                    <div class="card-head">
+                        ${iconFor("source")}
+                        <span class="name">${LABELS.source}</span>
+                    </div>
+                    <div class="meta">${esc(release.tag_name || "")}</div>
+                    <div class="src-links">${links}</div>
+                `;
+                return el;
+            }
+
+            function render(release) {
+                const primary = document.getElementById("primary");
+                const others = document.getElementById("others");
+                const current = currentPlatform();
+
+                const assets = (release.assets || []).filter(
+                    (a) => a.state === "uploaded",
+                );
+                if (!assets.length) throw new Error("No release assets found.");
+
+                let i = assets.findIndex((a) => platformOf(a.name) === current);
+                if (i < 0) i = 0;
+
+                primary.replaceChildren(card(assets[i], current, true));
+                others.replaceChildren(
+                    ...assets
+                        .filter((_, j) => j !== i)
+                        .map((a) => card(a, current, false)),
+                    sourceCard(release),
+                );
+
+                if (release.tag_name) {
+                    document.getElementById("tagline").textContent =
+                        `Latest release ${release.tag_name} — pick your platform.`;
+                }
+                document.getElementById("status").hidden = true;
+                document.getElementById("layout").hidden = false;
+                document.getElementById("all").hidden = false;
+            }
+
+            function fallback(message) {
+                const status = document.getElementById("status");
+                status.hidden = false;
+                status.classList.add("error");
+                status.textContent = `${message} Grab a build directly from the releases page.`;
+                document.getElementById("all").hidden = false;
+            }
+
+            async function loadRelease() {
+                try {
+                    const raw = sessionStorage.getItem(CACHE_KEY);
+                    if (raw) {
+                        const { t, data } = JSON.parse(raw);
+                        if (Date.now() - t < CACHE_MS) return data;
+                    }
+                } catch (e) {}
+
+                const res = await fetch(API, {
+                    headers: { Accept: "application/vnd.github+json" },
+                });
+                if (!res.ok) throw new Error(`GitHub responded ${res.status}`);
+                const data = await res.json();
+
+                try {
+                    sessionStorage.setItem(
+                        CACHE_KEY,
+                        JSON.stringify({ t: Date.now(), data }),
+                    );
+                } catch (e) {}
+                return data;
+            }
+
+            (async () => {
+                try {
+                    render(await loadRelease());
+                } catch (err) {
+                    fallback(
+                        `Could not load the latest release (${err.message}).`,
+                    );
+                }
+            })();
+        </script>
+    </body>
+</html>
