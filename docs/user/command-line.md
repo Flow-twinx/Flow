@@ -131,7 +131,7 @@ download the matching index can be used the same way.
 | `rename <name or index>`       | Rename a downloaded song (offline; alias: `re`). You are then asked for the new name. An index is the number in the `list` output (ascending by name) and the prompt repeats it                                                   |
 | `lang <tag>`                   | Play every downloaded song with that language tag (offline). One word — `hindi`, `punjabi`, `telugu`, ... — set when the song was downloaded. Partial words work (`lang pun`); `-s` shuffles                                      |
 | `artist <name>`                | Play every song by that artist. Offline plays your downloads, online plays the YouTube results whose title credits the artist (falling back to the current track's artist). Partial words work; `-s` shuffles (alias: `ar`)       |
-| `tags [list \| add \| remove \| rename \| delete]` | Inspect or maintain tags. Bare `tags` opens an interactive editor; `tags add <song> <tag>` / `tags remove <song> <tag>` tag a song, `tags add -m <tag>` / `tags remove -m <tag>` checkbox-pick several songs, `tags rename <old> <new>` renames a free-form tag everywhere, `tags delete <tag>` drops it everywhere |
+| `tags [list \| add \| remove \| rename \| delete]` | Inspect or maintain tags. Bare `tags` opens an interactive editor (delete/clear steps multi-select); `tags add <song> <tag>` / `tags remove <song> <tag>` tag a song, `tags rename <old> <new>` renames a free-form tag everywhere, `tags delete <tag>` drops it everywhere |
 | `playlist <sub>`               | Manage playlists — see below                                                                                                                                                                                                      |
 | `switch`                       | Toggle between online and offline mode                                                                                                                                                                                            |
 | `config [target [value]]`      | Change settings; run bare for an interactive wizard                                                                                                                                                                               |
@@ -216,16 +216,15 @@ plain forms are scriptable:
 flow tags                      # interactive editor (in the shell)
 flow tags list                 # languages + artists + free-form tags
 flow tags add "Mitti" workout  # free-form tag on one song
-flow tags add -m roadtrip      # checkbox-pick songs, tag them all
 flow tags remove "Mitti" workout
-flow tags remove -m roadtrip   # checkbox-pick songs, untag them all
 flow tags rename workout gym    # on every song that has it
 flow tags delete workout
 ```
 
-`tags add -m <tag>` and `tags remove -m <tag>` replace the song name with an
-interactive song picker — the same `-m` multi-select flag `play` and `playlist`
-use.
+Every song-picking step checks a checkbox list, and the delete steps let you
+pick several tags at once — `flow tags`, pick *Free-form tags → Delete
+tag(s) everywhere* (or the language/artist equivalent), tick two or three
+tags with space, confirm, and they are all gone.
 
 `language` and `artist` come from YouTube's metadata at download time —
 `tags` fixes or extends them by hand. Free-form tags (`workout`, `roadtrip`,

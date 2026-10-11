@@ -112,7 +112,7 @@ COMMANDS = {
     "download": "Download audio from YouTube | -f <format> (opus, m4a, mp3, webm)",
     "delete": "Delete a downloaded song (alias: dl-d)",
     "artist": "Play songs by artist | artist <name> | -s shuffle",
-    "tags": "Library tags | tags (editor) | tags list/add/remove/rename/delete (-m for multi add/remove)",
+    "tags": "Library tags | tags (editor) | tags list/add/remove/rename/delete",
     "playlist": "Manage playlists | create add remove list play rename move dup merge sort clear dedupe info export import download (-m for multi add/remove)",
     "switch": "Switch to Offline mode",
     "help": "Show this help message",
